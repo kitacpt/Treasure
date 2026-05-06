@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Treasure · 三个方向</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Fraunces:ital,wght@0,400;0,500;0,600;0,700;1,500;1,600;1,700&family=Noto+Serif+SC:wght@400;500;600&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #f0eee9; }
+  body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  #root { height: 100%; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="vectors.jsx"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="android-frame.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="direction-a.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "paletteA": [
+    "#8a3a1f",
+    "#1a1815",
+    "#f4f1ea"
+  ],
+  "serif": "'Cormorant Garamond', 'Noto Serif SC', serif",
+  "sans": "'Space Grotesk', 'Noto Sans SC', sans-serif",
+  "display": "'Cormorant Garamond', 'Noto Serif SC', serif",
+  "mono": "'JetBrains Mono', ui-monospace, monospace",
+  "dark": false
+}/*EDITMODE-END*/;
+
+// Strip header/keyboard from the AndroidDevice — we want bare phone canvas
+// for these prototypes. Use a thinner local shell.
+function Phone({ children, dark = false }) {
+  return (
+    <div style={{
+      width: 393, height: 800, borderRadius: 36, overflow: 'hidden',
+      background: dark ? '#0e0d0a' : '#fff',
+      border: '8px solid rgba(116,119,117,0.5)',
+      boxShadow: '0 30px 80px rgba(0,0,0,0.18)',
+      display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
+    }}>
+      {/* status bar */}
+      <div style={{
+        height: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 22px', flexShrink: 0, position: 'relative',
+        background: 'transparent',
+        fontFamily: 'Inter, system-ui, sans-serif', fontSize: 13, fontWeight: 600,
+        color: dark ? '#f4efe2' : '#1a1815',
+      }}>
+        <span>9:30</span>
+        <div style={{
+          position: 'absolute', left: '50%', top: 8, transform: 'translateX(-50%)',
+          width: 22, height: 22, borderRadius: 11, background: '#0e0d0a',
+        }}/>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <svg width="14" height="10" viewBox="0 0 14 10" fill="currentColor"><path d="M0 8h2v2H0zm4-2h2v4H4zm4-3h2v7H8zm4-3h2v10h-2z"/></svg>
+          <svg width="13" height="10" viewBox="0 0 13 10" fill="currentColor"><path d="M0 6.5L6.5 0 13 6.5 11 8.5 6.5 4 2 8.5z" opacity="0.4"/><path d="M2 8.5L6.5 4 11 8.5z"/></svg>
+          <svg width="22" height="10" viewBox="0 0 22 10" fill="none" stroke="currentColor" strokeWidth="1"><rect x="0.5" y="0.5" width="18" height="9" rx="2"/><rect x="2" y="2" width="13" height="6" fill="currentColor"/><rect x="19.5" y="3" width="2" height="4" fill="currentColor"/></svg>
+        </div>
+      </div>
+      {/* content */}
+      <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+        {children}
+      </div>
+      {/* gesture bar */}
+      <div style={{ height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ width: 134, height: 4, borderRadius: 2, background: dark ? '#f4efe2' : '#1a1815', opacity: 0.5 }}/>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+  return (
+    <>
+      <DesignCanvas>
+        <DCSection id="a" title="Treasure" subtitle="底部控制岛 · 抽屉式历史/参数 · 明信片翻面看实拍 · 博物馆插画 · 对话式录入">
+          <DCArtboard id="a-portal" label="门厅 · Portal" width={393} height={800}>
+            <Phone dark={t.dark}><DirectionAFixed tweaks={t} startWith={{ uiTab: 'portal' }}/></Phone>
+          </DCArtboard>
+          <DCArtboard id="a-home" label="首页 · 图鉴" width={393} height={800}>
+            <Phone dark={t.dark}><DirectionA tweaks={t}/></Phone>
+          </DCArtboard>
+          <DCArtboard id="a-detail" label="详情 · 展示页" width={393} height={800}>
+            <Phone dark={t.dark}><DirectionAFixed tweaks={t} startWith={{ screen: 'detail', id: 'cam-leica-m6', cat: 'photo' }}/></Phone>
+          </DCArtboard>
+          <DCArtboard id="a-flipped" label="详情 · 翻面看实拍" width={393} height={800}>
+            <Phone dark={t.dark}><DirectionAFixed tweaks={t} startWith={{ screen: 'detail', id: 'cam-leica-m6', cat: 'photo', flipped: true }}/></Phone>
+          </DCArtboard>
+          <DCArtboard id="a-drawer-history" label="抽屉 · 历史" width={393} height={800}>
+            <Phone dark={t.dark}><DirectionAFixed tweaks={t} startWith={{ screen: 'detail', id: 'racket-vt-zf2', cat: 'badminton', drawer: true, tab: 'history' }}/></Phone>
+          </DCArtboard>
+          <DCArtboard id="a-drawer-specs" label="抽屉 · 参数" width={393} height={800}>
+            <Phone dark={t.dark}><DirectionAFixed tweaks={t} startWith={{ screen: 'detail', id: 'cam-fuji-xt5', cat: 'photo', drawer: true, tab: 'specs' }}/></Phone>
+          </DCArtboard>
+          <DCArtboard id="a-drawer-album" label="抽屉 · 影集" width={393} height={800}>
+            <Phone dark={t.dark}><DirectionAFixed tweaks={t} startWith={{ screen: 'detail', id: 'car-911', cat: 'cars', drawer: true, tab: 'album' }}/></Phone>
+          </DCArtboard>
+          <DCArtboard id="a-add" label="录入 · 对话式" width={393} height={800}>
+            <Phone dark={t.dark}><DirectionAFixed tweaks={t} startWith={{ uiTab: 'add' }}/></Phone>
+          </DCArtboard>
+          <DCArtboard id="a-settings" label="设置 · AI 服务" width={393} height={800}>
+            <Phone dark={t.dark}><DirectionAFixed tweaks={t} startWith={{ uiTab: 'settings' }}/></Phone>
+          </DCArtboard>
+        </DCSection>
+
+      </DesignCanvas>
+
+      <TweaksPanel title="Treasure · Tweaks">
+        <TweakSection label="Theme">
+          <TweakToggle label="Dark mode" value={t.dark} onChange={(v) => setTweak('dark', v)}/>
+        </TweakSection>
+
+        <TweakSection label="配色">
+          <TweakColor label="" value={t.paletteA}
+            options={[
+              ["#8a3a1f", "#1a1815", "#f4f1ea"],
+              ["#1f3a82", "#0e1b3d", "#eef0f5"],
+              ["#3a5a3a", "#1a2a1a", "#f0eee5"],
+              ["#5a4a2a", "#231a10", "#f5efe0"],
+            ]}
+            onChange={(v) => setTweak('paletteA', v)}/>
+        </TweakSection>
+
+        <TweakSection label="Type · 衬线">
+          <TweakSelect label="" value={t.serif}
+            options={[
+              { value: "'Cormorant Garamond', 'Noto Serif SC', serif", label: 'Cormorant Garamond' },
+              { value: "'Fraunces', 'Noto Serif SC', serif", label: 'Fraunces' },
+              { value: "'Noto Serif SC', serif", label: 'Noto Serif SC' },
+            ]}
+            onChange={(v) => setTweak('serif', v)}/>
+        </TweakSection>
+
+        <TweakSection label="Type · 正文">
+          <TweakSelect label="" value={t.sans}
+            options={[
+              { value: "'Inter', 'Noto Sans SC', system-ui, sans-serif", label: 'Inter' },
+              { value: "'Space Grotesk', 'Noto Sans SC', sans-serif", label: 'Space Grotesk' },
+              { value: "'Noto Sans SC', system-ui, sans-serif", label: 'Noto Sans SC' },
+            ]}
+            onChange={(v) => setTweak('sans', v)}/>
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+function DirectionAFixed({ tweaks, startWith }) { return <DirectionA tweaks={tweaks} seed={startWith}/>; }
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

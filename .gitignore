@@ -1,0 +1,35 @@
+# ---------- Android / Gradle ----------
+.gradle/
+build/
+**/build/
+local.properties
+
+# Captures from Profiler / Layout Inspector / etc.
+captures/
+
+# IDE
+.idea/
+.cxx/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+*.hprof
+
+# Signing — never commit
+*.jks
+*.keystore
+
+# Native build
+.externalNativeBuild
+
+# Generated
+**/generated/
+**/*.bin
