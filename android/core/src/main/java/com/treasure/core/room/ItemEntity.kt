@@ -28,6 +28,7 @@ internal data class ItemEntity(
     @ColumnInfo(name = "hero_specs_json") val heroSpecsJson: String,
     @ColumnInfo(name = "specs_json") val specsJson: String,
     @ColumnInfo(name = "history_json") val historyJson: String,
+    @ColumnInfo(name = "photos_json") val photosJson: String,
     @ColumnInfo(name = "created_at") val createdAt: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
 ) {
@@ -46,6 +47,7 @@ internal data class ItemEntity(
         heroSpecs = JsonCodec.decodeHeroSpecs(heroSpecsJson),
         specs = JsonCodec.decodeStringMap(specsJson),
         history = JsonCodec.decodeHistory(historyJson),
+        photos = JsonCodec.decodeStringList(photosJson),
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
@@ -66,6 +68,7 @@ internal data class ItemEntity(
             heroSpecsJson = JsonCodec.encodeHeroSpecs(item.heroSpecs),
             specsJson = JsonCodec.encodeStringMap(item.specs),
             historyJson = JsonCodec.encodeHistory(item.history),
+            photosJson = JsonCodec.encodeStringList(item.photos),
             createdAt = item.createdAt,
             updatedAt = item.updatedAt,
         )

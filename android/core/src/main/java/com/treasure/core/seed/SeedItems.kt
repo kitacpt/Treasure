@@ -51,6 +51,7 @@ object SeedItems {
                 HistoryEvent("2024-08-11", HistoryKind.MILESTONE, "杭州友谊赛", "混双第三名"),
                 HistoryEvent("2025-11-02", HistoryKind.MAINTAIN,  "换线 BG65Ti","27 磅，更耐用"),
             ),
+            photos = emptyList(),
             createdAt = NOW, updatedAt = NOW,
         ),
         Item(
@@ -82,6 +83,7 @@ object SeedItems {
                 HistoryEvent("2024-10-08", HistoryKind.MAINTAIN,  "首次拉线",    "BG66UM 27 磅"),
                 HistoryEvent("2025-03-15", HistoryKind.MILESTONE, "俱乐部联赛",  "团体赛第二名"),
             ),
+            photos = emptyList(),
             createdAt = NOW, updatedAt = NOW,
         ),
 
@@ -118,6 +120,7 @@ object SeedItems {
                 HistoryEvent("2024-10-12", HistoryKind.MAINTAIN,  "传感器除尘",  "官方上海店清理"),
                 HistoryEvent("2025-09-08", HistoryKind.MILESTONE, "冰岛环线",    "极光夜，长曝光神器"),
             ),
+            photos = emptyList(),
             createdAt = NOW, updatedAt = NOW,
         ),
         Item(
@@ -149,6 +152,7 @@ object SeedItems {
                 HistoryEvent("2025-01-05", HistoryKind.MILESTONE, "拍完第一卷", "Portra 400 · 北京胡同"),
                 HistoryEvent("2025-04-10", HistoryKind.MAINTAIN,  "快门 CLA",   "北京 fix-it 老师傅，2400元"),
             ),
+            photos = emptyList(),
             createdAt = NOW, updatedAt = NOW,
         ),
 
@@ -183,6 +187,7 @@ object SeedItems {
                 HistoryEvent("2025-07-05", HistoryKind.MILESTONE, "1号公路",     "Big Sur 海岸 280 公里"),
                 HistoryEvent("2025-07-06", HistoryKind.PARTED,    "还车",        "依依不舍"),
             ),
+            photos = emptyList(),
             createdAt = NOW, updatedAt = NOW,
         ),
         Item(
@@ -215,6 +220,7 @@ object SeedItems {
                 HistoryEvent("2024-10-02", HistoryKind.MILESTONE, "新都桥",     "摄影天堂，拍了一整天"),
                 HistoryEvent("2024-10-04", HistoryKind.PARTED,    "还车",        "右后门一道小划痕 800元"),
             ),
+            photos = emptyList(),
             createdAt = NOW, updatedAt = NOW,
         ),
 
@@ -246,6 +252,7 @@ object SeedItems {
                 HistoryEvent("2024-11-20", HistoryKind.ACQUIRED, "购入",            "替换服役 4 年的 M1"),
                 HistoryEvent("2025-02-10", HistoryKind.MOD,      "配 Studio Display","外接 27 寸屏"),
             ),
+            photos = emptyList(),
             createdAt = NOW, updatedAt = NOW,
         ),
         Item(
@@ -274,6 +281,7 @@ object SeedItems {
                 HistoryEvent("2023-09-22", HistoryKind.ACQUIRED, "购入", "首发当天去三里屯"),
                 HistoryEvent("2024-08-04", HistoryKind.MAINTAIN, "换右耳", "充电仓里掉出来摔了，换右耳"),
             ),
+            photos = emptyList(),
             createdAt = NOW, updatedAt = NOW,
         ),
     )

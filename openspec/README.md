@@ -35,10 +35,10 @@ openspec/
 |---|---|---|
 | 0001 | done | [MVP · Portal + Grid + Detail + Add（手动 Add 后改 stub）](0001-mvp-portal-grid-detail-add/proposal.md) |
 | 0002 | done | [抽屉 + 明信片翻面 + 视觉 polish](0002-drawer-flip-polish/proposal.md) |
+| 0003 | done | [真实照片 + 抽屉内嵌编辑](0003-photos-and-inline-edit/proposal.md) |
 
 ## 后续 cycle 候选（按优先级，不一定按这个顺序做）
 
-- 0003 · 设置页 AI 服务 + 对话式录入（拍照 → AI 识别） + 真实照片上传
-- 0004 · AI 生成博物馆插画 + callout 文字标注
-- 0005 · FastAPI 同步层 + 后端 admin
-- 0006 · 真实照片云端备份
+- 0004 · 设置页 AI 服务 + 对话式录入（Add stub → 真接通）+ AI 生成博物馆插画 + callout 文字标注
+- 0005 · 全屏看图浏览器（影集 tap → fullscreen + 拖拽 dismiss）+ 真 schema migration
+- 0006 · FastAPI 同步层 + 后端 admin + 真实照片云端备份

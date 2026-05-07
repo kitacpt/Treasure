@@ -19,6 +19,7 @@ data class Item(
     val heroSpecs: List<HeroSpec>,
     val specs: Map<String, String>,
     val history: List<HistoryEvent>,
+    val photos: List<String>, // absolute file paths in app's private storage
     val createdAt: Long,
     val updatedAt: Long,
 )

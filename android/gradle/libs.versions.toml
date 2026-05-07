@@ -9,6 +9,7 @@ lifecycle = "2.8.7"
 room = "2.6.1"
 navigationCompose = "2.8.4"
 serialization = "1.7.3"
+coil = "2.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -35,6 +36,9 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 
 # Kotlinx serialization (for JSON columns in Room)
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
+
+# Coil — image loading from file:// paths (real photos)
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
