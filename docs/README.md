@@ -7,6 +7,7 @@
 - [`product.md`](product.md) —— Treasure 是什么、给谁、为什么这么定义
 - [`visual-language.md`](visual-language.md) —— 配色、字体、插画规则、控制岛规格 —— 来自 [`../prototype/`](../prototype/)
 - [`architecture.md`](architecture.md) —— 模块划分、数据流、持久化、同步、AI 抽象
+- [`dev-loop.md`](dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环
 - [`adr/`](adr/) —— 架构决策记录。一份 ADR = 一个钉死的"为什么这么选"
 
 ## ADR 索引

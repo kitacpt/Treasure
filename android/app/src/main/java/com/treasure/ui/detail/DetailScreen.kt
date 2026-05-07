@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -49,6 +51,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
@@ -444,7 +447,16 @@ private enum class DrawerTab(val label: String) {
 @Composable
 private fun DrawerContent(item: Item, onDelete: () -> Unit) {
     var selected by remember { mutableStateOf(DrawerTab.History) }
-    Column(modifier = Modifier.fillMaxWidth()) {
+    // Lock drawer to a constant height across tabs — short tabs (Settings)
+    // and long tabs (History) used to make the sheet pop/shrink visually.
+    val configuration = LocalConfiguration.current
+    val drawerHeight = (configuration.screenHeightDp * 0.78f).dp
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(drawerHeight),
+    ) {
         TabRow(
             selected = selected,
             onSelect = { selected = it },
@@ -453,13 +465,18 @@ private fun DrawerContent(item: Item, onDelete: () -> Unit) {
             albumCount = 0,
         )
         Spacer(Modifier.height(8.dp))
-        when (selected) {
-            DrawerTab.History  -> HistoryList(item.history)
-            DrawerTab.Specs    -> SpecsList(item.specs)
-            DrawerTab.Album    -> AlbumStub()
-            DrawerTab.Settings -> SettingsTab(onDelete = onDelete)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
+            when (selected) {
+                DrawerTab.History  -> HistoryList(item.history)
+                DrawerTab.Specs    -> SpecsList(item.specs)
+                DrawerTab.Album    -> AlbumStub()
+                DrawerTab.Settings -> SettingsTab(onDelete = onDelete)
+            }
         }
-        Spacer(Modifier.height(120.dp))
     }
 }
 
@@ -526,7 +543,8 @@ private fun HistoryList(events: List<HistoryEvent>) {
     }
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp, vertical = 8.dp),
     ) {
         events.forEachIndexed { idx, e ->
@@ -610,7 +628,8 @@ private fun SpecsList(specs: Map<String, String>) {
     }
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp),
     ) {
         specs.entries.forEachIndexed { idx, (key, value) ->
@@ -650,7 +669,7 @@ private fun AlbumStub() {
     val colors = LocalTreasureColors.current
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .fillMaxSize()
             .padding(horizontal = 22.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -660,9 +679,9 @@ private fun AlbumStub() {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(220.dp),
+                .weight(1f),
         ) {
-            items(items = (0 until 6).toList()) {
+            items(items = (0 until 9).toList()) {
                 Box(
                     modifier = Modifier
                         .aspectRatio(1f)
@@ -687,7 +706,8 @@ private fun SettingsTab(onDelete: () -> Unit) {
     var confirming by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp, vertical = 12.dp),
     ) {
         Text(

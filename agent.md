@@ -1,73 +1,142 @@
 # Agent · 现状交接
 
-每次工作结束更新这一份。新人/新一轮 agent 进来先读它。
+每次工作结束更新这一份。新人 / 新一轮 agent 进来先读它。
 
-## 今天 (2026-05-06)
+## 今天 (2026-05-07)
 
-**状态：cycle 0001 进行中 —— Portal 屏 + Room 数据层已通**
+**状态：cycle 0001 + 0002 已落地，准备交接**
 
-今天的进度（按时间顺序）：
+最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.5.2，11 MB）
 
-1. **工程脚手架**：Gradle 多模块工程立起来（`:app` + `:core`）；OpenJDK 17、Android SDK 35 在 `~/Android/Sdk`、Gradle 8.10.2 在 `~/.local/opt/`、wrapper 装在 `android/`
-2. **首个 APK**：Hello-Treasure 占位屏，验证编译链 + 主题
-3. **完整 Portal 视觉**：bundled 字体（Cormorant / Space Grotesk / JetBrains Mono）、罗盘装饰、三连计数、四扇门带罗马数字 + hero 占位、Latest entry 卡片、底部浮动控制岛（4 颗胶囊）
-4. **Room 数据层**：`:core` 模块启动；`Item` 域模型、`ItemEntity` + `ItemDao` + `TreasureDatabase`、`ItemRepository` 暴露 `Flow<List<Item>>`
-5. **种子数据**：8 条物品从 `prototype/project/data.jsx` 移植到 `core/seed/SeedItems.kt`，覆盖全部 4 个品类
-6. **VM 接通**：`TreasureApp` 当 ServiceLocator 起 DB + repo；`PortalViewModel` 把 items 流聚合成 UiState；`PortalScreen` 通过 `viewModel()` + `collectAsStateWithLifecycle()` 反应式订阅
-7. APK：`android/app/build/outputs/apk/debug/app-debug.apk` ~10MB，覆盖装到 vivo X200 验证过
+GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
 
-**今天后半段：Chunk A（Grid + Nav）+ Chunk C（Detail + Add/Edit）**
+## 全部已实现的功能（端到端）
 
-- 加 navigation-compose，路由表 `Routes.kt`，控制岛上提到 NavHost 级别（按路由判可见性）
-- Portal 重构成纯展示组件，吃 `onEnterCategory` / `onOpenItem` 回调
-- **Grid 屏**：横向品类胶囊 + 2 列卡片网格，从门厅 4 扇门 / 控制岛"图鉴"都能进
-- **Detail 屏**：hero + 标题 + 状态徽章 + 4 行 hero specs + 底部抽屉占位；右上 edit/delete
-- **Add / Edit 屏** 同一个 `AddRoute(itemId)`，null = 新建 / 非空 = 编辑预填；写 Room 后跳到 Detail
-- 引入 `kotlinx-serialization`，schema bump v2，`Item` 加 `heroSpecs: List<HeroSpec>` + `specs: Map`
-- `fallbackToDestructiveMigration()` —— cycle 0001 还没真用户，schema 抖动期允许吹库
+四屏导航，全部数据从 Room 来：
 
-**接下来：cycle 0002 全量 + 三处用户反馈修复**
+```
+       ┌─ Portal (门厅 / 默认起点)
+       │      ornament + Treasure 64sp + 三连计数 + 4 扇门 + Latest entry
+       │      点 4 扇门 → Grid 该品类
+       │      点 Latest entry → Detail
+       │
+       ├─ Grid (图鉴)                  Portal 4 扇门 / 控制岛 → 这里
+       │      标题 "Treasure" + N ITEMS
+       │      品类 chips 横滚
+       │      2 列卡片网格，hero 缩略
+       │      点卡片 → Detail
+       │
+       ├─ Detail (详情) ★ cycle 0002 主体
+       │      back 加粗箭头 + 标题
+       │      ▽ Hero 卡片：博物馆线描；点击翻面 → "尚未收录实拍" 占位 (3 张旋转空相框 + ×)
+       │      ▽ 4 行 hero specs
+       │      ▽ 底部 40dp 拉手 (peek 只露拉手)
+       │      ▽ 上滑展开抽屉 (78% 屏高，tab 切换不变高):
+       │          历史 (timeline + kind 字形 + ★Δ↻+−)
+       │          参数 (specs key-value)
+       │          影集 (3×3 空灰格 + "添加照片 — coming")
+       │          设置 (删除这件物品，AlertDialog 二次确认；后续操作占位)
+       │
+       ├─ 录入 stub      "对话式录入 · 拍照 → AI 自动识别 — coming"
+       └─ 设置 stub       "AI 服务 · BYO API key — coming"
+       
+                     +──────────────────────+
+                     │  门厅 图鉴 录入 设置  │  ← 浮动控制岛 (Detail 屏隐藏)
+                     +──────────────────────+
+```
 
-- 反馈 1: Add 屏取消手工录入，改为 "coming" stub（删了 AddScreen / AddViewModel；Detail 的 edit 按钮也一起去掉）
-- 反馈 2: 顶部 status bar 留白 —— `enableEdgeToEdge()` + 每个屏 `Modifier.statusBarsPadding()`；控制岛 `navigationBarsPadding()`
-- 反馈 3: 页面转场改为左右推 —— `slideIntoContainer(Start/End)` + 300ms tween，前进从右进左出，回退从左回右
-- **抽屉**: `BottomSheetScaffold` + 96dp peek；3 tabs（历史 ★Δ↻+− 时间轴 / 参数 key-value 表 / 影集 3×2 占位）；schema 升 v3，`Item` 加 `history: List<HistoryEvent>`（kind: ACQUIRED/MILESTONE/MAINTAIN/MOD/PARTED）
-- **明信片翻面**: hero 卡片点击 `graphicsLayer { rotationY }` 600ms tween；正面 hero illustration + "0 PHOTOS · TAP TO FLIP" 角标；背面 "暂无实拍" + 添加照片占位（cycle 0003 接通真照片）
-- 8 条种子物品全都补了真实历史事件（移植自 prototype/data.jsx）
+视觉系统：
 
-**今天前半段：Chunk B —— 真博物馆线描插画**
+- 字体 Cormorant Garamond + Italic / Space Grotesk / JetBrains Mono（都打包）
+- 配色 paper / ink / terra / card / sub / line tokens，浅深双套
+- edge-to-edge + statusBarsPadding，控制岛 navigationBarsPadding
+- 页面转场左右滑（slideIntoContainer Start/End，300ms tween）
+- 11 个博物馆线描插画（10 形状 + Generic 兜底）
 
-- 翻译 prototype/project/vectors.jsx 的 10 个 V-functions 到 Compose `Canvas`：Racket / Camera / Lens / Tripod / Shoes / Car / Laptop / Earbuds / Tablet / Watch
-- 共享 helper `drawInViewBox(vbW, vbH)` 在 Canvas 里模拟 SVG viewBox 的 letterbox 行为
-- `HeroIllustration(item)` dispatcher 按 `item.heroVector` 分发到具体函数；多个 enum 值可共享同一个画法（CAMERA_DSLR / CAMERA_RANGEFINDER 都走 Camera，CAR_SEDAN / CAR_SUV 都走 Car，KINDLE 走 Tablet）
-- `Generic` 给没具体画法的 enum 兜底（带画框 + palette swatch 的"空白博物馆牌"）
-- 删了 `HeroPlaceholder`；Portal / Grid / Detail / Add 都改用 `HeroIllustration`
-- **没做**：callout 引线 + 罗马数字标注（i · pentaprism 那种）—— 加进去要在 Canvas 里调 `TextMeasurer`，下一刀
+数据：
 
-下一步候选（cycle 0001 收尾或开 cycle 0002）：
+- Room v3，items 一张表，列含 palette / hero_specs / specs / history 全部 JSON 序列化（kotlinx-serialization）
+- `Item` 域模型 + `ItemRepository` (Flow)
+- 8 条种子物品（移植 prototype/data.jsx），覆盖 4 个品类，全部带 history 时间线
+- `fallbackToDestructiveMigration()`（cycle 0001 期未冻 schema）
 
-- cycle 0001 收尾：callout 引线 + 罗马数字标注；DatePicker；UI test；agent.md 复盘
-- cycle 0002：抽屉（历史 / 参数 / 影集）+ 详情翻面 + 真实照片
-- cycle 0003：设置 + AI 服务 + 对话式录入
+## 整体工程
 
-不打算这一轮做的（cycle 0002+）：
+```
+treasure/
+├── android/                Kotlin + Jetpack Compose（Gradle 8.10.2 + AGP 8.7.2 + Kotlin 2.0.21）
+│   ├── app/                :app — Compose 屏幕 / 导航 / 主题 / 插画
+│   └── core/               :core — domain / Room / Repository / Seed
+├── prototype/              Claude Design 原型（活的视觉规格，可双击 Treasure.html）
+├── docs/                   长期指引（产品 / 架构 / 视觉 / dev-loop / 5 ADRs）
+├── openspec/               变更周期（0001 done, 0002 done）
+├── scripts/                bootstrap.sh / prototype-serve.sh / serve-apk.sh
+├── backend/                FastAPI 同步占位（cycle 0003+）
+├── README.md
+└── agent.md                这一份
+```
 
-- 抽屉（历史/参数/影集）、明信片翻面、DatePicker、AI、后端同步
+## 之前的 polish round（昨天 2026-05-06 末段）
+
+7 项用户反馈一次过：
+
+1. Add → stub（删 AddViewModel/AddScreen/edit 路由）
+2. 顶部 statusBarsPadding，每屏自管 inset；控制岛 navigationBarsPadding
+3. 滑动转场（slideIntoContainer Start/End + 300ms）
+4. Detail 顶部去 delete，下沉到抽屉"设置" tab
+5. 抽屉 peek 降到 40dp，只露拉手
+6. 翻面背面重画（3 张空相框 + × + italic 文案 + 添加占位）
+7. back 按钮换 Canvas 加粗箭头无文字
+8. Grid 副标题简化为 `N ITEMS`
+9. Portal 删 EST 日期条 + 三连计数边框
+
+加 `git init` + push 到 GitHub。
+
+## 今天的细修（2026-05-07）
+
+- **抽屉高度统一**：固定 78% 屏高；不同 tab（短的 Settings vs 长的 History）切换不再变高；每个 tab 内部 verticalScroll
+- 影集占位从 6 格改为 3×3 = 9 格，看着更像样
+
+## 对接给下一个 agent / 新人
+
+进来按这个顺序读：
+
+1. [`README.md`](README.md) — 60 秒概览
+2. **本文件** — 当前状态
+3. [`docs/dev-loop.md`](docs/dev-loop.md) — 开发循环（构建 / 装机 / vivo 调试）
+4. 浏览器开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) — 视觉规格
+5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
+6. [`docs/adr/`](docs/adr/) — 5 份决策记录
+7. [`openspec/`](openspec/) — 各 cycle 提案 / 规格 / 笔记
+
+## 下一刀候选（cycle 0003）
+
+按优先级：
+
+1. **真实照片上传** —— 翻面背面"添加照片"接通：相册选择器 / 相机 → 存到 `files/photos/<itemId>/<uuid>.jpg` → 抽屉影集真实显示。schema 不动（照片 path 列表存为 JSON，可以加 `photos_json` 字段，bump v4）。
+2. **设置页 AI 服务** —— BYO key form：provider / model / API key → EncryptedSharedPreferences。先把 `core/ai/AiClient.kt` interface 写起来。
+3. **对话式录入** —— Add stub 接通：拍照 / 选图 → AI vision extract → 字段自动填 → 用户调整 → 保存。需要 1 + 2 都做完。
+4. **AI 生成博物馆插画** —— 用户新增物品时调 AI 生成符合视觉规则的 SVG，cache 本地。`generateIllustration` 在 AiClient 上。
+5. **callout 标注** —— 现有插画补 `i · pentaprism` / `ii · grip` 那种 Cormorant 斜体标注线（Compose Canvas 里走 `TextMeasurer`）。
 
 ## 历史
 
 | 日期 | 摘要 |
 |---|---|
-| 2026-05-06 | cycle 0002：抽屉（历史/参数/影集）+ 明信片翻面 + status bar 留白 + 滑动转场 + Add stub（本次） |
-| 2026-05-06 | cycle 0001：Chunk B 博物馆插画（10 形状 + Generic） |
+| 2026-05-07 | 抽屉高度统一 + 全文档刷新（本次） |
+| 2026-05-06 | cycle 0002 + 7 项 polish + git push 到 GitHub |
+| 2026-05-06 | cycle 0001：Chunk B 博物馆线描插画（10 形状 + Generic） |
 | 2026-05-06 | cycle 0001：Grid + Nav + Detail + Add/Edit + serialization v2 schema |
 | 2026-05-06 | cycle 0001 开工：工程脚手架 → Portal 视觉 → Room 数据层 |
 | 2026-05-06 | 项目骨架搭建完成 |
-| 2026-05-06 | Claude Design 导出原型；视觉方向锁定为博物馆图鉴风（参见 [`prototype/chats/chat1.md`](prototype/chats/chat1.md)） |
+| 2026-05-06 | Claude Design 导出原型；视觉方向锁定为博物馆图鉴风 |
 
 ## 给下一个 agent 的备忘
 
-- 改视觉之前一定先打开 `prototype/project/Treasure.html` 对照 —— 那是活的视觉规格，比文字描述准
-- ADR 是钉死的决策。要推翻某个 ADR，写一份新的 ADR 来 supersede 它，不要悄悄改老的
-- 一个 cycle 一个文件夹（`openspec/NNNN-*/`），一个 cycle 一个改动，做完再开下一个
-- 任何"日期"在文档/code 里都写绝对日期（YYYY-MM-DD），不要写"上周"、"昨天"
+- 改视觉之前一定先打开 `prototype/project/Treasure.html` 对照
+- ADR 是钉死的决策。要推翻某个 ADR，写新 ADR 来 supersede 它
+- 一个 cycle 一个文件夹（`openspec/NNNN-*/`），一个 cycle 一个改动
+- 任何"日期"在文档里写绝对日期（YYYY-MM-DD），不写"上周"
+- schema 升级：cycle 0001-0002 期间用 `fallbackToDestructiveMigration()`。**cycle 0003 之后必须开始写真 migration**——会有真用户的数据
+- 控制岛在 Detail / Edit 屏隐藏（视觉规格要求）；其它屏显示
+- 字体 / SVG / 历史事件等数据移植参考 `prototype/project/{vectors,data}.jsx`

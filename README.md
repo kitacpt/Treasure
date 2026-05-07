@@ -8,24 +8,37 @@
 
 ## 从这里开始
 
-- **想看可点击的视觉规格** → 浏览器打开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html)
-- **想看产品定义** → [`docs/product.md`](docs/product.md)
-- **想看视觉系统** → [`docs/visual-language.md`](docs/visual-language.md)
-- **想看技术架构** → [`docs/architecture.md`](docs/architecture.md)
-- **想看为什么这么选** → [`docs/adr/`](docs/adr/)
-- **想看现在做到哪儿了 / 接下来做啥** → [`agent.md`](agent.md)
-- **想看正在进行的变更周期** → [`openspec/`](openspec/)
+新人 / 新一轮 agent 进来按这个顺序读：
+
+1. 浏览器开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) —— 看 8 个画板，理解视觉
+2. [`agent.md`](agent.md) —— 当前状态、做了什么、接下来做啥
+3. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环
+4. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
+5. [`docs/adr/`](docs/adr/) —— 5 份决策记录
+6. [`openspec/`](openspec/) —— 各 cycle 的 proposal / spec / notes
+
+## 当前状态（2026-05-07）
+
+**cycle 0001 + 0002 已落地**。能跑出 v0.5.2 APK，装到 vivo X200 Pro mini 上：
+
+- 4 屏导航：Portal · Grid · Detail · Stubs（录入 / 设置）
+- 8 条种子数据（Room v3，从 `prototype/project/data.jsx` 移植）
+- Detail 屏带抽屉（历史 / 参数 / 影集 / 设置 4 tabs）+ 明信片翻面看实拍占位
+- 11 个博物馆线描插画
+- 左右滑动转场、edge-to-edge、控制岛
+
+GitHub：<https://github.com/kitacpt/Treasure>
 
 ## 仓库布局
 
 ```
 treasure/
 ├── prototype/      Claude Design 导出的可点击 HTML 原型，作为活的视觉规格
-├── android/        Android app（Kotlin + Jetpack Compose）
+├── android/        Android app（Kotlin + Jetpack Compose；:app + :core）
 ├── backend/        FastAPI 同步服务（占位，cycle 0003+ 才会接通）
-├── docs/           长期指引 —— product / architecture / visual-language / ADRs
+├── docs/           长期指引 —— product / architecture / visual-language / dev-loop / ADRs
 ├── openspec/       变更周期提案（一个 cycle 一个文件夹）
-├── scripts/        开发/构建脚手架
+├── scripts/        bootstrap.sh / prototype-serve.sh / serve-apk.sh
 └── agent.md        滚动更新的现状交接
 ```
 

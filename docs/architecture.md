@@ -16,18 +16,20 @@ android/
 
 ## 关键依赖（Gradle / version catalog）
 
-| 用途 | 依赖 |
-|---|---|
-| UI | `androidx.compose:compose-bom`、`androidx.compose.material3`、`androidx.activity:activity-compose` |
-| 导航 | `androidx.navigation:navigation-compose` |
-| 持久化 | `androidx.room:room-runtime`、`room-ktx`、`room-compiler`（KSP） |
-| 偏好 | `androidx.datastore:datastore-preferences` |
-| 安全存储 | `androidx.security:security-crypto`（[ADR-0004](adr/0004-byo-ai-key.md) 用） |
-| 异步 | `kotlinx-coroutines-android`、`kotlinx-coroutines-core` |
-| 序列化 | `kotlinx-serialization-json`（specs / hero_specs / palette 字段都是 JSON） |
-| DI | **不引** Hilt/Koin，先用手写 ServiceLocator。等屏数 > 5 个再上 DI。 |
-| 网络 | （cycle 0003+ 才引 `ktor-client` / `okhttp`） |
-| AI client | （cycle 之后）`com.anthropic:anthropic-java`（或 OkHttp 直调） |
+实际写在 [`../android/gradle/libs.versions.toml`](../android/gradle/libs.versions.toml)：
+
+| 用途 | 依赖 | 当前版本 |
+|---|---|---|
+| UI | `androidx.compose:compose-bom`、`material3`、`activity-compose` | bom 2024.10.01, activity 1.9.3 |
+| 导航 | `androidx.navigation:navigation-compose` | 2.8.4 |
+| 持久化 | `androidx.room:room-runtime` + `room-ktx` + `room-compiler`（KSP） | 2.6.1 |
+| 序列化 | `kotlinx-serialization-json`（palette / hero_specs / specs / history JSON 列） | 1.7.3 |
+| 生命周期 | `androidx.lifecycle:lifecycle-{viewmodel,runtime}-compose` | 2.8.7 |
+| Kotlin / AGP | Kotlin 2.0.21 / AGP 8.7.2 / KSP 2.0.21-1.0.27 | — |
+| 偏好 | （未引）`androidx.datastore:datastore-preferences` | — |
+| 安全存储 | （未引）`androidx.security:security-crypto`（[ADR-0004](adr/0004-byo-ai-key.md) 用） | cycle 0003 |
+| DI | **不引** Hilt/Koin，手写 ServiceLocator（`TreasureApp`） | — |
+| 网络 / AI client | （未引）cycle 0003 起 | — |
 
 参见 [ADR-0002](adr/0002-jetpack-compose.md) 关于 Compose / Material3 用法。
 
@@ -57,93 +59,103 @@ cycle 0001 的实际链路只到 LocalItemSource。`RemoteItemSource` 在 :core 
 
 参见 [ADR-0003](adr/0003-local-first-with-optional-sync.md) 关于同步协议。
 
-## :core 内部结构
+## :core 内部结构（实际）
 
 ```
 core/
 ├── domain/
 │   ├── Item.kt                         # 领域模型（不依赖 Room）
-│   ├── HistoryEvent.kt
 │   ├── Category.kt                     # 4 个 enum：BADMINTON / PHOTO / CARS / TECH
-│   ├── ItemStatus.kt                   # owned / parted / rented
-│   └── HeroVector.kt                   # 预置插画 enum：RACKET / CAMERA_DSLR / LENS_PRIME / …
+│   ├── ItemStatus.kt                   # OWNED / PARTED / RENTED
+│   ├── HeroVector.kt                   # 预置插画 enum
+│   ├── HeroSpec.kt                     # @Serializable
+│   └── HistoryEvent.kt                 # @Serializable + HistoryKind enum
 ├── repo/
-│   ├── ItemRepository.kt               # interface
-│   ├── DefaultItemRepository.kt        # 实现，用 LocalItemSource
-│   └── source/
-│       ├── LocalItemSource.kt          # interface
-│       ├── RoomItemSource.kt           # 实现
-│       └── RemoteItemSource.kt         # interface（cycle 0003+ 用）
+│   └── ItemRepository.kt               # interface + RoomItemRepository 实现
 ├── room/
-│   ├── TreasureDatabase.kt
-│   ├── ItemEntity.kt
-│   ├── HistoryEventEntity.kt
-│   ├── ItemDao.kt
-│   ├── HistoryEventDao.kt
-│   └── Converters.kt                   # JSON ↔ List<HeroSpec> / Map<String,String> / List<String>
-├── usecase/
-│   ├── GetCategoryCounts.kt
-│   ├── ListItemsByCategory.kt
-│   ├── GetItemDetail.kt
-│   ├── CreateItem.kt
-│   ├── UpdateItem.kt
-│   └── DeleteItem.kt
-├── seed/
-│   └── SeedItems.kt                    # 首次启动预置（移植自 prototype/project/data.jsx）
-└── ai/                                 # cycle AI 之后才有具体实现
-    └── AiClient.kt                     # interface（[ADR-0004]）
+│   ├── TreasureDatabase.kt             # @Database version=3, fallbackToDestructiveMigration
+│   ├── ItemEntity.kt                   # internal；含 toDomain/fromDomain；JsonCodec object
+│   └── ItemDao.kt                      # observeAll/observeById/count/upsert/deleteById
+└── seed/
+    └── SeedItems.kt                    # 8 条 + 真实 history（移植自 prototype/project/data.jsx）
 ```
 
-## :app 内部结构
+简化 vs. 早期设计稿：
+
+- **没拆 source 子层**（之前画的 `LocalItemSource` / `RemoteItemSource` interface）—— 直接 `RoomItemRepository` 持有 `TreasureDatabase`。等 cycle 0003+ 真要接同步层时再拆。
+- **没拆 usecase 层** —— ViewModel 直接用 Repository。屏数 < 6 个，过早抽象没收益。
+- **没拆 history_events 表** —— history 当作 JSON 列嵌在 items 里。等需要"按 kind 跨物品查"时再正规化。
+
+## :app 内部结构（实际）
 
 ```
 app/
-├── MainActivity.kt
-├── TreasureApp.kt                      # NavHost + Theme
+├── MainActivity.kt                     # ComponentActivity + enableEdgeToEdge → TreasureNavHost
+├── TreasureApp.kt                      # Application：构造 ItemRepository + 首启 seed
 ├── theme/
-│   ├── TreasureTheme.kt                # 应用 Color/Typography 覆盖
-│   ├── Color.kt                        # paper / ink / terra / sub / line / card
-│   └── Type.kt                         # Cormorant / Space Grotesk / Mono / Noto SC
+│   ├── Theme.kt                        # TreasureTheme + LocalTreasureColors
+│   ├── Color.kt                        # paper / ink / terra / card / sub / line（浅深双套）
+│   └── Type.kt                         # Cormorant / Space Grotesk / JetBrains Mono FontFamily
 ├── ui/
-│   ├── portal/PortalScreen.kt
-│   ├── grid/GridScreen.kt
-│   ├── detail/DetailScreen.kt
-│   ├── add/AddScreen.kt                # 表单（cycle 0001 不带 AI）
-│   ├── settings/SettingsStubScreen.kt  # cycle 0001：占位 "AI integration coming"
+│   ├── nav/
+│   │   ├── Routes.kt                   # 路由常量（Portal / Grid{cat} / Detail{id} / Add / Settings）
+│   │   └── TreasureNavHost.kt          # NavHost + 滑动转场 + 全局 ControlIsland
+│   ├── portal/
+│   │   ├── PortalRoute.kt              # （PortalScreen 内嵌）
+│   │   ├── PortalScreen.kt
+│   │   └── PortalViewModel.kt          # 聚合 Items → tally / 按品类
+│   ├── grid/
+│   │   ├── GridScreen.kt               # 内含 GridRoute + 品类 chips + 2 列网格
+│   │   └── GridViewModel.kt            # 单品类 items
+│   ├── detail/
+│   │   ├── DetailScreen.kt             # BottomSheetScaffold + 翻面 + 4-tab 抽屉（设置含删除）
+│   │   └── DetailViewModel.kt          # observeById + delete
+│   ├── stubs/StubScreens.kt            # AddStub / SettingsStub / DetailStub
 │   └── components/
-│       ├── ControlIsland.kt            # 底部浮动控制岛
-│       ├── HeroIllustration.kt         # 分发到具体绘制
-│       ├── CalloutLine.kt              # 标注线 helper（对应原型 Callout）
-│       ├── PlateLabel.kt               # 罗马数字小标（对应原型 PlateLabel）
-│       └── Ornament.kt                 # Portal 顶部的罗盘装饰
-└── illust/                             # 各物品的 Canvas 绘制函数
-    ├── HeroIllustration_Racket.kt
-    ├── HeroIllustration_CameraDSLR.kt
-    ├── HeroIllustration_LensPrime.kt
-    ├── HeroIllustration_CarSedan.kt
-    ├── HeroIllustration_Tripod.kt
-    ├── HeroIllustration_Laptop.kt
-    ├── HeroIllustration_Earbuds.kt
-    ├── HeroIllustration_Kindle.kt
-    ├── HeroIllustration_Watch.kt
-    └── HeroIllustration_Tablet.kt
+│       ├── ControlIsland.kt            # 底部浮动控制岛（4 颗胶囊）
+│       ├── BackArrow.kt                # 手绘加粗 ← 箭头（无文字）
+│       └── Ornament.kt                 # Portal 顶部罗盘装饰
+└── illust/                             # 11 个 Compose Canvas 博物馆插画
+    ├── IllustHelpers.kt                # drawInViewBox / palette4 / parseHex / INK
+    ├── HeroIllustration.kt             # 按 HeroVector enum 分发的 dispatcher
+    ├── Racket.kt                       # 球拍
+    ├── Camera.kt                       # 相机（DSLR + 旁轴共享）
+    ├── Lens.kt                         # 镜头
+    ├── Tripod.kt                       # 三脚架
+    ├── Shoes.kt                        # 球鞋
+    ├── Car.kt                          # 汽车（轿车 + SUV 共享）
+    ├── Laptop.kt                       # 笔电
+    ├── Earbuds.kt                      # TWS 耳机
+    ├── Tablet.kt                       # 平板（含 Kindle）
+    ├── Watch.kt                        # 智能手表
+    └── Generic.kt                      # 兜底空白博物馆牌
 ```
+
+差异 vs. 早期设计稿：插画 dispatcher 没有按 enum 一一拆文件，而是把多个 enum 值映射到同一个 Composable（CAMERA_DSLR / CAMERA_RANGEFINDER → Camera()，CAR_SEDAN / CAR_SUV → Car()，KINDLE → Tablet()）。
 
 `HeroIllustration.kt` 按 `item.heroVector` 分发到 `illust/` 下具体函数，所有具体函数都接受 `IllustrationStyle`（含 ink、palette、showCallouts）。
 
-## 导航图
+## 导航图（实际）
 
 ```
 NavHost (start = "portal")
-├── "portal"
-├── "grid/{categoryId}"
-├── "detail/{itemId}"
-├── "add"           （cycle 0001）
-├── "edit/{itemId}" （cycle 0001）
-└── "settings"      （cycle 0001：stub 屏）
+├── "portal"            ─→  PortalRoute
+├── "grid/{categoryId}" ─→  GridRoute
+├── "detail/{itemId}"   ─→  DetailRoute
+├── "add"               ─→  AddStubScreen           # cycle 0002 把表单删了
+└── "settings"          ─→  SettingsStubScreen
 ```
 
-控制岛 4 颗胶囊里"录入"和"设置"同样进 `add`/`settings` 路由。门厅与品类间的"4 扇门"点击 → `grid/<id>`。
+转场（NavHost 全局）：
+
+| 方向 | 进 | 出 |
+|---|---|---|
+| 前进 (push) | `slideIntoContainer(Start)` 从右进 | `slideOutOfContainer(Start)` 向左推 |
+| 回退 (pop)  | `slideIntoContainer(End)` 从左进  | `slideOutOfContainer(End)` 向右推  |
+
+均 300ms tween。
+
+控制岛 4 颗胶囊：门厅 / 图鉴 / 录入 / 设置。"图鉴"按当前路由：在 grid/X 时停留；不在时跳 `grid/photo` 默认。Detail 屏控制岛**隐藏**（视觉规格要求）。
 
 ## 状态与事件
 
