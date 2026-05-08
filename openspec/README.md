@@ -39,11 +39,12 @@ openspec/
 | 0004 | done | [录入页（手动 + AI 占位）+ Detail 全字段编辑（被否后改）](0004-add-route-and-full-edit/proposal.md) |
 | 0005 | done | [AI 服务接通 + 编辑屏重做（入口移到详情左上角点）](0005-ai-and-edit-screen/proposal.md) |
 | 0006 | done | [OpenAI / 自定义 provider + 参数统一（拖动选前 4）+ 编辑点移右上 + 录入外层留空](0006-providers-and-spec-unify/proposal.md) |
+| 0007 | done | [录入页 v2：chat-first + 草稿预览 + 历史抽屉 + 手动入口](0007-add-page-v2/proposal.md) |
 
 ## 后续 cycle 候选（按优先级，不一定按这个顺序做）
 
-- 0007 · **真 schema migration**（v1→v5 全部，MigrationTest，删 fallbackToDestructiveMigration）
-- 0008 · 新录入交互（等用户重画）+ 接回 AI 入口
-- 0009 · 拍照 / 多选照片 + AI 生成博物馆插画
-- 0010 · 全屏看图浏览器 + callout 文字标注 + 多轮 AI 对话
-- 0011 · FastAPI 同步层 + 后端 admin + 真实照片云端备份
+- 0008 · **真 schema migration**（v1→v5 全部，MigrationTest，删 fallbackToDestructiveMigration）—— 已 7 次 destructive，欠债最大
+- 0009 · 真 STT + 历史对话持久化（录入页两个 stub）+ 多轮对话
+- 0010 · 拍照（直调相机）+ AI 生成博物馆插画
+- 0011 · 全屏看图浏览器 + callout 文字标注
+- 0012 · FastAPI 同步层 + 后端 admin + 真实照片云端备份

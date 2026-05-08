@@ -80,7 +80,7 @@ fun CategoryForm(
             canSave = canSave,
             onCancel = onCancel,
             onSave = {
-                vm.save(
+                vm.saveManual(
                     template = template,
                     brand = brand,
                     model = model,

@@ -4,9 +4,9 @@
 
 ## 今天 (2026-05-07)
 
-**状态：cycle 0001 → 0006 全部落地**
+**状态：cycle 0001 → 0007 全部落地**
 
-最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.9.0，13 MB）
+最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.10.0，13 MB）
 
 GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
 
@@ -53,11 +53,24 @@ GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
        │      ── 实拍 ─── 3 列 + tile + 长按删
        │      ── DANGER ZONE ─── 删除（二次确认）
        │
-       ├─ 录入 (Add)  ★ cycle 0006 留空
-       │      Header: Treasure / NEW ENTRY
-       │      中间空 + italic "录入页交互重新设计中"
-       │      底部 4 颗朴素品类 chip 临时入口（重设计后移除）
-       │      （CategoryForm 仍存在；AiChatPanel 已删，等新设计接回 AI）
+       ├─ 录入 (Add)  ★ cycle 0007 chat-first
+       │      Header: 录入  Fujifilm X-T5 ▾    🕐  ⊕  [手动]
+       │
+       │      Chat 模式（默认）:
+       │        助手打招呼 italic serif → 用户输入气泡
+       │        Composer 浮在控制岛上方: [📷] 文本 [🎙] [→]
+       │        发送 / 选图 / 语音 → 调 extractItemDraft
+       │        AI 草稿就绪 → DraftCta 卡片（缩略 + DRAFT N FIELDS + → ）
+       │        点 🕐 / ▾ → 历史对话 dropdown
+       │        点 ⊕ → 新对话
+       │        点 [手动] → 蒙层选品类 → CategoryForm（cycle 0006 不变）
+       │
+       │      Preview 模式（点 DraftCta 进入）:
+       │        Hero 卡 + 9 字段 + 置信度 dots + ✎ inline edit
+       │        [继续修改] [✓ 确认收入图鉴]
+       │        确认 → 写 Room → 跳新 Detail
+       │
+       │      VoiceOverlay (点 🎙): 全屏蒙层 + 波形 + italic 转写 stub
        │
        └─ 设置 (Settings) ★ cycle 0005 + 0006
               Provider chips: Anthropic / OpenAI / Custom (OpenAI-compatible)
