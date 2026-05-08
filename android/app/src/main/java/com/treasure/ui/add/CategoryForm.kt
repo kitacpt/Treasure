@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -32,7 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.treasure.core.domain.HeroSpec
+import com.treasure.core.ai.ItemDraft
 import com.treasure.core.domain.Item
 import com.treasure.core.domain.ItemStatus
 import com.treasure.illust.HeroIllustration
@@ -42,18 +41,27 @@ import java.time.LocalDate
 @Composable
 fun CategoryForm(
     template: CategoryTemplate,
+    initial: ItemDraft? = null,
     onCancel: () -> Unit,
     onSaved: (String) -> Unit,
     vm: AddViewModel = viewModel(factory = AddViewModel.Factory),
 ) {
     val colors = LocalTreasureColors.current
-    var brand by remember { mutableStateOf("") }
-    var model by remember { mutableStateOf("") }
-    var nickname by remember { mutableStateOf("") }
+    var brand by remember { mutableStateOf(initial?.brand.orEmpty()) }
+    var model by remember { mutableStateOf(initial?.model.orEmpty()) }
+    var nickname by remember { mutableStateOf(initial?.nickname.orEmpty()) }
     var acquired by remember { mutableStateOf(LocalDate.now().toString()) }
-    var oneLiner by remember { mutableStateOf("") }
+    var oneLiner by remember { mutableStateOf(initial?.oneLiner.orEmpty()) }
     var status by remember { mutableStateOf(ItemStatus.OWNED) }
-    val specValues = remember { mutableStateListOf("", "", "", "") }
+    val specValues = remember {
+        mutableStateListOf<String>().apply {
+            // Map AI's heroSpec values into the template's slots positionally
+            // (the AI is instructed to return them in template order).
+            for (i in 0..3) {
+                add(initial?.heroSpecs?.getOrNull(i)?.value.orEmpty())
+            }
+        }
+    }
 
     val canSave = brand.isNotBlank() && model.isNotBlank()
 
@@ -64,7 +72,6 @@ fun CategoryForm(
             .padding(horizontal = 22.dp)
             .padding(bottom = 24.dp),
     ) {
-        // Top row: cancel left, title center, save right
         Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -80,7 +87,8 @@ fun CategoryForm(
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = "新增 · ${template.category.nameZh}",
+                text = if (initial != null) "AI 预填 · ${template.category.nameZh}"
+                       else "新增 · ${template.category.nameZh}",
                 color = colors.sub,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -109,7 +117,6 @@ fun CategoryForm(
 
         Spacer(Modifier.height(12.dp))
 
-        // Hero preview using template
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.55f)

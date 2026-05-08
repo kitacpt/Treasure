@@ -17,4 +17,6 @@ object Routes {
 
     const val Add = "add"
     const val Settings = "settings"
+    const val EditPattern = "edit/{itemId}"
+    fun edit(itemId: String) = "edit/$itemId"
 }

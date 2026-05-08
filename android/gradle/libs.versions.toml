@@ -10,6 +10,8 @@ room = "2.6.1"
 navigationCompose = "2.8.4"
 serialization = "1.7.3"
 coil = "2.7.0"
+okhttp = "4.12.0"
+security = "1.1.0-alpha06"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -39,6 +41,12 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 
 # Coil — image loading from file:// paths (real photos)
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+
+# OkHttp — HTTP client for AI service calls
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+
+# Encrypted prefs for the BYO AI key (per ADR-0004)
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto-ktx", version.ref = "security" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

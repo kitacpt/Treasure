@@ -2,7 +2,6 @@
 
 package com.treasure.ui.add
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,7 +39,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.treasure.TreasureApp
+import com.treasure.core.ai.ItemDraft
 import com.treasure.core.domain.Category
 import com.treasure.theme.LocalTreasureColors
 
@@ -50,6 +51,11 @@ private enum class AddMode(val label: String) {
     Ai("AI 录入"),
 }
 
+private data class FormSession(
+    val template: CategoryTemplate,
+    val initial: ItemDraft? = null,
+)
+
 @Composable
 fun AddRoute(
     onSaved: (String) -> Unit,
@@ -57,7 +63,14 @@ fun AddRoute(
 ) {
     val colors = LocalTreasureColors.current
     var mode by remember { mutableStateOf(AddMode.Manual) }
-    var picked by remember { mutableStateOf<Category?>(null) }
+    var session by remember { mutableStateOf<FormSession?>(null) }
+
+    // AI availability is read on each composition so that toggling settings
+    // and coming back updates the AI panel without restart.
+    val context = LocalContext.current
+    val aiAvailable = remember(context) {
+        (context.applicationContext as? TreasureApp)?.settingsStore?.hasKey() == true
+    }
 
     Box(
         modifier = Modifier
@@ -72,26 +85,39 @@ fun AddRoute(
             Spacer(Modifier.height(8.dp))
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 when (mode) {
-                    AddMode.Manual -> Bubbles(onPick = { picked = it })
-                    AddMode.Ai     -> AiChatStub(onGoSettings = onGoSettings)
+                    AddMode.Manual -> Bubbles(onPick = { c ->
+                        session = FormSession(CategoryTemplates.forCategory(c))
+                    })
+                    AddMode.Ai -> AiChatPanel(
+                        aiAvailable = aiAvailable,
+                        onGoSettings = onGoSettings,
+                        onDraft = { draft ->
+                            val cat = Category.fromId(draft.category ?: Category.TECH.id)
+                            session = FormSession(
+                                template = CategoryTemplates.forCategory(cat),
+                                initial = draft,
+                            )
+                        },
+                    )
                 }
             }
         }
     }
 
-    if (picked != null) {
+    if (session != null) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
-            onDismissRequest = { picked = null },
+            onDismissRequest = { session = null },
             sheetState = sheetState,
             containerColor = colors.paper,
             contentColor = colors.ink,
         ) {
             CategoryForm(
-                template = CategoryTemplates.forCategory(picked!!),
-                onCancel = { picked = null },
+                template = session!!.template,
+                initial = session!!.initial,
+                onCancel = { session = null },
                 onSaved = { id ->
-                    picked = null
+                    session = null
                     onSaved(id)
                 },
             )
@@ -150,24 +176,19 @@ private fun ModeToggle(mode: AddMode, onModeChange: (AddMode) -> Unit) {
     }
 }
 
-// ─── Manual: bubbles ────────────────────────────────────────────────────────
-
 @Composable
 private fun Bubbles(onPick: (Category) -> Unit) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val containerW = maxWidth
         val containerH = maxHeight
-        // Bubble diameter scales with the smaller axis; clamp to a reasonable range
         val bubbleSize = listOf(containerW * 0.36f, containerH * 0.32f).min().coerceIn(96.dp, 168.dp)
         val cats = Category.entries
-        // 2×2 layout: anchor each bubble to a corner via fractional positioning
         val anchors = listOf(
-            Alignment.TopStart    to Pair( 0.18f, 0.10f),  // top-left, slight inward shift
-            Alignment.TopEnd      to Pair(-0.18f, 0.06f),
-            Alignment.BottomStart to Pair( 0.10f,-0.18f),
-            Alignment.BottomEnd   to Pair(-0.10f,-0.10f),
+            Alignment.TopStart    to Pair( 0.18f,  0.10f),
+            Alignment.TopEnd      to Pair(-0.18f,  0.06f),
+            Alignment.BottomStart to Pair( 0.10f, -0.18f),
+            Alignment.BottomEnd   to Pair(-0.10f, -0.10f),
         )
-        // Different float periods so the motion never feels metronomic
         val periods = listOf(2200, 2700, 2400, 2900)
         cats.forEachIndexed { idx, cat ->
             val (alignment, shift) = anchors[idx]
@@ -241,86 +262,5 @@ private fun FloatingBubble(
     }
 }
 
-// ─── AI mode: chat scaffold stub ───────────────────────────────────────────
-
-@Composable
-private fun AiChatStub(onGoSettings: () -> Unit) {
-    val colors = LocalTreasureColors.current
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 22.dp),
-    ) {
-        // Pretend bubble
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
-                .background(colors.card)
-                .border(0.5.dp, colors.line)
-                .padding(14.dp),
-        ) {
-            Text(
-                text = "嗨，告诉我你新收下的物件是什么 — 拍个照、描述几句、或者贴一段商品页都行。",
-                color = colors.ink,
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        }
-        Spacer(Modifier.height(20.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .align(Alignment.End)
-                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
-                .background(colors.ink)
-                .padding(14.dp),
-        ) {
-            Text(
-                text = "...",
-                color = colors.paper.copy(alpha = 0.6f),
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        }
-        Spacer(Modifier.height(40.dp))
-        // "Coming" panel
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(2.dp))
-                .background(colors.card)
-                .border(0.5.dp, colors.line)
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = "AI 录入 — coming",
-                color = colors.ink,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "需要先在「设置」里配置 API key 才能聊起来",
-                color = colors.sub,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Spacer(Modifier.height(14.dp))
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .border(0.5.dp, colors.terra.copy(alpha = 0.6f), RoundedCornerShape(999.dp))
-                    .clickable(onClick = onGoSettings)
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-            ) {
-                Text(
-                    text = "去设置",
-                    color = colors.terra.copy(alpha = 0.85f),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        }
-    }
-}
-
-// helper — Compose has no built-in Dp.min; we list-it
 private fun List<androidx.compose.ui.unit.Dp>.min(): androidx.compose.ui.unit.Dp =
     this.fold(this.first()) { acc, d -> if (d.value < acc.value) d else acc }

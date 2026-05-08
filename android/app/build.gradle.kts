@@ -12,8 +12,8 @@ android {
         applicationId = "com.treasure"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.7.0"
+        versionCode = 10
+        versionName = "0.8.0"
     }
 
     buildTypes {
@@ -53,5 +53,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.coil.compose)
+    implementation(libs.androidx.security.crypto)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

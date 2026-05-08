@@ -4,9 +4,9 @@
 
 ## 今天 (2026-05-07)
 
-**状态：cycle 0001 + 0002 + 0003 + 0004 全部落地**
+**状态：cycle 0001 → 0005 全部落地**
 
-最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.7.0，12 MB）
+最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.8.0，13 MB）
 
 GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
 
@@ -26,28 +26,43 @@ GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
        │      2 列卡片网格，hero 缩略
        │      点卡片 → Detail
        │
-       ├─ Detail (详情) ★ cycle 0002 + 0003 + 0004
-       │      back 加粗箭头 + 标题
-       │      ▽ Hero 卡片：博物馆线描；点击翻面：
-       │          0 张照片 → 3 张空相框 + × + "上滑抽屉 · 影集 tab 添加"
-       │          ≥1 张  → 前 3 张缩略 + "N 张实拍 · 上滑抽屉看影集"
-       │        正面右下角 "${N} PHOTOS · TAP TO FLIP" 角标
-       │      ▽ 4 行 hero specs
+       ├─ Detail (详情)  纯只读 ★ cycle 0005 重做
+       │      ┌ ← (back) · (edit dot → 进编辑屏)
+       │      │
+       │      ▽ Hero 卡片：博物馆线描；点击翻面（有/无照片不同空状态）
+       │      ▽ 4 行 hero specs（只读）
        │      ▽ 底部 40dp 拉手 (peek 只露拉手)
-       │      ▽ 上滑展开抽屉 (78% 屏高，tab 切换不变高):  ★ cycle 0004 全字段编辑
-       │          基础  brand/model/nickname/oneLiner/acquired/parted/status/category/heroVector
-       │                + DANGER ZONE (删除，二次确认)
-       │          参数  hero_specs 4 行 + specs map (任意行 + / − )
-       │          历史  时间轴 + 顶部 + 加一条 + tap 编辑 / 长按删除
-       │          影集  3 列 + tile + 真实照片，长按删 ★ cycle 0003
+       │      ▽ 上滑展开抽屉 (78% 屏高):  3 tabs 全只读
+       │          历史  时间轴 (kind 字形 ★Δ↻+−)
+       │          参数  hero_specs + specs map
+       │          影集  3 列网格（无添加 / 无删除 affordance）
        │
-       ├─ 录入 (Add)  ★ cycle 0004
+       ├─ Edit (编辑) ★ cycle 0005 新建
+       │      ┌ ← (back) ··················· 保存 (dirty 时 terra)
+       │      │
+       │      EDIT
+       │      ── 基础 ─── 品牌 / 型号 / 昵称 / 简介
+       │      ── 时间 ─── 购入 / 出手
+       │      ── 标签 ─── 状态 chips / 品类 chips
+       │      ── 插画 ─── 14 个 HeroVector 横滚缩略，选中 terra
+       │      ── 关键参数 ─── 4 行 hero_specs (label+value)
+       │      ── 完整参数 ─── 变长 specs map (+ 加一行)
+       │      ── 历史 ─── 行排版 + tap 编辑 / 长按删 + 加一条
+       │      ── 实拍 ─── 3 列 + tile + 长按删
+       │      ── DANGER ZONE ─── 删除（二次确认）
+       │
+       ├─ 录入 (Add)  ★ cycle 0004 + 0005
        │      Header: Treasure / NEW ENTRY
        │      模式 chips: 手动 / AI
-       │      手动 → 4 气泡浮动 (badminton/photo/cars/tech) → 点开 → ModalBottomSheet
-       │              品类模板表单 (heroSpec 标签预填) → 保存 → 跳新 Detail
-       │      AI    → 聊天骨架 + "AI 录入 — coming · 去设置" 占位
-       └─ 设置 stub       "AI 服务 · BYO API key — coming"
+       │      手动 → 4 气泡浮动 → 点开 ModalBottomSheet → 模板表单 → 保存
+       │      AI   → 助手气泡 + 输入框 + "+ 选张图" + 发送 ★ cycle 0005 接通
+       │             → AnthropicClient.extractItemDraft → ItemDraft
+       │             → 弹同样的 BottomSheet, CategoryForm 预填字段
+       │             （没配 key → 显示"去设置"卡片）
+       └─ 设置 (Settings) ★ cycle 0005 接通
+              Provider: Anthropic | Model: text | API Key: password
+              [保存] [测试连接]   DANGER ZONE: 清除所有设置
+              EncryptedSharedPreferences 存 key + model
        
                      +──────────────────────+
                      │  门厅 图鉴 录入 设置  │  ← 浮动控制岛 (Detail 屏隐藏)

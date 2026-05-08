@@ -18,12 +18,6 @@ import androidx.compose.ui.unit.dp
 import com.treasure.theme.LocalTreasureColors
 
 @Composable
-fun SettingsStubScreen() = StubBody(
-    title = "Settings",
-    note = "AI 服务 · BYO API key — coming",
-)
-
-@Composable
 fun DetailStubScreen(itemId: String, onBack: () -> Unit) {
     val colors = LocalTreasureColors.current
     Box(

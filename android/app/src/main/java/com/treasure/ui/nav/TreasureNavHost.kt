@@ -23,9 +23,10 @@ import com.treasure.ui.add.AddRoute
 import com.treasure.ui.components.ControlIsland
 import com.treasure.ui.components.IslandTab
 import com.treasure.ui.detail.DetailRoute
+import com.treasure.ui.edit.EditRoute
 import com.treasure.ui.grid.GridRoute
 import com.treasure.ui.portal.PortalRoute
-import com.treasure.ui.stubs.SettingsStubScreen
+import com.treasure.ui.settings.SettingsRoute
 
 private val SlideTween = tween<androidx.compose.ui.unit.IntOffset>(durationMillis = 300)
 
@@ -73,6 +74,18 @@ fun TreasureNavHost() {
                 DetailRoute(
                     itemId = id,
                     onBack = { nav.popBackStack() },
+                    onEdit = { idToEdit -> nav.navigate(Routes.edit(idToEdit)) },
+                )
+            }
+
+            composable(
+                route = Routes.EditPattern,
+                arguments = listOf(navArgument("itemId") { type = NavType.StringType }),
+            ) { entry ->
+                val id = entry.arguments?.getString("itemId").orEmpty()
+                EditRoute(
+                    itemId = id,
+                    onDone = { nav.popBackStack() },
                 )
             }
 
@@ -90,7 +103,7 @@ fun TreasureNavHost() {
                     },
                 )
             }
-            composable(Routes.Settings) { SettingsStubScreen() }
+            composable(Routes.Settings) { SettingsRoute() }
         }
 
         val islandTab = islandTabFor(currentRoute)
@@ -128,5 +141,6 @@ private fun islandTabFor(route: String?): IslandTab? = when {
     route == Routes.Add -> IslandTab.Add
     route == Routes.Settings -> IslandTab.Settings
     route?.startsWith("detail/") == true -> null  // hide on Detail per visual-language.md
+    route?.startsWith("edit/") == true -> null    // hide on Edit (focused form)
     else -> null
 }
