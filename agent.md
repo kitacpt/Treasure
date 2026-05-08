@@ -2,218 +2,166 @@
 
 每次工作结束更新这一份。新人 / 新一轮 agent 进来先读它。
 
-## 今天 (2026-05-07)
+## 当前状态 · 2026-05-07
 
-**状态：cycle 0001 → 0008 全部落地**
+**cycle 0001 → 0008 全部落地。准备交接。**
 
-最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.11.0，13 MB）
+- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.11.0，13 MB，debug 签名）
+- GitHub：<https://github.com/kitacpt/Treasure>（main 分支）
+- 上次 commit：`9e75cc0` Cycle 0008
+- 测试设备：vivo X200 Pro mini（Android 15）
 
-GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
-
-## 全部已实现的功能（端到端）
-
-四屏导航，全部数据从 Room 来：
+## 端到端能跑通的功能
 
 ```
-       ┌─ Portal (门厅 / 默认起点)
-       │      ornament + Treasure 64sp + 三连计数 + 4 扇门 + Latest entry
-       │      点 4 扇门 → Grid 该品类
-       │      点 Latest entry → Detail
-       │
-       ├─ Grid (图鉴)                  Portal 4 扇门 / 控制岛 → 这里
-       │      标题 "Treasure" + N ITEMS
-       │      品类 chips 横滚
-       │      2 列卡片网格，hero 缩略
-       │      点卡片 → Detail
-       │
-       ├─ Detail (详情)  纯只读 ★ cycle 0005 + 0006
-       │      ┌ ← (back) ································ · (edit dot)
-       │      │                                            ↑ 编辑入口已移到右上
-       │      ▽ Hero 卡片：博物馆线描；点击翻面（有/无照片不同空状态）
-       │      ▽ 4 行 hero specs（item.specs 前 4，只读）
-       │      ▽ 底部 40dp 拉手 (peek 只露拉手)
-       │      ▽ 上滑展开抽屉 (78% 屏高):  3 tabs 全只读
-       │          历史  时间轴 (kind 字形 ★Δ↻+−)
-       │          参数  完整 specs 列表，第 4 行后 terra 细线分隔 hero / tail
-       │          影集  3 列网格（无添加 / 无删除 affordance）
-       │
-       ├─ Edit (编辑) ★ cycle 0005 新建 / 0006 重整
-       │      ┌ ← (back) ··················· 保存 (dirty 时 terra)
-       │      │
-       │      EDIT
-       │      ── 基础 ─── 品牌 / 型号 / 昵称 / 简介
-       │      ── 时间 ─── 购入 / 出手
-       │      ── 标签 ─── 状态 chips / 品类 chips
-       │      ── 插画 ─── 14 个 HeroVector 横滚缩略，选中 terra
-       │      ── 参数 ─── ★ cycle 0006 统一为单列表
-       │                  每行 [label] [value] [≡ drag] [− del]
-       │                  长按 ≡ 拖动重排；前 4 行作 hero
-       │                  第 4 行后 terra 细线 + "↑ 关键 4 项"
-       │      ── 历史 ─── 行排版 + tap 编辑 / 长按删 + 加一条
-       │      ── 实拍 ─── 3 列 + tile + 长按删
-       │      ── DANGER ZONE ─── 删除（二次确认）
-       │
-       ├─ 录入 (Add)  ★ cycle 0007 chat-first / 0008 polish
-       │      Header: RECORD                       🕐  ⊕  [手动]
-       │      （副标题 "Fujifilm X-T5 ▾" 仅在出过 AI 草稿后才显示）
-       │
-       │      Chat 模式（默认）:
-       │        助手打招呼 italic serif → 用户输入气泡
-       │        Composer 浮在控制岛上方: [📷] 文本 [🎙] [→]
-       │        发送 / 选图 / 语音 → 调 extractItemDraft
-       │        AI 草稿就绪 → DraftCta 卡片（缩略 + DRAFT N FIELDS + → ）
-       │        点 🕐 / ▾ → 历史对话 dropdown
-       │        点 ⊕ → 新对话
-       │        点 [手动] → 蒙层选品类 → CategoryForm（cycle 0006 不变）
-       │
-       │      Preview 模式（点 DraftCta 进入）:
-       │        Hero 卡 + 9 字段 + 置信度 dots + ✎ inline edit
-       │        [继续修改] [✓ 确认收入图鉴]
-       │        确认 → 写 Room → 跳新 Detail
-       │
-       │      VoiceCapture (点 🎙): 真 STT — RECORD_AUDIO 权限请求 +
-       │           SpeechRecognizer + 实时 partial 转写 + RMS 跳动波形
-       │           （没识别服务的设备自动 fallback 到占位文案）★ cycle 0008
-       │
-       └─ 设置 (Settings) ★ cycle 0005 + 0006
-              Provider chips: Anthropic / OpenAI / Custom (OpenAI-compatible)
-              Model | Base URL（按 provider 显隐）| API Key (password)
-              [保存] [测试连接]   DANGER ZONE: 清除所有设置
-              EncryptedSharedPreferences 存 provider + key + model + baseUrl
-       
-                     +──────────────────────+
-                     │  门厅 图鉴 录入 设置  │  ← 浮动控制岛 (Detail 屏隐藏)
-                     +──────────────────────+
+Portal (默认起点)         门厅：ornament + 大字 Treasure + 三连计数 + 4 扇门 + Latest entry
+   ↓ 点扇门 / 控制岛
+Grid                      品类网格：标题 + N ITEMS + 横滚 chips + 2 列卡片
+   ↓ 点卡片 / Latest entry
+Detail (只读)             ←  · (右上 dot 进编辑)
+                          Hero (点翻面，有/无照片不同) + 4 行 hero specs
+                          底部 40dp 拉手 → 上滑 78% 抽屉
+                          抽屉 3 tabs：历史 / 参数 / 影集 (全只读)
+                          ↓ 点右上 ·
+Edit                      ← 单页表单
+                          基础 / 时间 / 标签 / 插画 / 参数(拖动选前 4 hero)
+                          / 历史 / 实拍 / DANGER ZONE 删除
+
+Add (RECORD)              chat-first
+                          Header: RECORD  [conv ▾]   🕐  ⊕  [手动]
+                          Composer 浮在控制岛上方：📷 / 文本 / 🎙 / →
+                              📷 → 系统 picker（先请 READ_MEDIA_IMAGES）
+                              🎙 → SpeechRecognizer 真转写（先请 RECORD_AUDIO）
+                              → → AnthropicClient/OpenAiClient.extractItemDraft
+                          AI 出草稿 → DraftCta 卡片
+                              点 → Preview 屏 9 字段 + confidence dots → 确认
+                              确认 → 写 Room → 跳新 Detail
+                          点 [手动] → 4 品类选择弹层 → CategoryForm
+
+Settings                  Provider chips: Anthropic / OpenAI / Custom
+                          Model | Base URL（按 provider 显隐）| API Key (mask)
+                          [保存] [测试连接]   DANGER ZONE: 清除
+                          EncryptedSharedPreferences 存
 ```
 
-视觉系统：
+控制岛（4 颗胶囊：门厅 / 图鉴 / 录入 / 设置）浮于底部，Detail / Edit 屏隐藏。
 
-- 字体 Cormorant Garamond + Italic / Space Grotesk / JetBrains Mono（都打包）
-- 配色 paper / ink / terra / card / sub / line tokens，浅深双套
-- edge-to-edge + statusBarsPadding，控制岛 navigationBarsPadding
-- 页面转场左右滑（slideIntoContainer Start/End，300ms tween）
-- 11 个博物馆线描插画（10 形状 + Generic 兜底）
+## 视觉系统
 
-数据：
+- 字体：Cormorant Garamond（含 italic）/ Space Grotesk / JetBrains Mono — 全部打包
+- 颜色 token：paper / ink / terra / card / sub / line（浅 + 深双套）
+- edge-to-edge + statusBarsPadding；控制岛 navigationBarsPadding
+- 滑动转场：300ms `slideIntoContainer(Start/End)`
+- 11 个博物馆线描插画（Racket / Camera / Lens / Tripod / Shoes / Car / Laptop / Earbuds / Tablet / Watch / Generic）
+- App icon：纸面背景 + 重笔粗黑环 + 顶/底 paper-color rune + terra 中心 dot 三粒（cycle 0008）
 
-- Room **v5** (cycle 0006 升级)，items 一张表，列含 palette / specs / history / photos 全部 JSON 序列化
-- `Item.specs` 是单列表 `List<HeroSpec>`，前 4 项作 hero（计算属性 `heroSpecs` / `tailSpecs`）
-- `Item` 域模型 + `ItemRepository` (Flow)
-- 8 条种子物品（移植 prototype/data.jsx），覆盖 4 个品类，全部带 history 时间线，photos 默认空
-- 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`（app 私有目录）
-- `fallbackToDestructiveMigration()`（已经 destructive 6 次了 — **cycle 0007 必须切真 migration**）
+## 数据 / AI
 
-## 整体工程
+- Room **v5**，单表 `items`，所有结构化字段 JSON 列（kotlinx-serialization）
+- `Item.specs: List<HeroSpec>` 单列表；前 4 项为 hero（计算属性 `heroSpecs` / `tailSpecs`）
+- 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`
+- 8 条种子物品（移植自 prototype/data.jsx）首启写入
+- ⚠️ **Schema 仍 `fallbackToDestructiveMigration()`** — 已 destructive 8 次，cycle 0009 必须切真 migration
+
+AI:
+- `core/ai/AiClient` interface + `AnthropicClient` / `OpenAiClient`（OpenAI client 同时覆盖兼容端点）
+- 强制 tool-use 结构化输出（fill_item_draft）
+- vision：image base64 块；语言：zh-CN
+- 用户 BYO key，存 `EncryptedSharedPreferences`
+- AI **设备直连 provider**，不走代理（[ADR-0004](docs/adr/0004-byo-ai-key.md)）
+
+## 工程布局
 
 ```
 treasure/
-├── android/                Kotlin + Jetpack Compose（Gradle 8.10.2 + AGP 8.7.2 + Kotlin 2.0.21）
-│   ├── app/                :app — Compose 屏幕 / 导航 / 主题 / 插画
-│   └── core/               :core — domain / Room / Repository / Seed
-├── prototype/              Claude Design 原型（活的视觉规格，可双击 Treasure.html）
-├── docs/                   长期指引（产品 / 架构 / 视觉 / dev-loop / 5 ADRs）
-├── openspec/               变更周期（0001 done, 0002 done）
-├── scripts/                bootstrap.sh / prototype-serve.sh / serve-apk.sh
-├── backend/                FastAPI 同步占位（cycle 0003+）
+├── android/                   Kotlin + Jetpack Compose（Gradle 8.10.2 / AGP 8.7.2 / Kotlin 2.0.21）
+│   ├── app/                   :app — 屏幕 / VM / 主题 / 插画 / voice / data
+│   └── core/                  :core — 域模型 / Room / Repo / Seed / AI clients
+├── prototype/                 Claude Design 原型（活的视觉规格）
+│   ├── project/               原版 8 画板（cycle 0001–0006）
+│   └── add-page-v2/           录入页 v2 设计稿（cycle 0007，HANDOFF.md 解释差异）
+├── docs/                      长期指引（product / architecture / visual-language / dev-loop / 5 ADRs）
+├── openspec/                  变更周期（0001–0008，每个 1 文件夹 3 文档）
+├── scripts/                   bootstrap.sh / prototype-serve.sh / serve-apk.sh
+├── backend/                   FastAPI 占位（cycle 0011+ 才接通）
 ├── README.md
-└── agent.md                这一份
+└── agent.md                   这一份
 ```
 
-## 之前的 polish round（昨天 2026-05-06 末段）
+## Cycle 一览
 
-7 项用户反馈一次过：
+| # | 主要内容 | 状态 |
+|---|---|---|
+| 0001 | MVP：Portal / Grid / Detail，Room 数据层，11 博物馆插画 | done |
+| 0002 | 抽屉（历史/参数/影集）+ 明信片翻面 + 7 项视觉 polish | done |
+| 0003 | 真实照片上传（Photo Picker + Coil + filesDir）+ 抽屉内嵌编辑（concise 版） | done |
+| 0004 | 录入页（4 气泡 + 模板表单 + AI 占位）+ Detail 全字段编辑 | done |
+| 0005 | AI 服务接通（Anthropic + OkHttp）+ 设置页 + 编辑屏重做（→ 单页 Edit） | done |
+| 0006 | OpenAI / Custom provider + specs 统一为单列表（拖动选前 4）+ 编辑点移右上 + 录入外层留空 | done |
+| 0007 | 录入页 v2：chat-first + 草稿预览 + 历史抽屉 + 手动入口 | done |
+| 0008 | 录入页 polish + 真 STT + 权限请求 + app 图标 + 6 项反馈修复 | done |
 
-1. Add → stub（删 AddViewModel/AddScreen/edit 路由）
-2. 顶部 statusBarsPadding，每屏自管 inset；控制岛 navigationBarsPadding
-3. 滑动转场（slideIntoContainer Start/End + 300ms）
-4. Detail 顶部去 delete，下沉到抽屉"设置" tab
-5. 抽屉 peek 降到 40dp，只露拉手
-6. 翻面背面重画（3 张空相框 + × + italic 文案 + 添加占位）
-7. back 按钮换 Canvas 加粗箭头无文字
-8. Grid 副标题简化为 `N ITEMS`
-9. Portal 删 EST 日期条 + 三连计数边框
+详见 [`openspec/`](openspec/) 各 cycle 的 proposal / spec / notes。
 
-加 `git init` + push 到 GitHub。
-
-## 今天的进度（2026-05-07）
-
-**早段 polish**：
-
-- 抽屉高度统一：固定 78% 屏高；tab 切换不再变高；每 tab 内 verticalScroll
-- 全文档刷新（agent.md / openspec/0002 spec+notes / docs/dev-loop.md / README / architecture.md）
-- 推 commit `05e8807` 到 GitHub
-
-**中段 cycle 0003 上线**：
-
-- 真实照片：Photo Picker（`PickVisualMedia`）→ `filesDir/photos/<itemId>/<uuid>.jpg` → Item.photos
-- Coil 渲染缩略图（`AsyncImage`）
-- 抽屉影集 tab 重写：3 列 + tile + 真实照片，长按删（二次确认）
-- 翻面背面：≥1 张显示前 3 张预览，0 张保留空相框设计
-- 正面 hero "0 PHOTOS" → "${N} PHOTOS"
-- 抽屉设置 tab 加 EDIT 区：昵称 / 一句话 / 状态 + 保存按钮（concise 版）
-- DetailViewModel 改 AndroidViewModel；加 `addPhoto` / `removePhoto` / `saveEdits`
-- Schema v3 → v4：Item 加 `photos: List<String>`，`photos_json` 列
-- 加 coil-compose 2.7.0 依赖
-
-**后段 cycle 0004 上线**：
-
-- 录入页换真实现（替换 AddStubScreen）：
-  - 手动模式：4 气泡 + 点开 ModalBottomSheet 弹品类模板表单
-  - AI 模式：聊天骨架 + "coming · 去设置" 占位
-- `CategoryTemplate` 系统：4 个品类各自的 heroSpec 标签预填 + heroVector + palette
-- `CategoryGlyph`: 4 个简单线条图标 (Canvas 自绘)
-- Detail 抽屉 4 tabs 重洗 → 基础 / 参数 / 历史 / 影集（"设置"消失，删除下沉到基础 DANGER ZONE）
-- 全字段编辑：基础 9 字段 / 参数（hero specs + 自由 specs map）/ 历史（增删改）
-- DetailViewModel 简化为统一 `update(Item)` 入口
-
-## 对接给下一个 agent / 新人
+## 对接给下一个 agent
 
 进来按这个顺序读：
 
-1. [`README.md`](README.md) — 60 秒概览
-2. **本文件** — 当前状态
-3. [`docs/dev-loop.md`](docs/dev-loop.md) — 开发循环（构建 / 装机 / vivo 调试）
-4. 浏览器开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) — 视觉规格
-5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
-6. [`docs/adr/`](docs/adr/) — 5 份决策记录
-7. [`openspec/`](openspec/) — 各 cycle 提案 / 规格 / 笔记
+1. **本文件** — 当前状态（你在看）
+2. [`README.md`](README.md) — 60 秒概览 + 关键决策
+3. [`docs/dev-loop.md`](docs/dev-loop.md) — 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
+4. 浏览器开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) — 视觉规格（v1，主体设计）
+5. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) — 录入页 v2 设计稿
+6. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
+7. [`docs/adr/`](docs/adr/) — 5 份决策记录
+8. [`openspec/`](openspec/) — cycle 0001-0008 提案 / 规格 / 笔记
 
-## 下一刀候选（cycle 0005）
+## 下一刀候选（cycle 0009）
 
 按优先级：
 
-1. **AI 服务真接通**（最高优先级，cycle 0004 留下 AI 录入 stub 等着）：
-   - 写 `core/ai/AiClient.kt` interface（`chat` / `visionExtract` / `generateIllustration`）
-   - AnthropicClient 实现（设备直连，遵循 [ADR-0004](docs/adr/0004-byo-ai-key.md)）
-   - 设置页 → 真页面：provider / model / API key 表单，EncryptedSharedPreferences 存 key
-   - Add 的 AI tab 接通：拍照 / 文本 → vision extract → ItemDraft → 跳已预填的手动表单 review → 保存
-2. **真 schema migration** —— cycle 0001-0004 全 destructive。cycle 0005 起必须停手；写 v1 → v4 的 Migration 对象 + MigrationTest；删 `fallbackToDestructiveMigration()`
-3. **全屏看图浏览器** —— 影集 tap → fullscreen + 拖拽 dismiss + 左右翻
-4. **AI 生成博物馆插画** —— 用户新增物品时调 AI 生成符合视觉规则的 SVG，cache 本地；`AiClient.generateIllustration`（依赖 1）
-5. **callout 标注** —— 现有 11 个插画补 `i · pentaprism` / `ii · grip` 那种 Cormorant 斜体标注线（Compose Canvas 里走 `TextMeasurer`）
+1. **真 schema migration**（最高优先级 · 最大欠债）— 已 destructive 8 次，再不做就要丢用户数据
+   - `exportSchema = true`，`schemaLocation = core/schemas/`
+   - 把 v1-v5 schema JSON commit
+   - 写 `MIGRATION_1_2 / 2_3 / 3_4 / 4_5` Migration 对象
+   - 加 `MigrationTest`（Room 提供 `MigrationTestHelper`）
+   - 删 `fallbackToDestructiveMigration()`
+   - 写 ADR-0006 钉死规矩
+2. **历史对话持久化** + **多轮对话**（assistant refine draft）— 录入页两个 stub 接通
+   - 新表 `add_conversations` / `add_messages`（或扩展 items？建议独立表）
+   - 多轮 send：把消息历史一起喂给 AiClient
+3. **拍照**（直调相机）+ **多选照片** — cycle 0003 留下的尾巴
+4. **AI 生成博物馆插画** — `AiClient.generateIllustration` + cache `filesDir/illustrations/<id>.svg`
+5. **全屏看图浏览器** + **callout 文字标注**
 
-我建议 cycle 0005 = (1) + (2) 一并做：AI 接通把"录入 / 设置"屏闭环，schema migration 把数据安全立起来。两件都是债，越早还越便宜。
+强烈建议 cycle 0009 单独做 (1) — migration 是基础设施，混在功能里容易出错。
+
+## 给下一个 agent 的备忘
+
+- 改视觉之前一定先打开 `prototype/project/Treasure.html` + `prototype/add-page-v2/project/Treasure.html` 对照
+- ADR 是钉死的决策。要推翻某个 ADR，写新 ADR 来 supersede 它（cycle 0009 会写 ADR-0006 schema migrations）
+- 一个 cycle 一个文件夹（`openspec/NNNN-*/`），proposal → spec → notes 三件套
+- 任何"日期"在文档里写绝对日期（YYYY-MM-DD），不写"上周"
+- ⚠️ **Schema migration**：cycle 0001-0008 全 `fallbackToDestructiveMigration`。**cycle 0009 起必须切真 migration** —— 用户的录入物品 / 编辑过的 hero specs / 添加的照片都会丢
+- 控制岛在 Detail / Edit 屏隐藏（视觉规格要求）；其它屏显示
+- 字体 / SVG / 历史事件等数据移植参考 `prototype/project/{vectors,data}.jsx`
+- 录入页的具体交互（chat / preview / voice / history）参考 `prototype/add-page-v2/`
+- 真 STT 在国行 ROM（华为 / vivo 部分机型）可能不可用 — 已做 `onUnavailable` fallback，不要去掉
+- AI key 存 EncryptedSharedPreferences；切勿改成 PlainSharedPreferences
 
 ## 历史
 
 | 日期 | 摘要 |
 |---|---|
-| 2026-05-07 | cycle 0004：录入页（气泡 + 模板表单 + AI 占位）+ Detail 全字段编辑 |
+| 2026-05-07 | cycle 0008：录入页 polish + 真 STT + 权限请求 + app 图标 + 6 项反馈修复 |
+| 2026-05-07 | cycle 0007：录入页 v2 — chat-first + 草稿预览 + 历史抽屉 + 手动入口 |
+| 2026-05-07 | cycle 0006：OpenAI/Custom provider + specs 统一为单列表 + 编辑点移右上 + 录入外层留空 |
+| 2026-05-07 | cycle 0005：AI 服务接通 + 编辑屏重做（先在左上点，后改右上） |
+| 2026-05-07 | cycle 0004：录入页（4 气泡 + 模板 + AI 占位）+ Detail 全字段编辑 |
 | 2026-05-07 | cycle 0003：真实照片 + 抽屉内嵌编辑（concise 版） |
 | 2026-05-07 | 抽屉高度统一 + 全文档刷新 |
 | 2026-05-06 | cycle 0002 + 7 项 polish + git push 到 GitHub |
-| 2026-05-06 | cycle 0001：Chunk B 博物馆线描插画（10 形状 + Generic） |
-| 2026-05-06 | cycle 0001：Grid + Nav + Detail + Add/Edit + serialization v2 schema |
-| 2026-05-06 | cycle 0001 开工：工程脚手架 → Portal 视觉 → Room 数据层 |
+| 2026-05-06 | cycle 0001：博物馆插画 + Grid + Nav + Detail + Add/Edit + Schema v2 |
+| 2026-05-06 | cycle 0001：工程脚手架 → Portal 视觉 → Room 数据层 |
 | 2026-05-06 | 项目骨架搭建完成 |
 | 2026-05-06 | Claude Design 导出原型；视觉方向锁定为博物馆图鉴风 |
-
-## 给下一个 agent 的备忘
-
-- 改视觉之前一定先打开 `prototype/project/Treasure.html` 对照
-- ADR 是钉死的决策。要推翻某个 ADR，写新 ADR 来 supersede 它
-- 一个 cycle 一个文件夹（`openspec/NNNN-*/`），一个 cycle 一个改动
-- 任何"日期"在文档里写绝对日期（YYYY-MM-DD），不写"上周"
-- schema 升级：cycle 0001-0002 期间用 `fallbackToDestructiveMigration()`。**cycle 0003 之后必须开始写真 migration**——会有真用户的数据
-- 控制岛在 Detail / Edit 屏隐藏（视觉规格要求）；其它屏显示
-- 字体 / SVG / 历史事件等数据移植参考 `prototype/project/{vectors,data}.jsx`

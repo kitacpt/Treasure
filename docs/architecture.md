@@ -23,13 +23,13 @@ android/
 | UI | `androidx.compose:compose-bom`、`material3`、`activity-compose` | bom 2024.10.01, activity 1.9.3 |
 | 导航 | `androidx.navigation:navigation-compose` | 2.8.4 |
 | 持久化 | `androidx.room:room-runtime` + `room-ktx` + `room-compiler`（KSP） | 2.6.1 |
-| 序列化 | `kotlinx-serialization-json`（palette / hero_specs / specs / history JSON 列） | 1.7.3 |
+| 序列化 | `kotlinx-serialization-json`（palette / specs / history JSON 列） | 1.7.3 |
 | 生命周期 | `androidx.lifecycle:lifecycle-{viewmodel,runtime}-compose` | 2.8.7 |
 | Kotlin / AGP | Kotlin 2.0.21 / AGP 8.7.2 / KSP 2.0.21-1.0.27 | — |
-| 偏好 | （未引）`androidx.datastore:datastore-preferences` | — |
-| 安全存储 | （未引）`androidx.security:security-crypto`（[ADR-0004](adr/0004-byo-ai-key.md) 用） | cycle 0003 |
+| 图片加载 | `io.coil-kt:coil-compose`（cycle 0003 真实照片） | 2.7.0 |
+| 网络 / AI | `com.squareup.okhttp3:okhttp`（手写 Anthropic / OpenAI client，cycle 0005 起） | 4.12.0 |
+| 安全存储 | `androidx.security:security-crypto-ktx`（API key 存储，[ADR-0004](adr/0004-byo-ai-key.md)） | 1.1.0-alpha06 |
 | DI | **不引** Hilt/Koin，手写 ServiceLocator（`TreasureApp`） | — |
-| 网络 / AI client | （未引）cycle 0003 起 | — |
 
 参见 [ADR-0002](adr/0002-jetpack-compose.md) 关于 Compose / Material3 用法。
 
@@ -64,21 +64,29 @@ cycle 0001 的实际链路只到 LocalItemSource。`RemoteItemSource` 在 :core 
 ```
 core/
 ├── domain/
-│   ├── Item.kt                         # 领域模型（不依赖 Room）
+│   ├── Item.kt                         # 领域模型；specs 单列表，前 4 项为 hero（计算属性 heroSpecs / tailSpecs）
 │   ├── Category.kt                     # 4 个 enum：BADMINTON / PHOTO / CARS / TECH
 │   ├── ItemStatus.kt                   # OWNED / PARTED / RENTED
 │   ├── HeroVector.kt                   # 预置插画 enum
 │   ├── HeroSpec.kt                     # @Serializable
 │   └── HistoryEvent.kt                 # @Serializable + HistoryKind enum
+├── ai/
+│   ├── AiClient.kt                     # interface：extractItemDraft(transcript, photo?, category?) → ItemDraft
+│   ├── AnthropicClient.kt              # POST /v1/messages，强制 tool_use=fill_item_draft
+│   ├── OpenAiClient.kt                 # POST /v1/chat/completions，同时覆盖 OpenAI 兼容端点
+│   ├── Prompts.kt                      # 共享 system prompt + tool schema（fill_item_draft）
+│   └── ItemDraft.kt                    # 9 字段草稿 + per-field confidence
 ├── repo/
 │   └── ItemRepository.kt               # interface + RoomItemRepository 实现
 ├── room/
-│   ├── TreasureDatabase.kt             # @Database version=3, fallbackToDestructiveMigration
+│   ├── TreasureDatabase.kt             # @Database version=5, fallbackToDestructiveMigration ⚠️
 │   ├── ItemEntity.kt                   # internal；含 toDomain/fromDomain；JsonCodec object
 │   └── ItemDao.kt                      # observeAll/observeById/count/upsert/deleteById
 └── seed/
     └── SeedItems.kt                    # 8 条 + 真实 history（移植自 prototype/project/data.jsx）
 ```
+
+⚠️ Schema 已 destructive 迁移过 8 次（v1 → v5）。cycle 0009 必须切真 migration（见 agent.md 候选清单）。
 
 简化 vs. 早期设计稿：
 
@@ -91,26 +99,36 @@ core/
 ```
 app/
 ├── MainActivity.kt                     # ComponentActivity + enableEdgeToEdge → TreasureNavHost
-├── TreasureApp.kt                      # Application：构造 ItemRepository + 首启 seed
+├── TreasureApp.kt                      # Application：构造 ItemRepository + SettingsStore + AiClient + 首启 seed
+├── data/
+│   └── SettingsStore.kt                # EncryptedSharedPreferences：provider / model / baseUrl / apiKey
+├── voice/
+│   └── VoiceCapture.kt                 # @Composable 包装 SpeechRecognizer + RECORD_AUDIO 权限 + 不可用回退
 ├── theme/
 │   ├── Theme.kt                        # TreasureTheme + LocalTreasureColors
 │   ├── Color.kt                        # paper / ink / terra / card / sub / line（浅深双套）
 │   └── Type.kt                         # Cormorant / Space Grotesk / JetBrains Mono FontFamily
 ├── ui/
 │   ├── nav/
-│   │   ├── Routes.kt                   # 路由常量（Portal / Grid{cat} / Detail{id} / Add / Settings）
-│   │   └── TreasureNavHost.kt          # NavHost + 滑动转场 + 全局 ControlIsland
-│   ├── portal/
-│   │   ├── PortalRoute.kt              # （PortalScreen 内嵌）
-│   │   ├── PortalScreen.kt
-│   │   └── PortalViewModel.kt          # 聚合 Items → tally / 按品类
-│   ├── grid/
-│   │   ├── GridScreen.kt               # 内含 GridRoute + 品类 chips + 2 列网格
-│   │   └── GridViewModel.kt            # 单品类 items
+│   │   ├── Routes.kt                   # 路由常量（Portal / Grid / Detail / Edit / Add / Settings）
+│   │   └── TreasureNavHost.kt          # NavHost + 滑动转场 + 全局 ControlIsland（Detail/Edit 屏隐藏）
+│   ├── portal/                         # PortalRoute + PortalScreen + PortalViewModel
+│   ├── grid/                           # GridScreen + GridViewModel
 │   ├── detail/
-│   │   ├── DetailScreen.kt             # BottomSheetScaffold + 翻面 + 4-tab 抽屉（设置含删除）
+│   │   ├── DetailScreen.kt             # BottomSheetScaffold + 翻面 + 3-tab 抽屉（只读）+ 右上 · 入 Edit
 │   │   └── DetailViewModel.kt          # observeById + delete
-│   ├── stubs/StubScreens.kt            # AddStub / SettingsStub / DetailStub
+│   ├── edit/
+│   │   ├── EditRoute.kt                # 单页编辑：基础 / 时间 / 标签 / 插画 / 参数(拖动) / 历史 / 实拍 / 删除
+│   │   └── EditViewModel.kt            # 加载 Item → 内存表单 → 保存 / 删除 / 上传照片
+│   ├── add/
+│   │   ├── AddRoute.kt                 # 编排：Chat / Preview 模式 + voice / history / manual 浮层
+│   │   ├── AddChat.kt                  # RECORD header + 浮动 composer + 历史 dropdown + 权限封装
+│   │   ├── AddPreview.kt               # 草稿预览 9 字段 + confidence dots + 确认入库
+│   │   ├── CategoryForm.kt             # 旧手动表单（[手动] 入口仍保留）
+│   │   └── AddViewModel.kt             # 消息流 + sendText / sendPhoto / sendVoice → AiClient → ItemDraft
+│   ├── settings/
+│   │   ├── SettingsRoute.kt            # Provider chips / Model / Base URL / API Key (mask) / 测试连接 / 清除
+│   │   └── SettingsViewModel.kt
 │   └── components/
 │       ├── ControlIsland.kt            # 底部浮动控制岛（4 颗胶囊）
 │       ├── BackArrow.kt                # 手绘加粗 ← 箭头（无文字）
@@ -142,8 +160,9 @@ NavHost (start = "portal")
 ├── "portal"            ─→  PortalRoute
 ├── "grid/{categoryId}" ─→  GridRoute
 ├── "detail/{itemId}"   ─→  DetailRoute
-├── "add"               ─→  AddStubScreen           # cycle 0002 把表单删了
-└── "settings"          ─→  SettingsStubScreen
+├── "edit/{itemId}"     ─→  EditRoute              # cycle 0005，从 Detail 右上 · 进入
+├── "add"               ─→  AddRoute               # cycle 0007 chat-first 重做
+└── "settings"          ─→  SettingsRoute          # cycle 0005 起接 AI 配置
 ```
 
 转场（NavHost 全局）：
@@ -155,7 +174,41 @@ NavHost (start = "portal")
 
 均 300ms tween。
 
-控制岛 4 颗胶囊：门厅 / 图鉴 / 录入 / 设置。"图鉴"按当前路由：在 grid/X 时停留；不在时跳 `grid/photo` 默认。Detail 屏控制岛**隐藏**（视觉规格要求）。
+控制岛 4 颗胶囊：门厅 / 图鉴 / 录入 / 设置。"图鉴"按当前路由：在 grid/X 时停留；不在时跳 `grid/photo` 默认。Detail / Edit 屏控制岛**隐藏**（视觉规格要求 — 这两屏右上角有自己的入口）。
+
+## AI / 录入数据流
+
+```
+AddRoute（chat-first）
+   │
+   ├─ 文本 / 真照片 / 真 STT 转写
+   │       │
+   │       ▼
+   │   AddViewModel.runExtract()
+   │       │
+   │       ▼
+   │   AiClient.extractItemDraft(transcript, photoBytes?, category?)
+   │       │            │
+   │       │            └→ AnthropicClient / OpenAiClient（按 SettingsStore.provider）
+   │       │                  POST + tool_use(fill_item_draft) → JSON 草稿
+   │       ▼
+   │   DraftCta 卡片（chat 内）
+   │
+   ├─ 点 DraftCta → AddPreview（9 字段 + confidence dots）
+   │       │
+   │       ▼
+   │   AddViewModel.commitDraft()
+   │       │
+   │       ▼
+   │   ItemRepository.upsert(Item) → 跳 Detail
+   │
+   └─ 点 [手动] → CategoryForm（4 品类模板）
+           │
+           ▼
+       AddViewModel.saveManual() → ItemRepository.upsert
+```
+
+AI key 通过 `SettingsStore`（EncryptedSharedPreferences）注入到 `AiClient` 的工厂方法（`TreasureApp` 持有）。设备直连 provider，不走代理（[ADR-0004](adr/0004-byo-ai-key.md)）。
 
 ## 状态与事件
 

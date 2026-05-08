@@ -48,7 +48,7 @@ cd android
 ./gradlew :app:assembleDebug
 ```
 
-输出在 `android/app/build/outputs/apk/debug/app-debug.apk`（约 11 MB，debug 签名 → 直接装手机）。
+输出在 `android/app/build/outputs/apk/debug/app-debug.apk`（cycle 0008 ~13 MB，debug 签名 → 直接装手机）。
 
 第一次构建会 download AGP / Kotlin / Compose / Room / KSP 等依赖（~5 min）；后续增量构建 ~10–30s。
 
@@ -124,6 +124,9 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 | 杀进程模拟启动 | `adb shell am force-stop com.treasure` |
 | 清数据回到首次启动 | `adb shell pm clear com.treasure`（会重新 seed） |
 | 截图存到电脑 | `adb exec-out screencap -p > /tmp/shot.png` |
+| 看权限当前状态 | `adb shell dumpsys package com.treasure \| grep -A2 permission` |
+| 撤销某权限模拟拒绝 | `adb shell pm revoke com.treasure android.permission.RECORD_AUDIO` |
+| 授某权限免弹框 | `adb shell pm grant com.treasure android.permission.RECORD_AUDIO` |
 
 ## 编辑器选择（SSH 开发机场景）
 
@@ -141,25 +144,51 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 新装 APK 后这套 smoke test 跑一遍：
 
-1. **冷启动** → Portal 出现，能看到 4 扇门 + 三连计数 + Latest entry
+**浏览路径**
+
+1. **冷启动** → Portal 出现，4 扇门 + 三连计数 + Latest entry
 2. 点一扇门（如"摄影"）→ Grid 出现，能看到 X-T5 / M6 卡片
-3. 点 X-T5 → Detail，能看到博物馆相机线描 + 4 行 hero specs
-4. **点 hero 卡片** → 600ms 翻面 → 看到 3 张空相框 + "尚未收录实拍"
-5. 再点一次 → 翻回正面
-6. **拉底部小条上滑** → 抽屉到 78% 屏高
-7. 切换 4 个 tab：历史 / 参数 / 影集 / 设置 —— 抽屉**高度不变**
-8. 历史 tab 看到时间轴 + ★Δ↻+− 字形
-9. 设置 tab → 删除这件物品 → 弹确认对话框 → 取消（不删）
-10. **back 按钮** → 加粗箭头无文字 → 滑回 Grid
-11. **杀进程**（`adb shell am force-stop com.treasure`）重启 → 数据还在
-12. `adb shell pm clear com.treasure` 重启 → 种子重新写入
+3. 点 X-T5 → Detail，博物馆相机线描 + 4 行 hero specs
+4. **点 hero 卡片** → 600ms 翻面 → 真实照片或"尚未收录实拍"
+5. **拉底部小条上滑** → 抽屉到 78% 屏高，切 3 tab 历史 / 参数 / 影集
+6. **back 按钮** → 加粗箭头无文字 → 滑回 Grid
+
+**编辑路径**
+
+7. Detail 右上 **·** → Edit 单页
+8. 改昵称 / 拖动 spec 改 hero 顺序 / 上传一张实拍 → 保存 → 回 Detail 看更新
+9. DANGER ZONE 删除 → 弹确认 → 取消（不删）
+
+**录入路径**
+
+10. 控制岛 ⊕ 录入 → 看到 **RECORD** header（无 New entry 副标题）
+11. 点 📷 → （首次）弹 READ_MEDIA_IMAGES 权限 → 选一张图 → AI 解析 → 草稿气泡
+12. 点 🎙 → （首次）弹 RECORD_AUDIO 权限 → 同意 → 蒙层 + 波形 + 实时 partial 转写 → tap → 真转写气泡 → AI 再解析
+13. 拒绝麦克风 → 蒙层立即 dismiss，不报错；ROM 没识别服务 → 蒙层秒退 + 占位语音消息
+14. 点草稿气泡 → Preview 9 字段 + confidence dots → 确认 → 跳新 Detail
+15. composer 多行输入 4 行 → 不溢出，不压控制岛胶囊
+16. 头部 🕐 → 历史 dropdown：圆角 + 软阴影 + ✦ ornament + 当前对话右侧 terra dot
+
+**设置 + AI**
+
+17. 控制岛 ⊕ 设置 → 切 Provider chips（Anthropic / OpenAI / Custom）→ 填 Model + Base URL（按 provider 显隐）+ API Key → 保存 → 测试连接（应返回 OK）
+18. 清除 key → 录入页再点 📷 → 草稿不出现，AI 提示未配置
+
+**持久化 / 图标**
+
+19. **杀进程**（`adb shell am force-stop com.treasure`）重启 → 数据还在
+20. 桌面查看图标：纸面 + 重笔黑环 + 顶/底 paper-color rune + terra 中心 dot
+21. `adb shell pm clear com.treasure` 重启 → 种子重新写入（v5 schema，destructive）
 
 ## 常见踩坑
 
 - **build 卡 dl.google.com**：偶尔某个 .aar TLS 抖一下挂掉。删那个目录重试：`rm -rf ~/.gradle/caches/modules-2/files-2.1/<group>/<artifact>/<version>; ./gradlew :app:assembleDebug`
-- **schema 升 v3 后旧装的 app 数据丢了**：cycle 0001-0002 期使用 `fallbackToDestructiveMigration()`。cycle 0003 起需要写真 migration。
+- **schema 升级丢数据**：⚠️ cycle 0001-0008 全程 `fallbackToDestructiveMigration()`，已 destructive 8 次（v1 → v5）。**cycle 0009 必须切真 migration**，否则用户的录入物品 / hero specs / 照片都会丢。
 - **vivo 装非商店 APK 弹安全检测**：每装一次都会弹（"应用未经过 vivo 安全检测"），点继续安装。习惯就好。
 - **覆盖装签名冲突**：debug 签名固定（Android Debug keystore），同包名同签名直接覆盖；除非你换了 keystore（不会发生）
+- **真 STT 在国行 ROM 不可用**：vivo / 华为部分机型没装 Google App，`SpeechRecognizer.isRecognitionAvailable` 返回 false → 走 `onUnavailable` 回退（占位语音消息）。这是预期行为，不要拆掉 fallback。
+- **PickVisualMedia 权限**：理论上不需要 READ_MEDIA_IMAGES（系统 picker），但 vivo / 华为某些 ROM 卡得严，所以仍主动请求一次更稳。拒绝后照样 launch picker —— 让 OS 自己决定。
+- **AI 测试连接超时**：Anthropic / OpenAI 直连国内可能要代理。Custom provider 可以填国内兼容端点（DeepSeek / 月之暗面等 OpenAI 兼容）。Key 存在 `EncryptedSharedPreferences`，`adb shell pm clear` 会清。
 
 ## 推到 GitHub
 

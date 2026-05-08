@@ -10,22 +10,27 @@
 
 新人 / 新一轮 agent 进来按这个顺序读：
 
-1. 浏览器开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) —— 看 8 个画板，理解视觉
-2. [`agent.md`](agent.md) —— 当前状态、做了什么、接下来做啥
-3. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环
-4. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
-5. [`docs/adr/`](docs/adr/) —— 5 份决策记录
-6. [`openspec/`](openspec/) —— 各 cycle 的 proposal / spec / notes
+1. [`agent.md`](agent.md) —— 当前状态、做了什么、接下来做啥（**先读这个**）
+2. 浏览器开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) —— v1 视觉规格（主体设计）
+3. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) —— v2 录入页设计稿
+4. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
+5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
+6. [`docs/adr/`](docs/adr/) —— 5 份决策记录
+7. [`openspec/`](openspec/) —— cycle 0001-0008 的 proposal / spec / notes
 
 ## 当前状态（2026-05-07）
 
-**cycle 0001 + 0002 已落地**。能跑出 v0.5.2 APK，装到 vivo X200 Pro mini 上：
+**cycle 0001 → 0008 全部落地**。v0.11.0 APK（13 MB，debug 签名），装到 vivo X200 Pro mini 上端到端跑通：
 
-- 4 屏导航：Portal · Grid · Detail · Stubs（录入 / 设置）
-- 8 条种子数据（Room v3，从 `prototype/project/data.jsx` 移植）
-- Detail 屏带抽屉（历史 / 参数 / 影集 / 设置 4 tabs）+ 明信片翻面看实拍占位
-- 11 个博物馆线描插画
-- 左右滑动转场、edge-to-edge、控制岛
+- Portal · Grid · Detail · Edit · Add (RECORD) · Settings 全屏导航
+- Detail 抽屉（历史 / 参数 / 影集，全只读）+ 明信片翻面（看实拍）
+- Detail 右上点 → Edit 单页表单（基础 / 时间 / 标签 / 插画 / 参数 / 历史 / 实拍 / 删除）
+- Add (RECORD) chat-first：📷 真照片 + 文本 + 🎙 真 STT (zh-CN) + → AI 解析 → 草稿预览 → 确认入库
+- AI：Anthropic / OpenAI / Custom provider，BYO key 存 EncryptedSharedPreferences
+- 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`（cycle 0003）
+- Schema v5（Room，单表 items + JSON 列）；⚠️ 仍 `fallbackToDestructiveMigration()`
+- 11 个博物馆线描插画 + 自家 LotR 风 app 图标
+- 8 条种子数据（首启写入），edge-to-edge，控制岛在 Detail/Edit 屏隐藏
 
 GitHub：<https://github.com/kitacpt/Treasure>
 
