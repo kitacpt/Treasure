@@ -1,5 +1,8 @@
 package com.treasure.ui.add
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,7 +16,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,16 +42,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.treasure.illust.HeroIllustration
 import com.treasure.theme.LocalTreasureColors
+
+private const val DEFAULT_TITLE = "New entry"
 
 @Composable
 fun AddChat(
@@ -66,6 +76,7 @@ fun AddChat(
     onGoSettings: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
+    val context = LocalContext.current
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -79,6 +90,35 @@ fun AddChat(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri -> if (uri != null) onSendPhoto(uri) }
 
+    val photoPermission = rememberPhotoPermissionName()
+    val photoPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { _ ->
+        // PhotoPicker works whether or not the runtime permission was
+        // granted (the system Picker uses its own privileged process).
+        // We still launch the picker afterward so the user gets through.
+        pickPhoto.launch(
+            PickVisualMediaRequest(
+                ActivityResultContracts.PickVisualMedia.ImageOnly,
+            ),
+        )
+    }
+
+    fun launchPhotoFlow() {
+        if (photoPermission == null ||
+            ContextCompat.checkSelfPermission(context, photoPermission) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pickPhoto.launch(
+                PickVisualMediaRequest(
+                    ActivityResultContracts.PickVisualMedia.ImageOnly,
+                ),
+            )
+        } else {
+            photoPermLauncher.launch(photoPermission)
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             ChatHeader(
@@ -89,16 +129,16 @@ fun AddChat(
                 onTapManual = onOpenManual,
             )
 
-            // Messages list — bottom padding accounts for the composer (about
-            // 64dp tall) + control island room below.
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
                 contentPadding = PaddingValues(
-                    horizontal = 22.dp,
-                    vertical = 18.dp,
+                    start = 22.dp,
+                    end = 22.dp,
+                    top = 18.dp,
+                    bottom = 18.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -114,9 +154,9 @@ fun AddChat(
             }
         }
 
-        // Composer — sits ABOVE the global control island. Control island
-        // lives in TreasureNavHost with `bottom = nav bar + 18dp`; composer
-        // adds another ~64dp on top of that.
+        // Composer floats above the global control island. Control island
+        // sits at navigationBarsPadding + 18dp + ~50dp tall; we sit at
+        // 100dp so we're always at least 32dp clear of its top edge.
         Composer(
             input = input,
             onInputChange = { input = it },
@@ -125,18 +165,12 @@ fun AddChat(
                 onSendText(input)
                 input = ""
             },
-            onTakePhoto = {
-                pickPhoto.launch(
-                    PickVisualMediaRequest(
-                        ActivityResultContracts.PickVisualMedia.ImageOnly,
-                    ),
-                )
-            },
+            onTakePhoto = ::launchPhotoFlow,
             onStartVoice = onStartVoice,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 88.dp, start = 14.dp, end = 14.dp),
+                .padding(bottom = 100.dp, start = 14.dp, end = 14.dp),
         )
 
         if (historyOpen) {
@@ -149,6 +183,21 @@ fun AddChat(
                     onNewChat()
                 },
             )
+        }
+    }
+}
+
+@Composable
+private fun rememberPhotoPermissionName(): String? {
+    return remember {
+        when {
+            // PickVisualMedia handles its own gating on Android 13+, but
+            // many vendor galleries still gate access via this perm.
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+                Manifest.permission.READ_MEDIA_IMAGES
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            else -> null
         }
     }
 }
@@ -172,6 +221,7 @@ private fun ChatHeader(
     onTapManual: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
+    val showSubtitle = title.isNotBlank() && title != DEFAULT_TITLE
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -181,18 +231,22 @@ private fun ChatHeader(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "录入",
-                    color = colors.ink,
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                Spacer(Modifier.width(8.dp))
+            Text(
+                text = "RECORD",
+                color = colors.ink,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = MaterialTheme.typography.labelSmall.fontFamily,
+                    letterSpacing = 4.sp,
+                    fontSize = 22.sp,
+                ),
+            )
+            if (showSubtitle) {
+                Spacer(Modifier.height(2.dp))
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .clickable(onClick = onTapTitle)
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                        .padding(vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -263,7 +317,7 @@ private fun ClockGlyph(color: Color) {
         val cx = w / 2f
         val cy = w / 2f
         val r = w * 0.42f
-        drawCircle(color, radius = r, center = Offset(cx, cy), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx()))
+        drawCircle(color, radius = r, center = Offset(cx, cy), style = Stroke(width = 1.2.dp.toPx()))
         drawLine(color, Offset(cx, cy), Offset(cx, cy - r * 0.55f), strokeWidth = 1.2.dp.toPx())
         drawLine(color, Offset(cx, cy), Offset(cx + r * 0.45f, cy), strokeWidth = 1.2.dp.toPx())
     }
@@ -291,6 +345,11 @@ private fun ManualGlyph(color: Color) {
 
 // ─── history dropdown ─────────────────────────────────────────────────
 
+/**
+ * History menu — a softer card with rounded corners, gentle shadow, and a
+ * tiny ornament header. The previous version was a sharp 2dp-corner panel
+ * that felt too clinical against the museum-paper rest of the app.
+ */
 @Composable
 private fun HistoryDropdown(
     conversations: List<FakeConversation>,
@@ -308,59 +367,127 @@ private fun HistoryDropdown(
         Column(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 60.dp, end = 14.dp)
-                .widthIn(min = 220.dp, max = 260.dp)
-                .clip(RoundedCornerShape(2.dp))
+                .padding(top = 60.dp, end = 14.dp, start = 14.dp)
+                .widthIn(min = 240.dp, max = 290.dp)
+                .shadow(12.dp, RoundedCornerShape(14.dp), clip = false)
+                .clip(RoundedCornerShape(14.dp))
                 .background(colors.paper)
-                .border(0.5.dp, colors.line)
+                .border(0.5.dp, colors.line, RoundedCornerShape(14.dp))
+                .padding(vertical = 14.dp)
                 .clickable(enabled = false) {},
         ) {
-            Text(
-                text = "历史对话",
-                color = colors.sub,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-            )
-            Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
+            HistoryHeader()
+            Spacer(Modifier.height(10.dp))
+            HistoryDivider(colors.line)
             conversations.forEach { c ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(if (c.current) colors.card else Color.Transparent)
-                        .clickable { onPick(c) }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                ) {
-                    Text(
-                        text = c.title,
-                        color = colors.ink,
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        text = c.date + (if (c.current) " · 当前" else ""),
-                        color = colors.sub,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
+                Spacer(Modifier.height(4.dp))
+                HistoryRow(
+                    conv = c,
+                    onClick = { onPick(c) },
+                )
+                Spacer(Modifier.height(4.dp))
+                HistoryDivider(colors.line)
             }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onNewChat)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PlusGlyph(colors.ink)
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = "新对话",
-                    color = colors.ink,
-                    style = MaterialTheme.typography.bodyMedium,
+            Spacer(Modifier.height(6.dp))
+            NewChatRow(onClick = onNewChat)
+        }
+    }
+}
+
+@Composable
+private fun HistoryHeader() {
+    val colors = LocalTreasureColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("✦", color = colors.sub, style = MaterialTheme.typography.labelSmall)
+        Text(
+            text = "RECENT CONVERSATIONS",
+            color = colors.sub,
+            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+        )
+        Box(modifier = Modifier
+            .weight(1f)
+            .height(0.5.dp)
+            .background(colors.line))
+        Text("✦", color = colors.sub, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun HistoryDivider(color: Color) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .height(0.5.dp)
+            .background(color),
+    )
+}
+
+@Composable
+private fun HistoryRow(
+    conv: FakeConversation,
+    onClick: () -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (conv.current) colors.card else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = conv.title,
+                color = colors.ink,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (conv.current) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(colors.terra),
                 )
             }
         }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = conv.date.replace("-", "·"),
+            color = colors.sub,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+@Composable
+private fun NewChatRow(onClick: () -> Unit) {
+    val colors = LocalTreasureColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PlusGlyph(colors.terra)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "新对话",
+            color = colors.terra,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
@@ -594,7 +721,7 @@ private fun Waveform(
     }
 }
 
-// ─── composer + voice overlay ─────────────────────────────────────────
+// ─── composer ─────────────────────────────────────────────────────────
 
 @Composable
 private fun Composer(
@@ -623,7 +750,12 @@ private fun Composer(
             contentAlignment = Alignment.Center,
         ) { CameraGlyph(colors.sub) }
         Spacer(Modifier.width(8.dp))
-        Box(modifier = Modifier.weight(1f).heightIn(min = 28.dp), contentAlignment = Alignment.CenterStart) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 28.dp, max = 96.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
             if (input.isEmpty()) {
                 Text(
                     text = "说说这件东西…",
@@ -635,6 +767,7 @@ private fun Composer(
                 value = input,
                 onValueChange = onInputChange,
                 cursorBrush = SolidColor(colors.terra),
+                maxLines = 4,
                 textStyle = LocalTextStyle.current.copy(
                     color = colors.ink,
                     fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
@@ -672,29 +805,19 @@ private fun CameraGlyph(color: Color) {
         val sw = 1.3.dp.toPx()
         val w = size.width
         val h = size.height
-        // body
-        drawRoundRect(
-            color = Color.Transparent,
-            topLeft = Offset(w * 0.15f, h * 0.30f),
-            size = Size(w * 0.70f, h * 0.55f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx(), 2.dp.toPx()),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(sw),
-        )
         drawRoundRect(
             color = color,
             topLeft = Offset(w * 0.15f, h * 0.30f),
             size = Size(w * 0.70f, h * 0.55f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx(), 2.dp.toPx()),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(sw),
+            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+            style = Stroke(sw),
         )
-        // lens
         drawCircle(
             color = color,
             radius = h * 0.15f,
             center = Offset(w * 0.50f, h * 0.55f),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(sw),
+            style = Stroke(sw),
         )
-        // viewfinder bump
         drawLine(color, Offset(w * 0.35f, h * 0.30f), Offset(w * 0.40f, h * 0.20f), strokeWidth = sw)
         drawLine(color, Offset(w * 0.40f, h * 0.20f), Offset(w * 0.60f, h * 0.20f), strokeWidth = sw)
         drawLine(color, Offset(w * 0.60f, h * 0.20f), Offset(w * 0.65f, h * 0.30f), strokeWidth = sw)
@@ -711,10 +834,9 @@ private fun MicGlyph(color: Color) {
             color = color,
             topLeft = Offset(w * 0.36f, h * 0.14f),
             size = Size(w * 0.28f, h * 0.50f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.14f),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(sw),
+            cornerRadius = CornerRadius(w * 0.14f),
+            style = Stroke(sw),
         )
-        // arc
         drawLine(color, Offset(w * 0.20f, h * 0.50f), Offset(w * 0.20f, h * 0.55f), strokeWidth = sw)
         drawLine(color, Offset(w * 0.80f, h * 0.50f), Offset(w * 0.80f, h * 0.55f), strokeWidth = sw)
         drawLine(color, Offset(w * 0.20f, h * 0.55f), Offset(w * 0.50f, h * 0.78f), strokeWidth = sw)
@@ -732,46 +854,6 @@ private fun ArrowUpGlyph(color: Color) {
         drawLine(color, Offset(w / 2f, h * 0.20f), Offset(w / 2f, h * 0.80f), strokeWidth = sw)
         drawLine(color, Offset(w * 0.25f, h * 0.45f), Offset(w / 2f, h * 0.20f), strokeWidth = sw)
         drawLine(color, Offset(w * 0.75f, h * 0.45f), Offset(w / 2f, h * 0.20f), strokeWidth = sw)
-    }
-}
-
-// ─── voice overlay ────────────────────────────────────────────────────
-
-@Composable
-internal fun VoiceOverlay(onDismiss: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xCC1A1815))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(bottom = 130.dp),
-        ) {
-            Waveform(
-                color = Color(0xFFF4F1EA),
-                bars = listOf(18, 32, 46, 28, 54, 40, 22, 50, 36, 26, 42, 30, 48, 34, 20),
-                modifier = Modifier
-                    .height(60.dp)
-                    .width(140.dp),
-            )
-            Spacer(Modifier.height(22.dp))
-            Text(
-                text = "\"二零二三年情人节，一万二千五…\"",
-                color = Color(0xFFF4F1EA),
-                style = MaterialTheme.typography.titleMedium,
-                fontStyle = FontStyle.Italic,
-                modifier = Modifier.padding(horizontal = 32.dp),
-            )
-            Spacer(Modifier.height(14.dp))
-            Text(
-                text = "松开发送 · TAP TO STOP",
-                color = Color(0xFFF4F1EA).copy(alpha = 0.6f),
-                style = MaterialTheme.typography.labelSmall,
-            )
-        }
     }
 }
 

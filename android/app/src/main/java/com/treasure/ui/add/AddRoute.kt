@@ -34,6 +34,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.treasure.core.domain.Category
 import com.treasure.theme.LocalTreasureColors
+import com.treasure.voice.VoiceCapture
 
 private enum class AddMode { Chat, Preview }
 
@@ -98,10 +99,18 @@ fun AddRoute(
         }
 
         if (voiceOn) {
-            VoiceOverlay(
-                onDismiss = {
+            VoiceCapture(
+                onResult = { transcript ->
                     voiceOn = false
-                    vm.sendVoiceStub()
+                    vm.sendVoice(transcript)
+                },
+                onCancel = { voiceOn = false },
+                onUnavailable = {
+                    // Some Chinese ROMs without Google services have no
+                    // SpeechRecognizer. Fall back so the user still
+                    // gets feedback.
+                    voiceOn = false
+                    vm.sendVoice("（设备未提供语音识别 · 已记录占位语音）")
                 },
             )
         }

@@ -112,14 +112,18 @@ class AddViewModel(
         runExtract(text = "（用户附了一张照片，请识别）", imageUri = uri)
     }
 
-    /** Stub: today the voice overlay is visual; no real STT yet. */
-    fun sendVoiceStub() {
+    /**
+     * Add a voice message — transcript comes from the real
+     * [SpeechRecognizer] now. Falls back to a stub line if the device
+     * has no recognition service or the user simply tapped to dismiss.
+     */
+    fun sendVoice(transcript: String) {
         if (_state.value.busy) return
-        val transcript = "二零二三年情人节，一万二千五"
+        val text = transcript.trim().ifBlank { "（无识别结果）" }
         _state.update {
-            it.copy(messages = it.messages + AddMessage.UserVoice(transcript))
+            it.copy(messages = it.messages + AddMessage.UserVoice(text))
         }
-        runExtract(text = "用户语音：$transcript", imageUri = null)
+        runExtract(text = "用户语音：$text", imageUri = null)
     }
 
     private fun runExtract(text: String, imageUri: Uri?) {

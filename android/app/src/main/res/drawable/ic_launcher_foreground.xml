@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!--
+      Treasure icon — a heavy ink ring on paper, with terra runes carved
+      in. Adaptive-icon safe zone is the inner 72×72 square centred at
+      (54,54); ring outer radius 30 keeps everything inside.
+    -->
+
+    <!-- The ring itself: heavy ink stroke, no fill -->
+    <path
+        android:strokeColor="#1A1815"
+        android:strokeWidth="6"
+        android:fillColor="#00000000"
+        android:pathData="M54,24 a30,30 0 1,0 0,60 a30,30 0 1,0 0,-60" />
+
+    <!-- Inner thin band that suggests the ring's shoulder -->
+    <path
+        android:strokeColor="#1A1815"
+        android:strokeWidth="0.6"
+        android:fillColor="#00000000"
+        android:pathData="M54,29 a25,25 0 1,0 0,50 a25,25 0 1,0 0,-50" />
+
+    <!-- Top inscription rune (paper-coloured, carved INTO the ink band) -->
+    <path
+        android:strokeColor="#F4F1EA"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M48,24 L52,22 L52,26 L56,22 L56,26 L60,24" />
+
+    <!-- Bottom inscription rune -->
+    <path
+        android:strokeColor="#F4F1EA"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M48,84 L52,82 L52,86 L56,82 L56,86 L60,84" />
+
+    <!-- Left + right tick marks on the band -->
+    <path
+        android:strokeColor="#F4F1EA"
+        android:strokeWidth="1"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M22,52 L22,56 M86,52 L86,56" />
+
+    <!-- Centre treasure dot — terra accent -->
+    <path
+        android:fillColor="#8A3A1F"
+        android:pathData="M54,54 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0" />
+
+    <!-- Two small terra inscription dots flanking the centre -->
+    <path
+        android:fillColor="#8A3A1F"
+        android:pathData="M44,54 m-1.1,0 a1.1,1.1 0 1,0 2.2,0 a1.1,1.1 0 1,0 -2.2,0" />
+    <path
+        android:fillColor="#8A3A1F"
+        android:pathData="M64,54 m-1.1,0 a1.1,1.1 0 1,0 2.2,0 a1.1,1.1 0 1,0 -2.2,0" />
+</vector>

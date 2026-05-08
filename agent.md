@@ -4,9 +4,9 @@
 
 ## 今天 (2026-05-07)
 
-**状态：cycle 0001 → 0007 全部落地**
+**状态：cycle 0001 → 0008 全部落地**
 
-最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.10.0，13 MB）
+最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.11.0，13 MB）
 
 GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
 
@@ -53,8 +53,9 @@ GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
        │      ── 实拍 ─── 3 列 + tile + 长按删
        │      ── DANGER ZONE ─── 删除（二次确认）
        │
-       ├─ 录入 (Add)  ★ cycle 0007 chat-first
-       │      Header: 录入  Fujifilm X-T5 ▾    🕐  ⊕  [手动]
+       ├─ 录入 (Add)  ★ cycle 0007 chat-first / 0008 polish
+       │      Header: RECORD                       🕐  ⊕  [手动]
+       │      （副标题 "Fujifilm X-T5 ▾" 仅在出过 AI 草稿后才显示）
        │
        │      Chat 模式（默认）:
        │        助手打招呼 italic serif → 用户输入气泡
@@ -70,7 +71,9 @@ GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
        │        [继续修改] [✓ 确认收入图鉴]
        │        确认 → 写 Room → 跳新 Detail
        │
-       │      VoiceOverlay (点 🎙): 全屏蒙层 + 波形 + italic 转写 stub
+       │      VoiceCapture (点 🎙): 真 STT — RECORD_AUDIO 权限请求 +
+       │           SpeechRecognizer + 实时 partial 转写 + RMS 跳动波形
+       │           （没识别服务的设备自动 fallback 到占位文案）★ cycle 0008
        │
        └─ 设置 (Settings) ★ cycle 0005 + 0006
               Provider chips: Anthropic / OpenAI / Custom (OpenAI-compatible)
