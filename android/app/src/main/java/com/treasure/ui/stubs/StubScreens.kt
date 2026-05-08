@@ -18,12 +18,6 @@ import androidx.compose.ui.unit.dp
 import com.treasure.theme.LocalTreasureColors
 
 @Composable
-fun AddStubScreen() = StubBody(
-    title = "录入",
-    note = "对话式录入 · 拍照 → AI 自动识别 — coming",
-)
-
-@Composable
 fun SettingsStubScreen() = StubBody(
     title = "Settings",
     note = "AI 服务 · BYO API key — coming",

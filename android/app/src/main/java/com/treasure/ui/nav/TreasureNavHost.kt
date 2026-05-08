@@ -19,12 +19,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.treasure.core.domain.Category
+import com.treasure.ui.add.AddRoute
 import com.treasure.ui.components.ControlIsland
 import com.treasure.ui.components.IslandTab
 import com.treasure.ui.detail.DetailRoute
 import com.treasure.ui.grid.GridRoute
 import com.treasure.ui.portal.PortalRoute
-import com.treasure.ui.stubs.AddStubScreen
 import com.treasure.ui.stubs.SettingsStubScreen
 
 private val SlideTween = tween<androidx.compose.ui.unit.IntOffset>(durationMillis = 300)
@@ -76,7 +76,20 @@ fun TreasureNavHost() {
                 )
             }
 
-            composable(Routes.Add) { AddStubScreen() }
+            composable(Routes.Add) {
+                AddRoute(
+                    onSaved = { savedId ->
+                        nav.popBackStack()
+                        nav.navigate(Routes.detail(savedId))
+                    },
+                    onGoSettings = {
+                        nav.navigate(Routes.Settings) {
+                            popUpTo(Routes.Portal) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    },
+                )
+            }
             composable(Routes.Settings) { SettingsStubScreen() }
         }
 

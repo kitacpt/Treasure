@@ -11,6 +11,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,9 +44,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -67,6 +68,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.treasure.core.domain.Category
+import com.treasure.core.domain.HeroSpec
+import com.treasure.core.domain.HeroVector
 import com.treasure.core.domain.HistoryEvent
 import com.treasure.core.domain.HistoryKind
 import com.treasure.core.domain.Item
@@ -86,7 +90,7 @@ fun DetailRoute(
         state = state,
         onBack = onBack,
         onDelete = { vm.delete(onBack) },
-        onSaveEdits = vm::saveEdits,
+        onUpdate = vm::update,
         onAddPhoto = vm::addPhoto,
         onRemovePhoto = vm::removePhoto,
     )
@@ -97,7 +101,7 @@ fun DetailScreen(
     state: DetailUiState,
     onBack: () -> Unit,
     onDelete: () -> Unit,
-    onSaveEdits: (String, String, ItemStatus) -> Unit,
+    onUpdate: (Item) -> Unit,
     onAddPhoto: (android.net.Uri) -> Unit,
     onRemovePhoto: (String) -> Unit,
 ) {
@@ -105,11 +109,7 @@ fun DetailScreen(
     val item = state.item
 
     if (!state.loaded) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(colors.paper),
-        )
+        Box(modifier = Modifier.fillMaxSize().background(colors.paper))
         return
     }
     if (item == null) {
@@ -148,8 +148,8 @@ fun DetailScreen(
         sheetContent = {
             DrawerContent(
                 item = item,
+                onUpdate = onUpdate,
                 onDelete = onDelete,
-                onSaveEdits = onSaveEdits,
                 onAddPhoto = onAddPhoto,
                 onRemovePhoto = onRemovePhoto,
             )
@@ -221,17 +221,12 @@ private fun FlippableHero(item: Item) {
             }
             .clickable { flipped = !flipped },
     ) {
-        if (rotation <= 90f) {
-            HeroFront(item)
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { rotationY = 180f },
-            ) {
-                HeroBack(item)
-            }
-        }
+        if (rotation <= 90f) HeroFront(item)
+        else Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { rotationY = 180f },
+        ) { HeroBack(item) }
     }
 }
 
@@ -245,9 +240,7 @@ private fun HeroFront(item: Item) {
         HeroIllustration(item = item, modifier = Modifier.fillMaxSize())
     }
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(end = 14.dp, bottom = 12.dp),
+        modifier = Modifier.fillMaxSize().padding(end = 14.dp, bottom = 12.dp),
         contentAlignment = Alignment.BottomEnd,
     ) {
         Text(
@@ -261,16 +254,12 @@ private fun HeroFront(item: Item) {
 @Composable
 private fun HeroBack(item: Item) {
     val colors = LocalTreasureColors.current
-    if (item.photos.isEmpty()) {
-        EmptyHeroBack(item)
-        return
-    }
+    if (item.photos.isEmpty()) { EmptyHeroBack(item); return }
     Column(
         modifier = Modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Up to 3 photo previews side-by-side
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item.photos.take(3).forEach { path ->
                 Box(
@@ -342,13 +331,9 @@ private fun EmptyHeroBack(item: Item) {
 private fun EmptyPhotoPlate(modifier: Modifier = Modifier) {
     val colors = LocalTreasureColors.current
     Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val frameW = w * 0.62f
-        val frameH = h * 0.72f
-        val cx = w / 2f
-        val cy = h / 2f
-
+        val w = size.width; val h = size.height
+        val frameW = w * 0.62f; val frameH = h * 0.72f
+        val cx = w / 2f; val cy = h / 2f
         data class Frame(val dx: Float, val dy: Float, val deg: Float, val alpha: Float)
         val frames = listOf(
             Frame(-w * 0.10f,  h * 0.04f, -6f, 0.35f),
@@ -359,31 +344,12 @@ private fun EmptyPhotoPlate(modifier: Modifier = Modifier) {
             val tlx = cx - frameW / 2f + f.dx
             val tly = cy - frameH / 2f + f.dy
             rotate(f.deg, pivot = Offset(tlx + frameW / 2f, tly + frameH / 2f)) {
-                drawRect(
-                    color = colors.card,
-                    topLeft = Offset(tlx, tly),
-                    size = Size(frameW, frameH),
-                )
-                drawRect(
-                    color = colors.ink.copy(alpha = f.alpha),
-                    topLeft = Offset(tlx, tly),
-                    size = Size(frameW, frameH),
-                    style = Stroke(width = 0.8f.dp.toPx()),
-                )
+                drawRect(colors.card, Offset(tlx, tly), Size(frameW, frameH))
+                drawRect(colors.ink.copy(alpha = f.alpha), Offset(tlx, tly), Size(frameW, frameH), style = Stroke(0.8f.dp.toPx()))
                 if (f.alpha >= 0.8f) {
                     val pad = 8.dp.toPx()
-                    drawLine(
-                        color = colors.sub,
-                        start = Offset(tlx + pad, tly + pad),
-                        end = Offset(tlx + frameW - pad, tly + frameH - pad),
-                        strokeWidth = 0.6f.dp.toPx(),
-                    )
-                    drawLine(
-                        color = colors.sub,
-                        start = Offset(tlx + frameW - pad, tly + pad),
-                        end = Offset(tlx + pad, tly + frameH - pad),
-                        strokeWidth = 0.6f.dp.toPx(),
-                    )
+                    drawLine(colors.sub, Offset(tlx + pad, tly + pad), Offset(tlx + frameW - pad, tly + frameH - pad), strokeWidth = 0.6f.dp.toPx())
+                    drawLine(colors.sub, Offset(tlx + frameW - pad, tly + pad), Offset(tlx + pad, tly + frameH - pad), strokeWidth = 0.6f.dp.toPx())
                 }
             }
         }
@@ -393,11 +359,7 @@ private fun EmptyPhotoPlate(modifier: Modifier = Modifier) {
 @Composable
 private fun Title(item: Item) {
     val colors = LocalTreasureColors.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 22.dp),
-    ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
         Text(
             text = "${item.brand} ${item.model}",
             color = colors.ink,
@@ -466,23 +428,21 @@ private fun HeroSpecsTable(item: Item) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = spec.value,
+                    text = spec.value.ifBlank { "—" },
                     color = colors.ink,
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }
             if (idx != item.heroSpecs.lastIndex) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(0.5.dp)
-                        .background(colors.line),
-                )
+                Box(modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(colors.line))
             }
         }
         if (item.heroSpecs.isEmpty()) {
             Text(
-                text = "（暂无关键参数）",
+                text = "（暂无关键参数 · 上滑抽屉 · 参数 tab 添加）",
                 color = colors.sub,
                 style = MaterialTheme.typography.bodyMedium,
                 fontStyle = FontStyle.Italic,
@@ -495,18 +455,18 @@ private fun HeroSpecsTable(item: Item) {
 // ─── Drawer ─────────────────────────────────────────────────────────────────
 
 private enum class DrawerTab(val label: String) {
-    History("历史"), Specs("参数"), Album("影集"), Settings("设置")
+    Basics("基础"), Specs("参数"), History("历史"), Album("影集")
 }
 
 @Composable
 private fun DrawerContent(
     item: Item,
+    onUpdate: (Item) -> Unit,
     onDelete: () -> Unit,
-    onSaveEdits: (String, String, ItemStatus) -> Unit,
     onAddPhoto: (android.net.Uri) -> Unit,
     onRemovePhoto: (String) -> Unit,
 ) {
-    var selected by remember { mutableStateOf(DrawerTab.History) }
+    var selected by remember { mutableStateOf(DrawerTab.Basics) }
     val configuration = LocalConfiguration.current
     val drawerHeight = (configuration.screenHeightDp * 0.78f).dp
 
@@ -515,31 +475,23 @@ private fun DrawerContent(
             .fillMaxWidth()
             .height(drawerHeight),
     ) {
-        TabRow(
+        TabRowBar(
             selected = selected,
             onSelect = { selected = it },
             historyCount = item.history.size,
-            specsCount = item.specs.size,
+            specsCount = item.heroSpecs.size + item.specs.size,
             albumCount = item.photos.size,
         )
         Spacer(Modifier.height(8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-        ) {
+        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             when (selected) {
-                DrawerTab.History  -> HistoryList(item.history)
-                DrawerTab.Specs    -> SpecsList(item.specs)
-                DrawerTab.Album    -> Album(
+                DrawerTab.Basics  -> BasicsTab(item = item, onUpdate = onUpdate, onDelete = onDelete)
+                DrawerTab.Specs   -> SpecsTab(item = item, onUpdate = onUpdate)
+                DrawerTab.History -> HistoryTab(item = item, onUpdate = onUpdate)
+                DrawerTab.Album   -> AlbumTab(
                     photos = item.photos,
                     onAddPhoto = onAddPhoto,
                     onRemovePhoto = onRemovePhoto,
-                )
-                DrawerTab.Settings -> SettingsTab(
-                    item = item,
-                    onSaveEdits = onSaveEdits,
-                    onDelete = onDelete,
                 )
             }
         }
@@ -547,7 +499,7 @@ private fun DrawerContent(
 }
 
 @Composable
-private fun TabRow(
+private fun TabRowBar(
     selected: DrawerTab,
     onSelect: (DrawerTab) -> Unit,
     historyCount: Int,
@@ -561,18 +513,16 @@ private fun TabRow(
             .padding(horizontal = 22.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Tab(DrawerTab.History,  historyCount, selected == DrawerTab.History)  { onSelect(DrawerTab.History)  }
-        Tab(DrawerTab.Specs,    specsCount,   selected == DrawerTab.Specs)    { onSelect(DrawerTab.Specs)    }
-        Tab(DrawerTab.Album,    albumCount,   selected == DrawerTab.Album)    { onSelect(DrawerTab.Album)    }
-        Tab(DrawerTab.Settings, null,         selected == DrawerTab.Settings) { onSelect(DrawerTab.Settings) }
+        Tab(DrawerTab.Basics,  null,         selected == DrawerTab.Basics)  { onSelect(DrawerTab.Basics)  }
+        Tab(DrawerTab.Specs,   specsCount,   selected == DrawerTab.Specs)   { onSelect(DrawerTab.Specs)   }
+        Tab(DrawerTab.History, historyCount, selected == DrawerTab.History) { onSelect(DrawerTab.History) }
+        Tab(DrawerTab.Album,   albumCount,   selected == DrawerTab.Album)   { onSelect(DrawerTab.Album)   }
     }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 22.dp)
-            .height(0.5.dp)
-            .background(colors.line),
-    )
+    Box(modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 22.dp)
+        .height(0.5.dp)
+        .background(colors.line))
 }
 
 @Composable
@@ -600,21 +550,316 @@ private fun Tab(tab: DrawerTab, count: Int?, selected: Boolean, onClick: () -> U
     }
 }
 
+// ─── Tab: 基础 ─────────────────────────────────────────────────────────────
+
 @Composable
-private fun HistoryList(events: List<HistoryEvent>) {
+private fun BasicsTab(
+    item: Item,
+    onUpdate: (Item) -> Unit,
+    onDelete: () -> Unit,
+) {
     val colors = LocalTreasureColors.current
-    if (events.isEmpty()) {
-        Empty("还没有时间轴 · 添加历史 — coming")
-        return
-    }
+    var brand by remember(item.id) { mutableStateOf(item.brand) }
+    var model by remember(item.id) { mutableStateOf(item.model) }
+    var nickname by remember(item.id) { mutableStateOf(item.nickname) }
+    var oneLiner by remember(item.id) { mutableStateOf(item.oneLiner) }
+    var acquired by remember(item.id) { mutableStateOf(item.acquired) }
+    var parted by remember(item.id) { mutableStateOf(item.parted ?: "") }
+    var status by remember(item.id) { mutableStateOf(item.status) }
+    var category by remember(item.id) { mutableStateOf(item.category) }
+    var heroVector by remember(item.id) { mutableStateOf(item.heroVector) }
+    var confirmingDelete by remember { mutableStateOf(false) }
+
+    val dirty = brand != item.brand ||
+        model != item.model ||
+        nickname != item.nickname ||
+        oneLiner != item.oneLiner ||
+        acquired != item.acquired ||
+        parted != (item.parted ?: "") ||
+        status != item.status ||
+        category != item.category ||
+        heroVector != item.heroVector
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp, vertical = 8.dp),
+            .padding(horizontal = 22.dp, vertical = 12.dp),
     ) {
-        events.forEachIndexed { idx, e ->
-            Row(modifier = Modifier.fillMaxWidth()) {
+        SectionLabel("BASICS")
+        Spacer(Modifier.height(8.dp))
+        FormField("品牌 brand",  brand, { brand = it })
+        Spacer(Modifier.height(10.dp))
+        FormField("型号 model",  model, { model = it })
+        Spacer(Modifier.height(10.dp))
+        FormField("昵称",        nickname, { nickname = it })
+        Spacer(Modifier.height(10.dp))
+        FormField("一句话简介",  oneLiner, { oneLiner = it })
+        Spacer(Modifier.height(10.dp))
+        FormField("购入日期 (YYYY-MM-DD)", acquired, { acquired = it })
+        Spacer(Modifier.height(10.dp))
+        FormField("出手日期 (YYYY-MM-DD · 没出手就空着)", parted, { parted = it })
+
+        Spacer(Modifier.height(20.dp))
+        SectionLabel("STATUS")
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FormChip("Owned",  status == ItemStatus.OWNED)  { status = ItemStatus.OWNED }
+            FormChip("Parted", status == ItemStatus.PARTED) { status = ItemStatus.PARTED }
+            FormChip("Rented", status == ItemStatus.RENTED) { status = ItemStatus.RENTED }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SectionLabel("CATEGORY")
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Category.entries.forEach { c ->
+                FormChip(c.nameZh, category == c) { category = c }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SectionLabel("HERO ILLUSTRATION")
+        // Compact picker: a horizontal scroll of small previews would be nicer,
+        // but for a "concise" edit a chip per option keeps the surface small.
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val rows = HeroVector.entries.chunked(4)
+            rows.forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { v ->
+                        FormChip(
+                            label = v.name.lowercase().replace('_', ' '),
+                            selected = heroVector == v,
+                        ) { heroVector = v }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SaveButton(dirty = dirty) {
+            onUpdate(item.copy(
+                brand = brand.trim(),
+                model = model.trim(),
+                nickname = nickname.trim(),
+                oneLiner = oneLiner.trim(),
+                acquired = acquired.trim(),
+                parted = parted.trim().ifBlank { null },
+                status = status,
+                category = category,
+                heroVector = heroVector,
+            ))
+        }
+
+        Spacer(Modifier.height(36.dp))
+        SectionLabel("DANGER ZONE")
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(2.dp))
+                .border(0.5.dp, colors.line)
+                .clickable { confirmingDelete = true }
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "删除这件物品",
+                color = colors.terra,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Text(text = "→", color = colors.terra, style = MaterialTheme.typography.bodyLarge)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "记录会从图鉴里移除，不可恢复",
+            color = colors.sub,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.height(40.dp))
+    }
+
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("确认删除？") },
+            text = { Text("这件物品的所有记录会被清除，无法恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingDelete = false
+                    onDelete()
+                }) { Text("删除", color = colors.terra) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = false }) { Text("取消") }
+            },
+            containerColor = colors.paper,
+            titleContentColor = colors.ink,
+            textContentColor = colors.sub,
+        )
+    }
+}
+
+// ─── Tab: 参数 ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun SpecsTab(item: Item, onUpdate: (Item) -> Unit) {
+    val colors = LocalTreasureColors.current
+    val heroSpecs = remember(item.id) {
+        mutableStateListOf<HeroSpec>().apply {
+            addAll(item.heroSpecs.ifEmpty { List(4) { HeroSpec("", "") } })
+        }
+    }
+    val specRows = remember(item.id) {
+        mutableStateListOf<Pair<String, String>>().apply {
+            addAll(item.specs.toList())
+        }
+    }
+
+    val dirty = heroSpecs.toList() != normalizedHeroSpecs(item.heroSpecs) ||
+        specRows.toList() != item.specs.toList()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+    ) {
+        SectionLabel("HERO SPECS · 顶部展示的关键 4 行")
+        Spacer(Modifier.height(8.dp))
+        heroSpecs.forEachIndexed { i, spec ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FormField(
+                    placeholder = "Label",
+                    value = spec.label,
+                    onValueChange = { heroSpecs[i] = HeroSpec(it, spec.value) },
+                    modifier = Modifier.weight(1f),
+                )
+                FormField(
+                    placeholder = "Value",
+                    value = spec.value,
+                    onValueChange = { heroSpecs[i] = HeroSpec(spec.label, it) },
+                    modifier = Modifier.weight(1.4f),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SectionLabel("SPECS · 完整参数表")
+        Spacer(Modifier.height(8.dp))
+        if (specRows.isEmpty()) {
+            Text(
+                text = "还没有完整参数 · 点 + 加一行",
+                color = colors.sub,
+                style = MaterialTheme.typography.bodyMedium,
+                fontStyle = FontStyle.Italic,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        }
+        specRows.forEachIndexed { i, (k, v) ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FormField(
+                    placeholder = "Key",
+                    value = k,
+                    onValueChange = { specRows[i] = it to v },
+                    modifier = Modifier.weight(1f),
+                )
+                FormField(
+                    placeholder = "Value",
+                    value = v,
+                    onValueChange = { specRows[i] = k to it },
+                    modifier = Modifier.weight(1.4f),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .border(0.5.dp, colors.line)
+                        .clickable { specRows.removeAt(i) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("−", color = colors.sub, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(2.dp))
+                .border(0.5.dp, colors.terra.copy(alpha = 0.6f))
+                .clickable { specRows.add("" to "") }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("+ 加一行", color = colors.terra, style = MaterialTheme.typography.bodyMedium)
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SaveButton(dirty = dirty) {
+            onUpdate(item.copy(
+                heroSpecs = heroSpecs.toList()
+                    .filter { it.label.isNotBlank() || it.value.isNotBlank() },
+                specs = specRows.toList()
+                    .filter { (k, _) -> k.isNotBlank() }
+                    .associate { (k, v) -> k.trim() to v.trim() },
+            ))
+        }
+        Spacer(Modifier.height(40.dp))
+    }
+}
+
+// ─── Tab: 历史 ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun HistoryTab(item: Item, onUpdate: (Item) -> Unit) {
+    val colors = LocalTreasureColors.current
+    var editing by remember { mutableStateOf<HistoryEditTarget?>(null) }
+    var deleting by remember { mutableStateOf<Int?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(2.dp))
+                .border(0.5.dp, colors.terra.copy(alpha = 0.6f))
+                .clickable { editing = HistoryEditTarget.New }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("+ 加一条历史", color = colors.terra, style = MaterialTheme.typography.bodyMedium)
+        }
+        Spacer(Modifier.height(16.dp))
+
+        if (item.history.isEmpty()) {
+            Text(
+                text = "还没有时间轴 · 点上面 + 添加",
+                color = colors.sub,
+                style = MaterialTheme.typography.bodyMedium,
+                fontStyle = FontStyle.Italic,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        }
+
+        item.history.forEachIndexed { idx, e ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInput(idx) {
+                        detectTapGestures(
+                            onTap = { editing = HistoryEditTarget.Existing(idx) },
+                            onLongPress = { deleting = idx },
+                        )
+                    },
+            ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(end = 14.dp),
@@ -638,14 +883,12 @@ private fun HistoryList(events: List<HistoryEvent>) {
                             modifier = Modifier.padding(horizontal = 4.dp),
                         )
                     }
-                    if (idx != events.lastIndex) {
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 4.dp)
-                                .height(36.dp)
-                                .width(0.5.dp)
-                                .background(colors.line),
-                        )
+                    if (idx != item.history.lastIndex) {
+                        Box(modifier = Modifier
+                            .padding(top = 4.dp)
+                            .height(36.dp)
+                            .width(0.5.dp)
+                            .background(colors.line))
                     }
                 }
                 Column(modifier = Modifier.padding(bottom = 18.dp).weight(1f)) {
@@ -663,7 +906,111 @@ private fun HistoryList(events: List<HistoryEvent>) {
                 }
             }
         }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "tap 编辑 · 长按删除",
+            color = colors.sub.copy(alpha = 0.7f),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.height(40.dp))
     }
+
+    editing?.let { target ->
+        val initial: HistoryEvent = when (target) {
+            HistoryEditTarget.New -> HistoryEvent(
+                date = java.time.LocalDate.now().toString(),
+                kind = HistoryKind.MILESTONE,
+                title = "",
+                note = "",
+            )
+            is HistoryEditTarget.Existing -> item.history[target.index]
+        }
+        HistoryEditDialog(
+            initial = initial,
+            onCancel = { editing = null },
+            onSave = { e ->
+                val updated = when (target) {
+                    HistoryEditTarget.New -> item.history + e
+                    is HistoryEditTarget.Existing ->
+                        item.history.toMutableList().also { it[target.index] = e }
+                }
+                onUpdate(item.copy(history = updated.sortedBy { it.date }))
+                editing = null
+            },
+        )
+    }
+
+    deleting?.let { idx ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("删除这条历史？") },
+            text = { Text(item.history[idx].title) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val newHistory = item.history.toMutableList().also { it.removeAt(idx) }
+                    onUpdate(item.copy(history = newHistory))
+                    deleting = null
+                }) { Text("删除", color = colors.terra) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = null }) { Text("取消") }
+            },
+            containerColor = colors.paper,
+            titleContentColor = colors.ink,
+            textContentColor = colors.sub,
+        )
+    }
+}
+
+private sealed interface HistoryEditTarget {
+    data object New : HistoryEditTarget
+    data class Existing(val index: Int) : HistoryEditTarget
+}
+
+@Composable
+private fun HistoryEditDialog(
+    initial: HistoryEvent,
+    onCancel: () -> Unit,
+    onSave: (HistoryEvent) -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    var date by remember { mutableStateOf(initial.date) }
+    var kind by remember { mutableStateOf(initial.kind) }
+    var title by remember { mutableStateOf(initial.title) }
+    var note by remember { mutableStateOf(initial.note) }
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(if (initial.title.isBlank()) "新增历史" else "编辑历史") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                FormField("日期 (YYYY-MM-DD)", date, { date = it })
+                Text("KIND", color = colors.sub, style = MaterialTheme.typography.labelSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HistoryKind.entries.forEach { k ->
+                        FormChip(
+                            label = "${kindGlyph(k)} ${k.name.lowercase()}",
+                            selected = kind == k,
+                        ) { kind = k }
+                    }
+                }
+                FormField("标题",  title, { title = it })
+                FormField("备注", note, { note = it })
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(HistoryEvent(date.trim(), kind, title.trim(), note.trim())) },
+                enabled = title.isNotBlank() && date.isNotBlank(),
+            ) { Text("保存", color = colors.terra) }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("取消") }
+        },
+        containerColor = colors.paper,
+        titleContentColor = colors.ink,
+        textContentColor = colors.sub,
+    )
 }
 
 private fun kindGlyph(kind: HistoryKind): String = when (kind) {
@@ -685,53 +1032,10 @@ private fun kindColor(
     HistoryKind.PARTED    -> colors.sub
 }
 
-@Composable
-private fun SpecsList(specs: Map<String, String>) {
-    val colors = LocalTreasureColors.current
-    if (specs.isEmpty()) {
-        Empty("（暂无完整参数）")
-        return
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp),
-    ) {
-        specs.entries.forEachIndexed { idx, (key, value) ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Text(
-                    text = key,
-                    color = colors.sub,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = value,
-                    color = colors.ink,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1.6f),
-                )
-            }
-            if (idx != specs.size - 1) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(0.5.dp)
-                        .background(colors.line),
-                )
-            }
-        }
-    }
-}
+// ─── Tab: 影集 ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun Album(
+private fun AlbumTab(
     photos: List<String>,
     onAddPhoto: (android.net.Uri) -> Unit,
     onRemovePhoto: (String) -> Unit,
@@ -754,7 +1058,6 @@ private fun Album(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) {
-            // First tile: + add
             item {
                 Box(
                     modifier = Modifier
@@ -777,7 +1080,6 @@ private fun Album(
                     )
                 }
             }
-            // Photo tiles
             itemsIndexed(photos, key = { _, path -> path }) { _, path ->
                 Box(
                     modifier = Modifier
@@ -785,9 +1087,7 @@ private fun Album(
                         .background(colors.card)
                         .border(0.5.dp, colors.line)
                         .pointerInput(path) {
-                            detectTapGestures(
-                                onLongPress = { pendingDelete = path },
-                            )
+                            detectTapGestures(onLongPress = { pendingDelete = path })
                         },
                 ) {
                     AsyncImage(
@@ -829,158 +1129,59 @@ private fun Album(
     }
 }
 
-@Composable
-private fun SettingsTab(
-    item: Item,
-    onSaveEdits: (String, String, ItemStatus) -> Unit,
-    onDelete: () -> Unit,
-) {
-    val colors = LocalTreasureColors.current
-    var nickname by remember(item.id) { mutableStateOf(item.nickname) }
-    var oneLiner by remember(item.id) { mutableStateOf(item.oneLiner) }
-    var status by remember(item.id) { mutableStateOf(item.status) }
-    val dirty = nickname != item.nickname ||
-        oneLiner != item.oneLiner ||
-        status != item.status
-
-    var confirmingDelete by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp, vertical = 12.dp),
-    ) {
-        // ── EDIT ──────────────────────────────────────────────────────
-        Text("EDIT", color = colors.sub, style = MaterialTheme.typography.labelSmall)
-        Spacer(Modifier.height(10.dp))
-
-        FieldLabel("昵称")
-        InlineTextField(value = nickname, onValueChange = { nickname = it })
-        Spacer(Modifier.height(12.dp))
-
-        FieldLabel("一句话简介")
-        InlineTextField(value = oneLiner, onValueChange = { oneLiner = it })
-        Spacer(Modifier.height(12.dp))
-
-        FieldLabel("状态")
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            StatusChip("Owned",  status == ItemStatus.OWNED)  { status = ItemStatus.OWNED }
-            StatusChip("Parted", status == ItemStatus.PARTED) { status = ItemStatus.PARTED }
-            StatusChip("Rented", status == ItemStatus.RENTED) { status = ItemStatus.RENTED }
-        }
-        Spacer(Modifier.height(16.dp))
-
-        // Save button
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(2.dp))
-                .background(if (dirty) colors.ink else colors.card)
-                .border(0.5.dp, if (dirty) colors.ink else colors.line)
-                .clickable(enabled = dirty) {
-                    onSaveEdits(nickname, oneLiner, status)
-                }
-                .padding(vertical = 14.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = if (dirty) "保存修改" else "未变动",
-                color = if (dirty) colors.paper else colors.sub,
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        }
-
-        Spacer(Modifier.height(28.dp))
-
-        // ── MANAGE ────────────────────────────────────────────────────
-        Text("MANAGE", color = colors.sub, style = MaterialTheme.typography.labelSmall)
-        Spacer(Modifier.height(10.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(2.dp))
-                .border(0.5.dp, colors.line)
-                .clickable { confirmingDelete = true }
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "删除这件物品",
-                color = colors.terra,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f),
-            )
-            Text(text = "→", color = colors.terra, style = MaterialTheme.typography.bodyLarge)
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "记录会从图鉴里移除，不可恢复",
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-        )
-        Spacer(Modifier.height(24.dp))
-    }
-
-    if (confirmingDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text("确认删除？") },
-            text = { Text("这件物品的所有记录会被清除，无法恢复。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmingDelete = false
-                    onDelete()
-                }) { Text("删除", color = colors.terra) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingDelete = false }) { Text("取消") }
-            },
-            containerColor = colors.paper,
-            titleContentColor = colors.ink,
-            textContentColor = colors.sub,
-        )
-    }
-}
+// ─── Shared helpers ────────────────────────────────────────────────────────
 
 @Composable
-private fun FieldLabel(text: String) {
+private fun SectionLabel(text: String) {
     val colors = LocalTreasureColors.current
     Text(
         text = text,
         color = colors.sub,
         style = MaterialTheme.typography.labelSmall,
-        modifier = Modifier.padding(bottom = 4.dp),
     )
 }
 
 @Composable
-private fun InlineTextField(value: String, onValueChange: (String) -> Unit) {
+private fun FormField(
+    placeholder: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalTreasureColors.current
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(colors.card)
-            .border(0.5.dp, colors.line)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-    ) {
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            cursorBrush = SolidColor(colors.terra),
-            textStyle = LocalTextStyle.current.copy(
-                color = colors.ink,
-                fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
-                fontSize = MaterialTheme.typography.bodyLarge.fontSize,
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        )
+    Column(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.card)
+                .border(0.5.dp, colors.line)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+        ) {
+            if (value.isEmpty()) {
+                Text(
+                    text = placeholder,
+                    color = colors.sub.copy(alpha = 0.5f),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                cursorBrush = SolidColor(colors.terra),
+                textStyle = LocalTextStyle.current.copy(
+                    color = colors.ink,
+                    fontFamily = MaterialTheme.typography.bodyMedium.fontFamily,
+                    fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
 @Composable
-private fun StatusChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun FormChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val colors = LocalTreasureColors.current
     val bg = if (selected) colors.ink else androidx.compose.ui.graphics.Color.Transparent
     val fg = if (selected) colors.paper else colors.ink
@@ -991,26 +1192,33 @@ private fun StatusChip(label: String, selected: Boolean, onClick: () -> Unit) {
             .background(bg)
             .border(0.5.dp, border, RoundedCornerShape(999.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 7.dp),
     ) {
         Text(label, color = fg, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
-private fun Empty(text: String) {
+private fun SaveButton(dirty: Boolean, onSave: () -> Unit) {
     val colors = LocalTreasureColors.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(40.dp),
+            .clip(RoundedCornerShape(2.dp))
+            .background(if (dirty) colors.ink else colors.card)
+            .border(0.5.dp, if (dirty) colors.ink else colors.line)
+            .clickable(enabled = dirty, onClick = onSave)
+            .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = text,
-            color = colors.sub,
-            style = MaterialTheme.typography.bodyMedium,
-            fontStyle = FontStyle.Italic,
+            text = if (dirty) "保存修改" else "未变动",
+            color = if (dirty) colors.paper else colors.sub,
+            style = MaterialTheme.typography.bodyLarge,
         )
     }
 }
+
+private fun normalizedHeroSpecs(input: List<HeroSpec>): List<HeroSpec> =
+    if (input.isNotEmpty()) input
+    else List(4) { HeroSpec("", "") }

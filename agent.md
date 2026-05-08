@@ -4,9 +4,9 @@
 
 ## 今天 (2026-05-07)
 
-**状态：cycle 0001 + 0002 + 0003 已落地**
+**状态：cycle 0001 + 0002 + 0003 + 0004 全部落地**
 
-最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.6.0，12 MB）
+最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.7.0，12 MB）
 
 GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
 
@@ -26,7 +26,7 @@ GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
        │      2 列卡片网格，hero 缩略
        │      点卡片 → Detail
        │
-       ├─ Detail (详情) ★ cycle 0002 + 0003 主体
+       ├─ Detail (详情) ★ cycle 0002 + 0003 + 0004
        │      back 加粗箭头 + 标题
        │      ▽ Hero 卡片：博物馆线描；点击翻面：
        │          0 张照片 → 3 张空相框 + × + "上滑抽屉 · 影集 tab 添加"
@@ -34,15 +34,19 @@ GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
        │        正面右下角 "${N} PHOTOS · TAP TO FLIP" 角标
        │      ▽ 4 行 hero specs
        │      ▽ 底部 40dp 拉手 (peek 只露拉手)
-       │      ▽ 上滑展开抽屉 (78% 屏高，tab 切换不变高):
-       │          历史 (timeline + kind 字形 + ★Δ↻+−)
-       │          参数 (specs key-value)
-       │          影集 (3 列网格：+ tile + 真实照片，长按删) ★ cycle 0003
-       │          设置:
-       │            EDIT 区：昵称 / 一句话 / 状态 + 保存修改  ★ cycle 0003
-       │            MANAGE 区：删除（二次确认）
+       │      ▽ 上滑展开抽屉 (78% 屏高，tab 切换不变高):  ★ cycle 0004 全字段编辑
+       │          基础  brand/model/nickname/oneLiner/acquired/parted/status/category/heroVector
+       │                + DANGER ZONE (删除，二次确认)
+       │          参数  hero_specs 4 行 + specs map (任意行 + / − )
+       │          历史  时间轴 + 顶部 + 加一条 + tap 编辑 / 长按删除
+       │          影集  3 列 + tile + 真实照片，长按删 ★ cycle 0003
        │
-       ├─ 录入 stub      "对话式录入 · 拍照 → AI 自动识别 — coming"
+       ├─ 录入 (Add)  ★ cycle 0004
+       │      Header: Treasure / NEW ENTRY
+       │      模式 chips: 手动 / AI
+       │      手动 → 4 气泡浮动 (badminton/photo/cars/tech) → 点开 → ModalBottomSheet
+       │              品类模板表单 (heroSpec 标签预填) → 保存 → 跳新 Detail
+       │      AI    → 聊天骨架 + "AI 录入 — coming · 去设置" 占位
        └─ 设置 stub       "AI 服务 · BYO API key — coming"
        
                      +──────────────────────+
@@ -106,17 +110,28 @@ treasure/
 - 全文档刷新（agent.md / openspec/0002 spec+notes / docs/dev-loop.md / README / architecture.md）
 - 推 commit `05e8807` 到 GitHub
 
-**后段 cycle 0003 上线**：
+**中段 cycle 0003 上线**：
 
 - 真实照片：Photo Picker（`PickVisualMedia`）→ `filesDir/photos/<itemId>/<uuid>.jpg` → Item.photos
 - Coil 渲染缩略图（`AsyncImage`）
 - 抽屉影集 tab 重写：3 列 + tile + 真实照片，长按删（二次确认）
 - 翻面背面：≥1 张显示前 3 张预览，0 张保留空相框设计
 - 正面 hero "0 PHOTOS" → "${N} PHOTOS"
-- 抽屉设置 tab 加 EDIT 区：昵称 / 一句话 / 状态 + 保存按钮（dirty 启用）
+- 抽屉设置 tab 加 EDIT 区：昵称 / 一句话 / 状态 + 保存按钮（concise 版）
 - DetailViewModel 改 AndroidViewModel；加 `addPhoto` / `removePhoto` / `saveEdits`
 - Schema v3 → v4：Item 加 `photos: List<String>`，`photos_json` 列
 - 加 coil-compose 2.7.0 依赖
+
+**后段 cycle 0004 上线**：
+
+- 录入页换真实现（替换 AddStubScreen）：
+  - 手动模式：4 气泡 + 点开 ModalBottomSheet 弹品类模板表单
+  - AI 模式：聊天骨架 + "coming · 去设置" 占位
+- `CategoryTemplate` 系统：4 个品类各自的 heroSpec 标签预填 + heroVector + palette
+- `CategoryGlyph`: 4 个简单线条图标 (Canvas 自绘)
+- Detail 抽屉 4 tabs 重洗 → 基础 / 参数 / 历史 / 影集（"设置"消失，删除下沉到基础 DANGER ZONE）
+- 全字段编辑：基础 9 字段 / 参数（hero specs + 自由 specs map）/ 历史（增删改）
+- DetailViewModel 简化为统一 `update(Item)` 入口
 
 ## 对接给下一个 agent / 新人
 
@@ -130,22 +145,29 @@ treasure/
 6. [`docs/adr/`](docs/adr/) — 5 份决策记录
 7. [`openspec/`](openspec/) — 各 cycle 提案 / 规格 / 笔记
 
-## 下一刀候选（cycle 0004）
+## 下一刀候选（cycle 0005）
 
 按优先级：
 
-1. **设置页 AI 服务**（`SettingsStubScreen` → 真页面）+ **Add stub 接通**：BYO key 表单（Anthropic / OpenAI / 自定义 endpoint），EncryptedSharedPreferences；写 `core/ai/AiClient.kt` interface + 一个 Anthropic 实现；Add 屏拍照 / 选图 → AI vision extract → 字段自动填
-2. **AI 生成博物馆插画** —— 用户新增物品时调 AI 生成符合视觉规则的 SVG，cache 本地；`AiClient.generateIllustration`
-3. **全屏看图浏览器** —— 影集 tap → fullscreen + 拖拽 dismiss
-4. **真 schema migration** —— cycle 0001-0003 全靠 `fallbackToDestructiveMigration`，cycle 0004 之后必须停手
+1. **AI 服务真接通**（最高优先级，cycle 0004 留下 AI 录入 stub 等着）：
+   - 写 `core/ai/AiClient.kt` interface（`chat` / `visionExtract` / `generateIllustration`）
+   - AnthropicClient 实现（设备直连，遵循 [ADR-0004](docs/adr/0004-byo-ai-key.md)）
+   - 设置页 → 真页面：provider / model / API key 表单，EncryptedSharedPreferences 存 key
+   - Add 的 AI tab 接通：拍照 / 文本 → vision extract → ItemDraft → 跳已预填的手动表单 review → 保存
+2. **真 schema migration** —— cycle 0001-0004 全 destructive。cycle 0005 起必须停手；写 v1 → v4 的 Migration 对象 + MigrationTest；删 `fallbackToDestructiveMigration()`
+3. **全屏看图浏览器** —— 影集 tap → fullscreen + 拖拽 dismiss + 左右翻
+4. **AI 生成博物馆插画** —— 用户新增物品时调 AI 生成符合视觉规则的 SVG，cache 本地；`AiClient.generateIllustration`（依赖 1）
 5. **callout 标注** —— 现有 11 个插画补 `i · pentaprism` / `ii · grip` 那种 Cormorant 斜体标注线（Compose Canvas 里走 `TextMeasurer`）
+
+我建议 cycle 0005 = (1) + (2) 一并做：AI 接通把"录入 / 设置"屏闭环，schema migration 把数据安全立起来。两件都是债，越早还越便宜。
 
 ## 历史
 
 | 日期 | 摘要 |
 |---|---|
-| 2026-05-07 | cycle 0003：真实照片 + 抽屉内嵌编辑（本次后段） |
-| 2026-05-07 | 抽屉高度统一 + 全文档刷新（本次前段） |
+| 2026-05-07 | cycle 0004：录入页（气泡 + 模板表单 + AI 占位）+ Detail 全字段编辑 |
+| 2026-05-07 | cycle 0003：真实照片 + 抽屉内嵌编辑（concise 版） |
+| 2026-05-07 | 抽屉高度统一 + 全文档刷新 |
 | 2026-05-06 | cycle 0002 + 7 项 polish + git push 到 GitHub |
 | 2026-05-06 | cycle 0001：Chunk B 博物馆线描插画（10 形状 + Generic） |
 | 2026-05-06 | cycle 0001：Grid + Nav + Detail + Add/Edit + serialization v2 schema |

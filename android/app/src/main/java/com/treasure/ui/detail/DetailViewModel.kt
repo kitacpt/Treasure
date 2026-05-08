@@ -47,16 +47,10 @@ class DetailViewModel(
         }
     }
 
-    /** Save inline edits from the drawer's settings tab. */
-    fun saveEdits(nickname: String, oneLiner: String, status: ItemStatus) {
+    /** Persist any user-edited copy of the current item back to Room. */
+    fun update(updated: Item) {
         viewModelScope.launch {
-            val item = state.value.item ?: return@launch
-            repo.upsert(item.copy(
-                nickname = nickname.trim(),
-                oneLiner = oneLiner.trim(),
-                status = status,
-                updatedAt = System.currentTimeMillis(),
-            ))
+            repo.upsert(updated.copy(updatedAt = System.currentTimeMillis()))
         }
     }
 
