@@ -166,8 +166,8 @@ private fun TopBar(onBack: () -> Unit, onEdit: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BackArrow(color = colors.ink, onClick = onBack)
-        DotButton(color = colors.terra, onClick = onEdit)
         Spacer(Modifier.weight(1f))
+        DotButton(color = colors.terra, onClick = onEdit)
     }
 }
 
@@ -403,7 +403,7 @@ private fun HeroSpecsTable(item: Item) {
         }
         if (item.heroSpecs.isEmpty()) {
             Text(
-                text = "（暂无关键参数 · 点左上 · 编辑）",
+                text = "（暂无关键参数 · 点右上 · 编辑添加）",
                 color = colors.sub,
                 style = MaterialTheme.typography.bodyMedium,
                 fontStyle = FontStyle.Italic,
@@ -434,7 +434,7 @@ private fun DrawerContent(item: Item) {
             selected = selected,
             onSelect = { selected = it },
             historyCount = item.history.size,
-            specsCount = item.heroSpecs.count { it.label.isNotBlank() } + item.specs.size,
+            specsCount = item.specs.count { it.label.isNotBlank() },
             albumCount = item.photos.size,
         )
         Spacer(Modifier.height(8.dp))
@@ -500,7 +500,7 @@ private fun Tab(tab: DrawerTab, count: Int, selected: Boolean, onClick: () -> Un
 @Composable
 private fun HistoryList(events: List<HistoryEvent>) {
     val colors = LocalTreasureColors.current
-    if (events.isEmpty()) { Empty("还没有时间轴 · 点左上 · 编辑添加"); return }
+    if (events.isEmpty()) { Empty("还没有时间轴 · 点右上 · 编辑添加"); return }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -581,9 +581,9 @@ private fun kindColor(
 @Composable
 private fun SpecsList(item: Item) {
     val colors = LocalTreasureColors.current
-    val hasHero = item.heroSpecs.any { it.label.isNotBlank() }
-    if (!hasHero && item.specs.isEmpty()) {
-        Empty("还没有完整参数 · 点左上 · 编辑添加")
+    val visible = item.specs.filter { it.label.isNotBlank() }
+    if (visible.isEmpty()) {
+        Empty("还没有参数 · 点右上 · 编辑添加")
         return
     }
     Column(
@@ -592,25 +592,21 @@ private fun SpecsList(item: Item) {
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp),
     ) {
-        // Hero specs first (compact, at top)
-        if (hasHero) {
-            item.heroSpecs.filter { it.label.isNotBlank() }.forEachIndexed { idx, spec ->
-                SpecRow(spec.label, spec.value)
-                if (idx != item.heroSpecs.lastIndex) {
-                    Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
-                }
-            }
-            if (item.specs.isNotEmpty()) {
-                Spacer(Modifier.height(20.dp))
+        visible.forEachIndexed { idx, spec ->
+            SpecRow(spec.label, spec.value)
+            if (idx != visible.lastIndex) {
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
+            }
+            // Subtle hairline after the hero set so users know what's "promoted"
+            if (idx == Item.HERO_SPEC_COUNT - 1 && idx != visible.lastIndex) {
                 Spacer(Modifier.height(8.dp))
-            }
-        }
-        // Full specs map
-        item.specs.entries.forEachIndexed { idx, (k, v) ->
-            SpecRow(k, v)
-            if (idx != item.specs.size - 1) {
-                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(0.5.dp)
+                        .background(colors.terra.copy(alpha = 0.4f)),
+                )
+                Spacer(Modifier.height(8.dp))
             }
         }
         Spacer(Modifier.height(40.dp))
@@ -644,7 +640,7 @@ private fun SpecRow(label: String, value: String) {
 @Composable
 private fun AlbumList(photos: List<String>) {
     val colors = LocalTreasureColors.current
-    if (photos.isEmpty()) { Empty("还没有实拍 · 点左上 · 编辑添加"); return }
+    if (photos.isEmpty()) { Empty("还没有实拍 · 点右上 · 编辑添加"); return }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -674,7 +670,7 @@ private fun AlbumList(photos: List<String>) {
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            text = "${photos.size} 张实拍 · 编辑请点左上 ·",
+            text = "${photos.size} 张实拍 · 编辑请点右上 ·",
             color = colors.sub,
             style = MaterialTheme.typography.labelSmall,
         )

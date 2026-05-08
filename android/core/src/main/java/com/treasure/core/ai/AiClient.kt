@@ -6,7 +6,9 @@ import kotlinx.serialization.Serializable
 /**
  * Per [ADR-0004], AI services are user-supplied (BYO key, device-direct,
  * no proxy). This interface is what the UI talks to; concrete impls live
- * in this package — `AnthropicClient` is the only one for now.
+ * in this package — [AnthropicClient] for Claude, [OpenAiClient] for
+ * OpenAI and OpenAI-compatible endpoints (e.g. self-hosted vLLM,
+ * DeepSeek, etc).
  */
 interface AiClient {
     /**
@@ -21,9 +23,19 @@ interface AiClient {
 }
 
 /**
- * Fields that AI tries to fill. Optional — [confidence] is the model's
- * own commentary, not used yet but useful when we want to gate "auto save"
- * behaviour later.
+ * Provider taxonomy. [OpenAiCompatible] uses the OpenAI client with a
+ * custom baseUrl — covers anything that speaks the OpenAI v1 schema.
+ */
+enum class Provider(val display: String) {
+    Anthropic("Anthropic"),
+    OpenAi("OpenAI"),
+    OpenAiCompatible("Custom (OpenAI-compatible)"),
+}
+
+/**
+ * Fields the AI tries to fill. [specs] is a single ordered list — the
+ * first [com.treasure.core.domain.Item.HERO_SPEC_COUNT] entries are
+ * treated as "hero" by the UI; anything after is the long-tail.
  */
 @Serializable
 data class ItemDraft(
@@ -32,5 +44,5 @@ data class ItemDraft(
     val model: String = "",
     val nickname: String = "",
     val oneLiner: String = "",
-    val heroSpecs: List<HeroSpec> = emptyList(),
+    val specs: List<HeroSpec> = emptyList(),
 )

@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -42,10 +43,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -60,13 +64,15 @@ import com.treasure.illust.HeroIllustration
 import com.treasure.theme.LocalTreasureColors
 import com.treasure.theme.TreasureColors
 import com.treasure.ui.components.BackArrow
-import com.treasure.ui.detail.DetailViewModel
+import kotlin.math.roundToInt
 
 @Composable
 fun EditRoute(
     itemId: String,
     onDone: () -> Unit,
-    vm: DetailViewModel = viewModel(factory = DetailViewModel.factory(itemId)),
+    vm: com.treasure.ui.detail.DetailViewModel = viewModel(
+        factory = com.treasure.ui.detail.DetailViewModel.factory(itemId),
+    ),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val item = state.item
@@ -78,10 +84,7 @@ fun EditRoute(
     EditScreen(
         item = item,
         onCancel = onDone,
-        onUpdate = { updated ->
-            vm.update(updated)
-            // Stay on edit so user can keep tweaking; explicit ← to leave.
-        },
+        onUpdate = vm::update,
         onAddPhoto = vm::addPhoto,
         onRemovePhoto = vm::removePhoto,
         onDelete = { vm.delete(onDone) },
@@ -99,7 +102,6 @@ fun EditScreen(
 ) {
     val colors = LocalTreasureColors.current
 
-    // ── form state, all reset when navigating to a different item ──────────
     var brand by remember(item.id) { mutableStateOf(item.brand) }
     var model by remember(item.id) { mutableStateOf(item.model) }
     var nickname by remember(item.id) { mutableStateOf(item.nickname) }
@@ -109,13 +111,8 @@ fun EditScreen(
     var status by remember(item.id) { mutableStateOf(item.status) }
     var category by remember(item.id) { mutableStateOf(item.category) }
     var heroVector by remember(item.id) { mutableStateOf(item.heroVector) }
-    val heroSpecs = remember(item.id) {
-        mutableStateListOf<HeroSpec>().apply {
-            addAll(item.heroSpecs.ifEmpty { List(4) { HeroSpec("", "") } })
-        }
-    }
-    val specRows = remember(item.id) {
-        mutableStateListOf<Pair<String, String>>().apply { addAll(item.specs.toList()) }
+    val specs = remember(item.id) {
+        mutableStateListOf<HeroSpec>().apply { addAll(item.specs) }
     }
 
     val dirty = brand != item.brand ||
@@ -127,10 +124,7 @@ fun EditScreen(
         status != item.status ||
         category != item.category ||
         heroVector != item.heroVector ||
-        heroSpecs.toList() != item.heroSpecs.let {
-            if (it.isEmpty()) List(4) { HeroSpec("", "") } else it
-        } ||
-        specRows.toList() != item.specs.toList()
+        specs.toList() != item.specs
 
     fun commit() {
         onUpdate(item.copy(
@@ -143,11 +137,8 @@ fun EditScreen(
             status = status,
             category = category,
             heroVector = heroVector,
-            heroSpecs = heroSpecs.toList()
+            specs = specs.toList()
                 .filter { it.label.isNotBlank() || it.value.isNotBlank() },
-            specs = specRows.toList()
-                .filter { (k, _) -> k.isNotBlank() }
-                .associate { (k, v) -> k.trim() to v.trim() },
         ))
     }
 
@@ -161,31 +152,23 @@ fun EditScreen(
             contentPadding = PaddingValues(top = 8.dp, bottom = 60.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
-            item {
-                TopBar(
-                    dirty = dirty,
-                    onBack = onCancel,
-                    onSave = ::commit,
-                )
-            }
+            item { TopBar(dirty = dirty, onBack = onCancel, onSave = ::commit) }
             item { Spacer(Modifier.height(18.dp)) }
             item {
                 Header()
                 Spacer(Modifier.height(20.dp))
             }
 
-            // ── 基础 ──
             item { Section("基础") }
             item {
                 Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LabeledField("品牌",   brand,   { brand = it })
-                    LabeledField("型号",   model,   { model = it })
+                    LabeledField("品牌",   brand,    { brand = it })
+                    LabeledField("型号",   model,    { model = it })
                     LabeledField("昵称",   nickname, { nickname = it })
                     LabeledField("简介",   oneLiner, { oneLiner = it })
                 }
             }
 
-            // ── 时间 ──
             item { Section("时间") }
             item {
                 Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -194,7 +177,6 @@ fun EditScreen(
                 }
             }
 
-            // ── 标签 ──
             item { Section("标签") }
             item {
                 Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -219,7 +201,6 @@ fun EditScreen(
                 }
             }
 
-            // ── 插画 ──
             item { Section("插画") }
             item {
                 HeroVectorPicker(
@@ -230,55 +211,23 @@ fun EditScreen(
                 )
             }
 
-            // ── 关键参数 ──
-            item { Section("关键参数") }
+            item { Section("参数 · 拖动选前 4 作关键参数") }
             item {
-                Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    heroSpecs.forEachIndexed { i, spec ->
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            InlineField(
-                                placeholder = "标签",
-                                value = spec.label,
-                                onValueChange = { heroSpecs[i] = HeroSpec(it, spec.value) },
-                                modifier = Modifier.weight(1f),
-                            )
-                            InlineField(
-                                placeholder = "值",
-                                value = spec.value,
-                                onValueChange = { heroSpecs[i] = HeroSpec(spec.label, it) },
-                                modifier = Modifier.weight(1.4f),
-                            )
-                        }
-                    }
+                ReorderableSpecs(
+                    specs = specs,
+                    onChange = { i, spec -> specs[i] = spec },
+                    onDelete = { i -> specs.removeAt(i) },
+                    onMove = { from, to ->
+                        val moved = specs.removeAt(from)
+                        specs.add(to, moved)
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+                Box(modifier = Modifier.padding(horizontal = 22.dp)) {
+                    AddRowButton(label = "+ 加一行 参数") { specs.add(HeroSpec("", "")) }
                 }
             }
 
-            // ── 完整参数 ──
-            item { Section("完整参数") }
-            item {
-                Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    specRows.forEachIndexed { i, (k, v) ->
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            InlineField(
-                                placeholder = "key",
-                                value = k,
-                                onValueChange = { specRows[i] = it to v },
-                                modifier = Modifier.weight(1f),
-                            )
-                            InlineField(
-                                placeholder = "value",
-                                value = v,
-                                onValueChange = { specRows[i] = k to it },
-                                modifier = Modifier.weight(1.4f),
-                            )
-                            DeleteIcon(onClick = { specRows.removeAt(i) })
-                        }
-                    }
-                    AddRowButton(label = "+ 加一行 参数") { specRows.add("" to "") }
-                }
-            }
-
-            // ── 历史 ──
             item { Section("历史") }
             item {
                 HistorySection(
@@ -289,7 +238,6 @@ fun EditScreen(
                 )
             }
 
-            // ── 实拍 ──
             item { Section("实拍") }
             item {
                 PhotoSection(
@@ -299,11 +247,8 @@ fun EditScreen(
                 )
             }
 
-            // ── DANGER ZONE ──
             item { Section("DANGER ZONE") }
-            item {
-                DangerZone(onDelete = onDelete)
-            }
+            item { DangerZone(onDelete = onDelete) }
 
             item { Spacer(Modifier.height(60.dp)) }
         }
@@ -346,7 +291,7 @@ private fun Header() {
 }
 
 @Composable
-private fun Section(label: String) {
+internal fun Section(label: String) {
     val colors = LocalTreasureColors.current
     Column(modifier = Modifier.fillMaxWidth().padding(top = 26.dp, bottom = 12.dp)) {
         Row(
@@ -368,10 +313,8 @@ private fun Section(label: String) {
     }
 }
 
-// ── Form fields ─────────────────────────────────────────────────────────
-
 @Composable
-private fun FieldLabel(text: String) {
+internal fun FieldLabel(text: String) {
     val colors = LocalTreasureColors.current
     Text(
         text = text,
@@ -381,13 +324,8 @@ private fun FieldLabel(text: String) {
     )
 }
 
-/**
- * Single-line edit row: a left label + an underlined editable value.
- * Hairline underline (instead of full box) keeps a list of these tightly
- * packed without the field-soup look the previous tabs had.
- */
 @Composable
-private fun LabeledField(
+internal fun LabeledField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
@@ -424,9 +362,8 @@ private fun LabeledField(
     }
 }
 
-/** Smaller card-style field used inside specs / heroSpec rows. */
 @Composable
-private fun InlineField(
+internal fun InlineField(
     placeholder: String,
     value: String,
     onValueChange: (String) -> Unit,
@@ -462,7 +399,7 @@ private fun InlineField(
 }
 
 @Composable
-private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
     val colors = LocalTreasureColors.current
     Box(
         modifier = Modifier
@@ -485,7 +422,7 @@ private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DeleteIcon(onClick: () -> Unit) {
+internal fun DeleteIcon(onClick: () -> Unit) {
     val colors = LocalTreasureColors.current
     Box(
         modifier = Modifier
@@ -500,7 +437,7 @@ private fun DeleteIcon(onClick: () -> Unit) {
 }
 
 @Composable
-private fun AddRowButton(label: String, onClick: () -> Unit) {
+internal fun AddRowButton(label: String, onClick: () -> Unit) {
     val colors = LocalTreasureColors.current
     Box(
         modifier = Modifier
@@ -561,12 +498,171 @@ private fun previewItem(v: HeroVector, palette: List<String>, category: Category
         palette = palette,
         oneLiner = "",
         heroVector = v,
-        heroSpecs = emptyList(),
-        specs = emptyMap(),
+        specs = emptyList(),
         history = emptyList(),
         photos = emptyList(),
         createdAt = 0L, updatedAt = 0L,
     )
+
+// ── Reorderable specs ─────────────────────────────────────────────────
+
+private val ROW_HEIGHT = 56.dp
+
+@Composable
+private fun ReorderableSpecs(
+    specs: List<HeroSpec>,
+    onChange: (Int, HeroSpec) -> Unit,
+    onDelete: (Int) -> Unit,
+    onMove: (Int, Int) -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    val density = LocalDensity.current
+    val rowHeightPx = with(density) { ROW_HEIGHT.toPx() }
+    var dragging by remember { mutableStateOf(-1) }
+    var dragOffset by remember { mutableStateOf(0f) }
+
+    val draggedTarget = if (dragging != -1) {
+        (dragging + (dragOffset / rowHeightPx).roundToInt())
+            .coerceIn(0, specs.size - 1)
+    } else -1
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
+        specs.forEachIndexed { idx, spec ->
+            // Hero divider sits BEFORE row index HERO_COUNT (between hero and tail)
+            if (idx == Item.HERO_SPEC_COUNT && specs.size > Item.HERO_SPEC_COUNT) {
+                HeroDivider()
+            }
+
+            val isDragging = dragging == idx
+            // Compute "make-room" shift for non-dragging rows
+            val shift = when {
+                dragging == -1 || idx == dragging -> 0f
+                dragging < idx && idx <= draggedTarget -> -rowHeightPx
+                dragging > idx && idx >= draggedTarget -> rowHeightPx
+                else -> 0f
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(ROW_HEIGHT)
+                    .graphicsLayer {
+                        translationY = if (isDragging) dragOffset else shift
+                        if (isDragging) shadowElevation = 6.dp.toPx()
+                    }
+                    .zIndex(if (isDragging) 1f else 0f)
+                    .background(if (isDragging) colors.card else Color.Transparent),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(ROW_HEIGHT)
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    InlineField(
+                        placeholder = if (idx < Item.HERO_SPEC_COUNT) "key (hero)" else "key",
+                        value = spec.label,
+                        onValueChange = { onChange(idx, HeroSpec(it, spec.value)) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    InlineField(
+                        placeholder = "value",
+                        value = spec.value,
+                        onValueChange = { onChange(idx, HeroSpec(spec.label, it)) },
+                        modifier = Modifier.weight(1.4f),
+                    )
+                    DragHandle(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .pointerInput(idx) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        dragging = idx
+                                        dragOffset = 0f
+                                    },
+                                    onDragEnd = {
+                                        val target = (idx + (dragOffset / rowHeightPx)
+                                            .roundToInt()).coerceIn(0, specs.size - 1)
+                                        if (target != idx) onMove(idx, target)
+                                        dragging = -1
+                                        dragOffset = 0f
+                                    },
+                                    onDragCancel = {
+                                        dragging = -1
+                                        dragOffset = 0f
+                                    },
+                                    onDrag = { _, drag -> dragOffset += drag.y },
+                                )
+                            },
+                    )
+                    DeleteIcon { onDelete(idx) }
+                }
+            }
+        }
+        if (specs.isEmpty()) {
+            Text(
+                text = "暂无参数 · 点下面 + 添加",
+                color = colors.sub.copy(alpha = 0.6f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontStyle = FontStyle.Italic,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        } else {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "长按 ≡ 拖动重排 · 顶部 ${Item.HERO_SPEC_COUNT} 行作为关键参数显示",
+                color = colors.sub.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HeroDivider() {
+    val colors = LocalTreasureColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(0.5.dp)
+                .background(colors.terra.copy(alpha = 0.5f)),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "↑ 关键 ${Item.HERO_SPEC_COUNT} 项",
+            color = colors.terra.copy(alpha = 0.8f),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(0.5.dp)
+                .background(colors.terra.copy(alpha = 0.5f)),
+        )
+    }
+}
+
+@Composable
+private fun DragHandle(modifier: Modifier = Modifier) {
+    val colors = LocalTreasureColors.current
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(2.dp))
+            .border(0.5.dp, colors.line),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("≡", color = colors.sub, style = MaterialTheme.typography.titleMedium)
+    }
+}
 
 // ── History section ─────────────────────────────────────────────────────
 
@@ -783,15 +879,12 @@ private fun PhotoSection(
     ) { uri -> if (uri != null) onAddPhoto(uri) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
-        // Manual 3-col grid (LazyVerticalGrid inside a LazyColumn item is awkward;
-        // a Column of Rows handles the small row counts we expect)
         val rows = (listOf(null) + photos.map { it }).chunked(3)
         rows.forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { entry ->
                     Box(modifier = Modifier.weight(1f)) {
                         if (entry == null) {
-                            // Add tile
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -834,7 +927,6 @@ private fun PhotoSection(
                         }
                     }
                 }
-                // Pad row to 3 cells
                 repeat(3 - row.size) {
                     Box(modifier = Modifier.weight(1f)) { }
                 }

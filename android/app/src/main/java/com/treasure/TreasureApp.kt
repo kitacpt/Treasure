@@ -3,6 +3,8 @@ package com.treasure
 import android.app.Application
 import com.treasure.core.ai.AiClient
 import com.treasure.core.ai.AnthropicClient
+import com.treasure.core.ai.OpenAiClient
+import com.treasure.core.ai.Provider
 import com.treasure.core.repo.ItemRepository
 import com.treasure.core.repo.RoomItemRepository
 import com.treasure.data.SettingsStore
@@ -34,10 +36,31 @@ class TreasureApp : Application() {
     /**
      * Build a fresh [AiClient] from the current [SettingsStore] state.
      * Returns null when the user hasn't supplied a key yet — UI uses this
-     * as the gate for AI features.
+     * as the gate for AI features. Provider switch happens here.
      */
     fun aiClient(): AiClient? {
         val key = settingsStore.apiKey ?: return null
-        return AnthropicClient(apiKey = key, model = settingsStore.model)
+        val model = settingsStore.model
+        val provider = settingsStore.provider
+        return when (provider) {
+            Provider.Anthropic -> AnthropicClient(
+                apiKey = key,
+                model = model.ifBlank { AnthropicClient.DEFAULT_MODEL },
+                baseUrl = settingsStore.baseUrl ?: "https://api.anthropic.com",
+            )
+            Provider.OpenAi -> OpenAiClient(
+                apiKey = key,
+                model = model.ifBlank { OpenAiClient.DEFAULT_MODEL },
+                baseUrl = settingsStore.baseUrl ?: "https://api.openai.com",
+            )
+            Provider.OpenAiCompatible -> {
+                val url = settingsStore.baseUrl ?: return null
+                OpenAiClient(
+                    apiKey = key,
+                    model = model.ifBlank { OpenAiClient.DEFAULT_MODEL },
+                    baseUrl = url,
+                )
+            }
+        }
     }
 }

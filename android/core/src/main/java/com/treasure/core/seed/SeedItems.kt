@@ -10,8 +10,8 @@ import com.treasure.core.domain.ItemStatus
 
 /**
  * First-launch seed data. Hand-picked subset ported from
- * prototype/project/data.jsx — covers all four categories, with history
- * timelines so the Detail drawer "历史" tab has real content.
+ * prototype/project/data.jsx. As of cycle 0006, hero specs and full specs
+ * are unified into one ordered list — first 4 are "hero".
  */
 object SeedItems {
     private const val NOW: Long = 1746576000_000L // 2026-05-06 UTC midnight
@@ -30,18 +30,16 @@ object SeedItems {
             palette = listOf("#0e0e0e", "#c9362f", "#e8e2d4", "#5a5a5a"),
             oneLiner = "进攻型 4U · 拉26磅",
             heroVector = HeroVector.RACKET,
-            heroSpecs = listOf(
+            specs = listOf(
                 HeroSpec("重量", "4U / 83g"),
                 HeroSpec("平衡点", "294mm"),
                 HeroSpec("中杆", "硬"),
                 HeroSpec("握把", "G5"),
-            ),
-            specs = mapOf(
-                "型号" to "Voltric Z-Force II",
-                "类型" to "进攻型",
-                "材质" to "高弹性碳素 + Nanometric DR",
-                "拉线" to "BG80 Power · 26lbs",
-                "购入价" to "¥1,580",
+                HeroSpec("型号", "Voltric Z-Force II"),
+                HeroSpec("类型", "进攻型"),
+                HeroSpec("材质", "高弹性碳素 + Nanometric DR"),
+                HeroSpec("拉线", "BG80 Power · 26lbs"),
+                HeroSpec("购入价", "¥1,580"),
             ),
             history = listOf(
                 HistoryEvent("2023-04-12", HistoryKind.ACQUIRED,  "购入",        "上海徐家汇 1580 入手二代"),
@@ -66,17 +64,15 @@ object SeedItems {
             palette = listOf("#d97757", "#8a3a1f", "#f6f0e6", "#231e1a"),
             oneLiner = "进攻型 4U · 桃田款",
             heroVector = HeroVector.RACKET,
-            heroSpecs = listOf(
+            specs = listOf(
                 HeroSpec("重量", "4U / 83g"),
                 HeroSpec("平衡点", "305mm"),
                 HeroSpec("中杆", "极硬"),
                 HeroSpec("握把", "G5"),
-            ),
-            specs = mapOf(
-                "型号" to "Astrox 99 Pro",
-                "配色" to "Cherry Sunburst",
-                "拉线" to "BG66UM · 27lbs",
-                "购入价" to "¥1,890",
+                HeroSpec("型号", "Astrox 99 Pro"),
+                HeroSpec("配色", "Cherry Sunburst"),
+                HeroSpec("拉线", "BG66UM · 27lbs"),
+                HeroSpec("购入价", "¥1,890"),
             ),
             history = listOf(
                 HistoryEvent("2024-09-21", HistoryKind.ACQUIRED,  "购入",        "看了桃田比赛太眼馋"),
@@ -100,17 +96,15 @@ object SeedItems {
             palette = listOf("#1a1a1a", "#3a3530", "#d8d2c4", "#8a8378"),
             oneLiner = "APS-C 旗舰 · 4020 万像素",
             heroVector = HeroVector.CAMERA_DSLR,
-            heroSpecs = listOf(
+            specs = listOf(
                 HeroSpec("传感器", "X-Trans CMOS 5"),
                 HeroSpec("像素", "40.2 MP"),
                 HeroSpec("机身防抖", "7档 IBIS"),
                 HeroSpec("快门寿命", "50万次"),
-            ),
-            specs = mapOf(
-                "型号" to "X-T5 Black",
-                "处理器" to "X-Processor 5",
-                "视频" to "6.2K 30p / 4K 60p",
-                "购入价" to "¥12,500（机身）",
+                HeroSpec("型号", "X-T5 Black"),
+                HeroSpec("处理器", "X-Processor 5"),
+                HeroSpec("视频", "6.2K 30p / 4K 60p"),
+                HeroSpec("购入价", "¥12,500（机身）"),
             ),
             history = listOf(
                 HistoryEvent("2023-02-14", HistoryKind.ACQUIRED,  "机身购入",    "首发后等三个月才买到"),
@@ -135,17 +129,15 @@ object SeedItems {
             palette = listOf("#2a2a2a", "#0a0a0a", "#d4cdb8", "#a89c7a"),
             oneLiner = "胶片旁轴 · 1984 年制",
             heroVector = HeroVector.CAMERA_RANGEFINDER,
-            heroSpecs = listOf(
+            specs = listOf(
                 HeroSpec("类型", "35mm 旁轴"),
                 HeroSpec("快门", "1s - 1/1000s"),
                 HeroSpec("取景器", "0.72x"),
                 HeroSpec("生产年份", "1984"),
-            ),
-            specs = mapOf(
-                "型号" to "Leica M6 (Classic)",
-                "配镜" to "Summicron 50mm F2 v4",
-                "产地" to "德国韦茨拉尔",
-                "购入价" to "¥38,000（中古）",
+                HeroSpec("型号", "Leica M6 (Classic)"),
+                HeroSpec("配镜", "Summicron 50mm F2 v4"),
+                HeroSpec("产地", "德国韦茨拉尔"),
+                HeroSpec("购入价", "¥38,000（中古）"),
             ),
             history = listOf(
                 HistoryEvent("2024-11-30", HistoryKind.ACQUIRED,  "购入",        "生日礼物，给自己"),
@@ -169,18 +161,16 @@ object SeedItems {
             palette = listOf("#dcd8d0", "#a8a39a", "#1a1a1a", "#d97757"),
             oneLiner = "租赁 2 天 · 加州海岸",
             heroVector = HeroVector.CAR_SEDAN,
-            heroSpecs = listOf(
+            specs = listOf(
                 HeroSpec("动力", "F6 3.0T 双涡轮"),
                 HeroSpec("马力", "450 PS"),
                 HeroSpec("0-100", "3.7 s"),
                 HeroSpec("配置", "PDK 8速"),
-            ),
-            specs = mapOf(
-                "车型" to "911 Carrera S 992.1",
-                "颜色" to "Crayon Grey",
-                "租赁公司" to "Hertz Dream Cars",
-                "里程" to "480 mi",
-                "路线" to "SF → Big Sur → Carmel",
+                HeroSpec("车型", "911 Carrera S 992.1"),
+                HeroSpec("颜色", "Crayon Grey"),
+                HeroSpec("租赁公司", "Hertz Dream Cars"),
+                HeroSpec("里程", "480 mi"),
+                HeroSpec("路线", "SF → Big Sur → Carmel"),
             ),
             history = listOf(
                 HistoryEvent("2025-07-04", HistoryKind.ACQUIRED,  "SFO 提车",   "金门大桥日落开过"),
@@ -202,17 +192,15 @@ object SeedItems {
             palette = listOf("#3a4a3a", "#1a2a1a", "#c4b89c", "#d8d2c4"),
             oneLiner = "租赁 7 天 · 川西环线",
             heroVector = HeroVector.CAR_SUV,
-            heroSpecs = listOf(
+            specs = listOf(
                 HeroSpec("动力", "L6 3.0T 轻混"),
                 HeroSpec("马力", "400 PS"),
                 HeroSpec("驱动", "四驱"),
                 HeroSpec("涉水", "900mm"),
-            ),
-            specs = mapOf(
-                "车型" to "Defender 110 P400",
-                "颜色" to "Pangea Green",
-                "里程" to "2380 km",
-                "路线" to "成都 → 稻城亚丁 → 新都桥",
+                HeroSpec("车型", "Defender 110 P400"),
+                HeroSpec("颜色", "Pangea Green"),
+                HeroSpec("里程", "2380 km"),
+                HeroSpec("路线", "成都 → 稻城亚丁 → 新都桥"),
             ),
             history = listOf(
                 HistoryEvent("2024-09-28", HistoryKind.ACQUIRED,  "成都提车",    "满油 + 全险"),
@@ -237,16 +225,14 @@ object SeedItems {
             palette = listOf("#3a3a3c", "#1a1a1c", "#d8d2c4", "#8a8378"),
             oneLiner = "工作机 · 24G/1T",
             heroVector = HeroVector.LAPTOP,
-            heroSpecs = listOf(
+            specs = listOf(
                 HeroSpec("CPU", "M4 Pro 12核"),
                 HeroSpec("内存", "24 GB"),
                 HeroSpec("存储", "1 TB"),
                 HeroSpec("屏幕", "14.2\" XDR 120Hz"),
-            ),
-            specs = mapOf(
-                "芯片" to "Apple M4 Pro 12CPU/16GPU",
-                "颜色" to "Space Black",
-                "购入价" to "¥18,499",
+                HeroSpec("芯片", "Apple M4 Pro 12CPU/16GPU"),
+                HeroSpec("颜色", "Space Black"),
+                HeroSpec("购入价", "¥18,499"),
             ),
             history = listOf(
                 HistoryEvent("2024-11-20", HistoryKind.ACQUIRED, "购入",            "替换服役 4 年的 M1"),
@@ -267,15 +253,13 @@ object SeedItems {
             palette = listOf("#f6f4ef", "#dcd8d0", "#1a1a1a", "#a8a39a"),
             oneLiner = "TWS 耳机 · USB-C",
             heroVector = HeroVector.EARBUDS,
-            heroSpecs = listOf(
+            specs = listOf(
                 HeroSpec("芯片", "H2"),
                 HeroSpec("续航", "6h + 30h 盒"),
                 HeroSpec("降噪", "主动降噪"),
                 HeroSpec("接口", "USB-C"),
-            ),
-            specs = mapOf(
-                "型号" to "AirPods Pro (2nd gen, USB-C)",
-                "购入价" to "¥1,899",
+                HeroSpec("型号", "AirPods Pro (2nd gen, USB-C)"),
+                HeroSpec("购入价", "¥1,899"),
             ),
             history = listOf(
                 HistoryEvent("2023-09-22", HistoryKind.ACQUIRED, "购入", "首发当天去三里屯"),

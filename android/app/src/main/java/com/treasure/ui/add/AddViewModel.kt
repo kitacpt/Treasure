@@ -46,6 +46,9 @@ class AddViewModel(
             val now = System.currentTimeMillis()
             val id = makeId(template.category, brand, model, now)
             val acquiredOrToday = acquired.ifBlank { LocalDate.now().toString() }
+            val specs = template.heroSpecLabels.zip(heroSpecValues) { l, v ->
+                HeroSpec(l, v.trim())
+            }
             val item = Item(
                 id = id,
                 category = template.category,
@@ -58,10 +61,7 @@ class AddViewModel(
                 palette = template.palette,
                 oneLiner = oneLiner.trim(),
                 heroVector = template.heroVector,
-                heroSpecs = template.heroSpecLabels.zip(heroSpecValues) { l, v ->
-                    HeroSpec(l, v.trim())
-                },
-                specs = emptyMap(),
+                specs = specs,
                 history = listOf(
                     HistoryEvent(
                         date = acquiredOrToday,
@@ -81,8 +81,7 @@ class AddViewModel(
 
     /**
      * Ask the configured AI service to fill out an [ItemDraft] from the
-     * user's text + optional photo. Returns null via [onError] if no AI
-     * key is configured.
+     * user's text + optional photo.
      */
     fun extractDraft(
         text: String,

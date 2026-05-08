@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.treasure.core.ai.Provider
 import com.treasure.theme.LocalTreasureColors
 
 @Composable
@@ -43,6 +44,8 @@ fun SettingsRoute(vm: SettingsViewModel = viewModel(factory = SettingsViewModel.
     val state by vm.state.collectAsStateWithLifecycle()
     SettingsScreen(
         state = state,
+        onProviderChange = vm::setProvider,
+        onBaseUrlChange = vm::setBaseUrl,
         onModelChange = vm::setModel,
         onApiKeyChange = vm::setApiKey,
         onSave = vm::save,
@@ -54,6 +57,8 @@ fun SettingsRoute(vm: SettingsViewModel = viewModel(factory = SettingsViewModel.
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
+    onProviderChange: (Provider) -> Unit,
+    onBaseUrlChange: (String) -> Unit,
     onModelChange: (String) -> Unit,
     onApiKeyChange: (String) -> Unit,
     onSave: () -> Unit,
@@ -62,6 +67,7 @@ fun SettingsScreen(
 ) {
     val colors = LocalTreasureColors.current
     var revealKey by remember { mutableStateOf(false) }
+    val showBaseUrl = state.provider != Provider.Anthropic // baseUrl optional otherwise
 
     Box(
         modifier = Modifier
@@ -90,22 +96,40 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(20.dp))
             Text(
-                text = "用户自带 API key（设备直连 Anthropic，不走代理）",
+                text = "用户自带 API key（设备直连，不走代理）",
                 color = colors.sub,
                 style = MaterialTheme.typography.bodyMedium,
             )
 
             Spacer(Modifier.height(20.dp))
             FieldLabel("Provider")
-            ReadOnlyField("Anthropic")
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Provider.entries.forEach { p ->
+                    ProviderChip(
+                        label = p.display,
+                        selected = p == state.provider,
+                        onClick = { onProviderChange(p) },
+                    )
+                }
+            }
 
             Spacer(Modifier.height(14.dp))
             FieldLabel("Model")
             FormField(
-                placeholder = "claude-haiku-4-5-20251001",
+                placeholder = SettingsViewModel::class.let { "默认见 provider" },
                 value = state.model,
                 onValueChange = onModelChange,
             )
+
+            if (showBaseUrl) {
+                Spacer(Modifier.height(14.dp))
+                FieldLabel(if (state.provider == Provider.OpenAiCompatible) "Base URL · 必填" else "Base URL · 可选")
+                FormField(
+                    placeholder = "https://api.openai.com",
+                    value = state.baseUrl,
+                    onValueChange = onBaseUrlChange,
+                )
+            }
 
             Spacer(Modifier.height(14.dp))
             Row(
@@ -122,7 +146,11 @@ fun SettingsScreen(
                 )
             }
             FormField(
-                placeholder = "sk-ant-...",
+                placeholder = when (state.provider) {
+                    Provider.Anthropic -> "sk-ant-..."
+                    Provider.OpenAi -> "sk-..."
+                    Provider.OpenAiCompatible -> "your-key"
+                },
                 value = state.apiKey,
                 onValueChange = onApiKeyChange,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -137,18 +165,20 @@ fun SettingsScreen(
             )
 
             Spacer(Modifier.height(20.dp))
-            // Save row
+            val canSave = state.apiKey.isNotBlank() && state.model.isNotBlank() &&
+                (state.provider != Provider.OpenAiCompatible || state.baseUrl.isNotBlank())
+            val canTest = state.apiKey.isNotBlank() && state.testStatus !is TestStatus.Running &&
+                (state.provider != Provider.OpenAiCompatible || state.baseUrl.isNotBlank())
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PrimaryButton(
                     label = "保存",
-                    enabled = state.apiKey.isNotBlank() && state.model.isNotBlank(),
+                    enabled = canSave,
                     onClick = onSave,
                     modifier = Modifier.weight(1f),
                 )
                 SecondaryButton(
                     label = "测试",
-                    enabled = state.apiKey.isNotBlank() &&
-                        state.testStatus !is TestStatus.Running,
+                    enabled = canTest,
                     onClick = onTest,
                     modifier = Modifier.weight(1f),
                 )
@@ -188,6 +218,29 @@ fun SettingsScreen(
 }
 
 @Composable
+private fun ProviderChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = LocalTreasureColors.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) colors.ink else androidx.compose.ui.graphics.Color.Transparent)
+            .border(
+                0.5.dp,
+                if (selected) colors.ink else colors.line,
+                RoundedCornerShape(999.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = label,
+            color = if (selected) colors.paper else colors.ink,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
 private fun TestStatusLine(status: TestStatus, configured: Boolean) {
     val colors = LocalTreasureColors.current
     val (text, color) = when (status) {
@@ -213,20 +266,6 @@ private fun FieldLabel(text: String) {
         style = MaterialTheme.typography.labelSmall,
         modifier = Modifier.padding(bottom = 4.dp),
     )
-}
-
-@Composable
-private fun ReadOnlyField(text: String) {
-    val colors = LocalTreasureColors.current
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(colors.card)
-            .border(0.5.dp, colors.line)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-    ) {
-        Text(text = text, color = colors.ink, style = MaterialTheme.typography.bodyLarge)
-    }
 }
 
 @Composable

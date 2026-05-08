@@ -4,9 +4,9 @@
 
 ## 今天 (2026-05-07)
 
-**状态：cycle 0001 → 0005 全部落地**
+**状态：cycle 0001 → 0006 全部落地**
 
-最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.8.0，13 MB）
+最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.9.0，13 MB）
 
 GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
 
@@ -26,18 +26,18 @@ GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
        │      2 列卡片网格，hero 缩略
        │      点卡片 → Detail
        │
-       ├─ Detail (详情)  纯只读 ★ cycle 0005 重做
-       │      ┌ ← (back) · (edit dot → 进编辑屏)
-       │      │
+       ├─ Detail (详情)  纯只读 ★ cycle 0005 + 0006
+       │      ┌ ← (back) ································ · (edit dot)
+       │      │                                            ↑ 编辑入口已移到右上
        │      ▽ Hero 卡片：博物馆线描；点击翻面（有/无照片不同空状态）
-       │      ▽ 4 行 hero specs（只读）
+       │      ▽ 4 行 hero specs（item.specs 前 4，只读）
        │      ▽ 底部 40dp 拉手 (peek 只露拉手)
        │      ▽ 上滑展开抽屉 (78% 屏高):  3 tabs 全只读
        │          历史  时间轴 (kind 字形 ★Δ↻+−)
-       │          参数  hero_specs + specs map
+       │          参数  完整 specs 列表，第 4 行后 terra 细线分隔 hero / tail
        │          影集  3 列网格（无添加 / 无删除 affordance）
        │
-       ├─ Edit (编辑) ★ cycle 0005 新建
+       ├─ Edit (编辑) ★ cycle 0005 新建 / 0006 重整
        │      ┌ ← (back) ··················· 保存 (dirty 时 terra)
        │      │
        │      EDIT
@@ -45,24 +45,25 @@ GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
        │      ── 时间 ─── 购入 / 出手
        │      ── 标签 ─── 状态 chips / 品类 chips
        │      ── 插画 ─── 14 个 HeroVector 横滚缩略，选中 terra
-       │      ── 关键参数 ─── 4 行 hero_specs (label+value)
-       │      ── 完整参数 ─── 变长 specs map (+ 加一行)
+       │      ── 参数 ─── ★ cycle 0006 统一为单列表
+       │                  每行 [label] [value] [≡ drag] [− del]
+       │                  长按 ≡ 拖动重排；前 4 行作 hero
+       │                  第 4 行后 terra 细线 + "↑ 关键 4 项"
        │      ── 历史 ─── 行排版 + tap 编辑 / 长按删 + 加一条
        │      ── 实拍 ─── 3 列 + tile + 长按删
        │      ── DANGER ZONE ─── 删除（二次确认）
        │
-       ├─ 录入 (Add)  ★ cycle 0004 + 0005
+       ├─ 录入 (Add)  ★ cycle 0006 留空
        │      Header: Treasure / NEW ENTRY
-       │      模式 chips: 手动 / AI
-       │      手动 → 4 气泡浮动 → 点开 ModalBottomSheet → 模板表单 → 保存
-       │      AI   → 助手气泡 + 输入框 + "+ 选张图" + 发送 ★ cycle 0005 接通
-       │             → AnthropicClient.extractItemDraft → ItemDraft
-       │             → 弹同样的 BottomSheet, CategoryForm 预填字段
-       │             （没配 key → 显示"去设置"卡片）
-       └─ 设置 (Settings) ★ cycle 0005 接通
-              Provider: Anthropic | Model: text | API Key: password
+       │      中间空 + italic "录入页交互重新设计中"
+       │      底部 4 颗朴素品类 chip 临时入口（重设计后移除）
+       │      （CategoryForm 仍存在；AiChatPanel 已删，等新设计接回 AI）
+       │
+       └─ 设置 (Settings) ★ cycle 0005 + 0006
+              Provider chips: Anthropic / OpenAI / Custom (OpenAI-compatible)
+              Model | Base URL（按 provider 显隐）| API Key (password)
               [保存] [测试连接]   DANGER ZONE: 清除所有设置
-              EncryptedSharedPreferences 存 key + model
+              EncryptedSharedPreferences 存 provider + key + model + baseUrl
        
                      +──────────────────────+
                      │  门厅 图鉴 录入 设置  │  ← 浮动控制岛 (Detail 屏隐藏)
@@ -79,11 +80,12 @@ GitHub: <https://github.com/kitacpt/Treasure>（main 分支）
 
 数据：
 
-- Room **v4**，items 一张表，列含 palette / hero_specs / specs / history / photos 全部 JSON 序列化（kotlinx-serialization）
+- Room **v5** (cycle 0006 升级)，items 一张表，列含 palette / specs / history / photos 全部 JSON 序列化
+- `Item.specs` 是单列表 `List<HeroSpec>`，前 4 项作 hero（计算属性 `heroSpecs` / `tailSpecs`）
 - `Item` 域模型 + `ItemRepository` (Flow)
 - 8 条种子物品（移植 prototype/data.jsx），覆盖 4 个品类，全部带 history 时间线，photos 默认空
 - 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`（app 私有目录）
-- `fallbackToDestructiveMigration()`（cycle 0001-0003 期未冻 schema；cycle 0004 之后必须改）
+- `fallbackToDestructiveMigration()`（已经 destructive 6 次了 — **cycle 0007 必须切真 migration**）
 
 ## 整体工程
 

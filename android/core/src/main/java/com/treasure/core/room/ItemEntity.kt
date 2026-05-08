@@ -25,7 +25,6 @@ internal data class ItemEntity(
     @ColumnInfo(name = "palette_json") val paletteJson: String,
     @ColumnInfo(name = "one_liner") val oneLiner: String,
     @ColumnInfo(name = "hero_vector") val heroVector: String,
-    @ColumnInfo(name = "hero_specs_json") val heroSpecsJson: String,
     @ColumnInfo(name = "specs_json") val specsJson: String,
     @ColumnInfo(name = "history_json") val historyJson: String,
     @ColumnInfo(name = "photos_json") val photosJson: String,
@@ -44,8 +43,7 @@ internal data class ItemEntity(
         palette = JsonCodec.decodeStringList(paletteJson),
         oneLiner = oneLiner,
         heroVector = HeroVector.valueOf(heroVector),
-        heroSpecs = JsonCodec.decodeHeroSpecs(heroSpecsJson),
-        specs = JsonCodec.decodeStringMap(specsJson),
+        specs = JsonCodec.decodeHeroSpecs(specsJson),
         history = JsonCodec.decodeHistory(historyJson),
         photos = JsonCodec.decodeStringList(photosJson),
         createdAt = createdAt,
@@ -65,8 +63,7 @@ internal data class ItemEntity(
             paletteJson = JsonCodec.encodeStringList(item.palette),
             oneLiner = item.oneLiner,
             heroVector = item.heroVector.name,
-            heroSpecsJson = JsonCodec.encodeHeroSpecs(item.heroSpecs),
-            specsJson = JsonCodec.encodeStringMap(item.specs),
+            specsJson = JsonCodec.encodeHeroSpecs(item.specs),
             historyJson = JsonCodec.encodeHistory(item.history),
             photosJson = JsonCodec.encodeStringList(item.photos),
             createdAt = item.createdAt,
@@ -81,10 +78,6 @@ internal object JsonCodec {
     fun encodeStringList(value: List<String>): String = json.encodeToString(value)
     fun decodeStringList(text: String): List<String> =
         if (text.isBlank()) emptyList() else json.decodeFromString(text)
-
-    fun encodeStringMap(value: Map<String, String>): String = json.encodeToString(value)
-    fun decodeStringMap(text: String): Map<String, String> =
-        if (text.isBlank()) emptyMap() else json.decodeFromString(text)
 
     fun encodeHeroSpecs(value: List<HeroSpec>): String = json.encodeToString(value)
     fun decodeHeroSpecs(text: String): List<HeroSpec> =

@@ -8,10 +8,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -28,16 +28,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.treasure.core.ai.ItemDraft
-import com.treasure.core.domain.Item
 import com.treasure.core.domain.ItemStatus
-import com.treasure.illust.HeroIllustration
 import com.treasure.theme.LocalTreasureColors
 import java.time.LocalDate
 
+/**
+ * Manual entry form. Layout deliberately mirrors EditScreen — same
+ * Section header style, same LabeledField row, same Chip — so muscle
+ * memory carries over.
+ */
 @Composable
 fun CategoryForm(
     template: CategoryTemplate,
@@ -55,10 +59,9 @@ fun CategoryForm(
     var status by remember { mutableStateOf(ItemStatus.OWNED) }
     val specValues = remember {
         mutableStateListOf<String>().apply {
-            // Map AI's heroSpec values into the template's slots positionally
-            // (the AI is instructed to return them in template order).
+            // First 4 of AI's specs map to the template hero slots positionally
             for (i in 0..3) {
-                add(initial?.heroSpecs?.getOrNull(i)?.value.orEmpty())
+                add(initial?.specs?.getOrNull(i)?.value.orEmpty())
             }
         }
     }
@@ -69,187 +72,185 @@ fun CategoryForm(
         modifier = Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp)
             .padding(bottom = 24.dp),
     ) {
+        TopBar(
+            title = if (initial != null) "AI 预填 · ${template.category.nameZh}"
+                    else "新增 · ${template.category.nameZh}",
+            canSave = canSave,
+            onCancel = onCancel,
+            onSave = {
+                vm.save(
+                    template = template,
+                    brand = brand,
+                    model = model,
+                    nickname = nickname,
+                    acquired = acquired,
+                    oneLiner = oneLiner,
+                    status = status,
+                    heroSpecValues = specValues.toList(),
+                    onSaved = onSaved,
+                )
+            },
+        )
+
+        Section("基础")
+        Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LabeledField("品牌", brand,    { brand = it })
+            LabeledField("型号", model,    { model = it })
+            LabeledField("昵称", nickname, { nickname = it })
+            LabeledField("简介", oneLiner, { oneLiner = it })
+        }
+
+        Section("时间")
+        Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LabeledField("购入", acquired, { acquired = it }, hint = "YYYY-MM-DD")
+        }
+
+        Section("状态")
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Chip("Owned",  status == ItemStatus.OWNED)  { status = ItemStatus.OWNED }
+            Chip("Parted", status == ItemStatus.PARTED) { status = ItemStatus.PARTED }
+            Chip("Rented", status == ItemStatus.RENTED) { status = ItemStatus.RENTED }
+        }
+
+        Section("关键参数 · ${template.category.nameZh} 模板")
+        Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            template.heroSpecLabels.forEachIndexed { i, label ->
+                LabeledField(label, specValues[i], { specValues[i] = it })
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+private fun TopBar(
+    title: String,
+    canSave: Boolean,
+    onCancel: () -> Unit,
+    onSave: () -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "取消",
+            color = colors.sub,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable(onClick = onCancel)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = title,
+            color = colors.sub,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = "保存",
+            color = if (canSave) colors.terra else colors.sub.copy(alpha = 0.4f),
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier
+                .clickable(enabled = canSave, onClick = onSave)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun Section(label: String) {
+    val colors = LocalTreasureColors.current
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "取消",
-                color = colors.sub,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .clickable(onClick = onCancel)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = if (initial != null) "AI 预填 · ${template.category.nameZh}"
-                       else "新增 · ${template.category.nameZh}",
+                text = label,
                 color = colors.sub,
                 style = MaterialTheme.typography.labelSmall,
             )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = "保存",
-                color = if (canSave) colors.terra else colors.sub.copy(alpha = 0.4f),
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier
-                    .clickable(enabled = canSave) {
-                        vm.save(
-                            template = template,
-                            brand = brand,
-                            model = model,
-                            nickname = nickname,
-                            acquired = acquired,
-                            oneLiner = oneLiner,
-                            status = status,
-                            heroSpecValues = specValues.toList(),
-                            onSaved = onSaved,
-                        )
-                    }
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.55f)
-                .align(Alignment.CenterHorizontally)
-                .aspectRatio(1f)
-                .background(colors.card)
-                .border(0.5.dp, colors.line)
-                .padding(20.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            HeroIllustration(
-                item = templatePreviewItem(template),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        SectionLabel("BASICS")
-        FormField("品牌 brand", brand, { brand = it })
-        FormField("型号 model", model, { model = it })
-        FormField("昵称 nickname", nickname, { nickname = it })
-        FormField("购入日期 (YYYY-MM-DD)", acquired, { acquired = it })
-        FormField("一句话简介", oneLiner, { oneLiner = it })
-
-        Spacer(Modifier.height(20.dp))
-        SectionLabel("STATUS")
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            FormChip("Owned",  status == ItemStatus.OWNED)  { status = ItemStatus.OWNED }
-            FormChip("Parted", status == ItemStatus.PARTED) { status = ItemStatus.PARTED }
-            FormChip("Rented", status == ItemStatus.RENTED) { status = ItemStatus.RENTED }
-        }
-
-        Spacer(Modifier.height(20.dp))
-        SectionLabel("HERO SPECS · ${template.category.nameZh}模板")
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            template.heroSpecLabels.forEachIndexed { i, label ->
-                FormField(label, specValues[i], { specValues[i] = it })
-            }
+            Spacer(Modifier.width(10.dp))
+            Box(modifier = Modifier
+                .weight(1f)
+                .height(0.5.dp)
+                .background(colors.line))
         }
     }
 }
 
 @Composable
-private fun SectionLabel(text: String) {
-    val colors = LocalTreasureColors.current
-    Text(
-        text = text,
-        color = colors.sub,
-        style = MaterialTheme.typography.labelSmall,
-        modifier = Modifier.padding(top = 6.dp, bottom = 6.dp),
-    )
-}
-
-@Composable
-private fun FormField(
-    placeholder: String,
+private fun LabeledField(
+    label: String,
     value: String,
     onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
+    hint: String? = null,
 ) {
     val colors = LocalTreasureColors.current
-    Column(modifier = modifier) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            text = placeholder,
+            text = label,
             color = colors.sub,
             style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(bottom = 4.dp),
+            modifier = Modifier.width(56.dp),
         )
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(colors.card)
-                .border(0.5.dp, colors.line)
-                .padding(horizontal = 12.dp, vertical = 12.dp),
-        ) {
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                singleLine = true,
-                cursorBrush = SolidColor(colors.terra),
-                textStyle = LocalTextStyle.current.copy(
-                    color = colors.ink,
-                    fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
-                    fontSize = MaterialTheme.typography.bodyLarge.fontSize,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                if (value.isEmpty()) {
+                    Text(
+                        text = hint ?: "",
+                        color = colors.sub.copy(alpha = 0.4f),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    cursorBrush = SolidColor(colors.terra),
+                    textStyle = LocalTextStyle.current.copy(
+                        color = colors.ink,
+                        fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
+                        fontSize = MaterialTheme.typography.bodyLarge.fontSize,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
         }
     }
 }
 
 @Composable
-private fun FormChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
     val colors = LocalTreasureColors.current
-    val bg = if (selected) colors.ink else androidx.compose.ui.graphics.Color.Transparent
-    val fg = if (selected) colors.paper else colors.ink
-    val border = if (selected) colors.ink else colors.line
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(bg)
-            .border(0.5.dp, border, RoundedCornerShape(999.dp))
+            .background(if (selected) colors.ink else Color.Transparent)
+            .border(
+                0.5.dp,
+                if (selected) colors.ink else colors.line,
+                RoundedCornerShape(999.dp),
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
-        Text(label, color = fg, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = label,
+            color = if (selected) colors.paper else colors.ink,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
-
-private fun templatePreviewItem(template: CategoryTemplate): Item =
-    Item(
-        id = "preview",
-        category = template.category,
-        brand = "",
-        model = "",
-        nickname = "",
-        acquired = "",
-        parted = null,
-        status = ItemStatus.OWNED,
-        palette = template.palette,
-        oneLiner = "",
-        heroVector = template.heroVector,
-        heroSpecs = emptyList(),
-        specs = emptyMap(),
-        history = emptyList(),
-        photos = emptyList(),
-        createdAt = 0L,
-        updatedAt = 0L,
-    )
