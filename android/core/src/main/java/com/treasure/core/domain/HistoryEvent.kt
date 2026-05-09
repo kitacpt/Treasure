@@ -1,7 +1,9 @@
 package com.treasure.core.domain
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
+@Immutable
 @Serializable
 data class HistoryEvent(
     val date: String,           // YYYY-MM-DD

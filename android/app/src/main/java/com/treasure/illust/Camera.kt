@@ -13,7 +13,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 @Composable
-fun Camera(palette: List<Color>, modifier: Modifier = Modifier) {
+fun Camera(palette: IllustPalette, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         drawInViewBox(340f, 240f) {
             val (c0, c1, c2, _) = palette4(palette)

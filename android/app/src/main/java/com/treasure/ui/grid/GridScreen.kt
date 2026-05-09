@@ -36,18 +36,35 @@ import com.treasure.core.domain.Category
 import com.treasure.core.domain.Item
 import com.treasure.theme.LocalTreasureColors
 import com.treasure.illust.HeroIllustration
+import com.treasure.ui.components.HeroAvatar
 
 @Composable
 fun GridRoute(
     initialCategoryId: String,
+    onCategoryChanged: (String) -> Unit,
     onBack: () -> Unit,
     onOpenItem: (String) -> Unit,
     vm: GridViewModel = viewModel(factory = GridViewModel.factory(initialCategoryId)),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    // Cycle 0016：之前从门厅点 doorway 后，gridCategoryId 变了，但 ViewModelStore
+    // 仍然返回最早创建的 GridViewModel（factory 的 initialCategory 被忽略），结果
+    // 永远停在第一次落到 GRID 页时的品类。靠 LaunchedEffect 监听 initialCategoryId
+    // 改动，调度 selectCategory。
+    androidx.compose.runtime.LaunchedEffect(initialCategoryId) {
+        val target: com.treasure.core.domain.Category? =
+            if (initialCategoryId == GridViewModel.ALL_FILTER_ID || initialCategoryId.isBlank()) null
+            else com.treasure.core.domain.Category.fromId(initialCategoryId)
+        if (state.currentCategory != target) vm.selectCategory(target)
+    }
     GridScreen(
         state = state,
-        onSelectCategory = vm::selectCategory,
+        onSelectCategory = { cat ->
+            // Cycle 0019：chip 点击 → vm 立刻切 + 通知 MainScreen 更新 saved
+            // state，避免 Detail pop 回来时 LaunchedEffect 用旧 id 覆盖。
+            vm.selectCategory(cat)
+            onCategoryChanged(cat?.id ?: GridViewModel.ALL_FILTER_ID)
+        },
         onOpenItem = onOpenItem,
         onBack = onBack,
     )
@@ -56,7 +73,7 @@ fun GridRoute(
 @Composable
 fun GridScreen(
     state: GridUiState,
-    onSelectCategory: (Category) -> Unit,
+    onSelectCategory: (Category?) -> Unit,
     onOpenItem: (String) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -115,17 +132,32 @@ private fun Header(total: Int) {
 @Composable
 private fun CategoryChips(
     state: GridUiState,
-    onSelectCategory: (Category) -> Unit,
+    onSelectCategory: (Category?) -> Unit,
 ) {
-    val scroll = rememberScrollState()
-    Row(
+    // 头号 chip = "全部"（null 过滤），后面跟 6 个品类。LazyRow 让我们能 animate
+    // 滚到选中那个，从门厅过来时不必再手动拖。
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val selectedIndex: Int = if (state.currentCategory == null) 0
+        else 1 + Category.entries.indexOf(state.currentCategory).coerceAtLeast(0)
+    androidx.compose.runtime.LaunchedEffect(selectedIndex) {
+        listState.animateScrollToItem(selectedIndex)
+    }
+    androidx.compose.foundation.lazy.LazyRow(
+        state = listState,
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(scroll)
             .padding(top = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Category.entries.forEach { c ->
+        item {
+            AllChip(
+                count = state.totalCount,
+                selected = state.currentCategory == null,
+                onClick = { onSelectCategory(null) },
+            )
+        }
+        items(Category.entries.size) { idx ->
+            val c = Category.entries[idx]
             CategoryChip(
                 category = c,
                 count = state.countByCategory[c] ?: 0,
@@ -133,6 +165,34 @@ private fun CategoryChips(
                 onClick = { onSelectCategory(c) },
             )
         }
+    }
+}
+
+@Composable
+private fun AllChip(count: Int, selected: Boolean, onClick: () -> Unit) {
+    val colors = LocalTreasureColors.current
+    val bg = if (selected) colors.ink else androidx.compose.ui.graphics.Color.Transparent
+    val fg = if (selected) colors.paper else colors.ink
+    val border = if (selected) colors.ink else colors.line
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(bg)
+            .border(0.5.dp, border, RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        Text(
+            text = "全部",
+            color = fg,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = "  $count",
+            color = fg.copy(alpha = 0.5f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
@@ -192,7 +252,7 @@ private fun ItemCard(item: Item, onClick: () -> Unit) {
                     .fillMaxWidth(0.92f)
                     .aspectRatio(1f),
             ) {
-                HeroIllustration(item = item, modifier = Modifier.fillMaxSize())
+                HeroAvatar(item = item, modifier = Modifier.fillMaxSize())
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -213,7 +273,7 @@ private fun ItemCard(item: Item, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EmptyHint(category: Category) {
+private fun EmptyHint(category: Category?) {
     val colors = LocalTreasureColors.current
     Box(
         modifier = Modifier
@@ -222,7 +282,8 @@ private fun EmptyHint(category: Category) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "${category.nameZh} 还没有收藏",
+            text = if (category == null) "图鉴还空着 — 去录入页加点东西"
+                else "${category.nameZh} 还没有收藏",
             color = colors.sub,
             style = MaterialTheme.typography.bodyMedium,
         )

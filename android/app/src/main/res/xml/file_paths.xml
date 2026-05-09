@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Camera capture writes JPEGs into filesDir/captures so we can hand
+         the camera app a content:// uri via FileProvider, then copy the
+         file into the item's photos folder. -->
+    <files-path name="captures" path="captures/" />
+</paths>

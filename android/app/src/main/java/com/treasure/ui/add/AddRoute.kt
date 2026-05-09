@@ -34,7 +34,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.treasure.core.domain.Category
 import com.treasure.theme.LocalTreasureColors
-import com.treasure.voice.VoiceCapture
 
 private enum class AddMode { Chat, Preview }
 
@@ -51,8 +50,8 @@ fun AddRoute(
 ) {
     val colors = LocalTreasureColors.current
     val state by vm.state.collectAsStateWithLifecycle()
+    val recents by vm.recentConversations.collectAsStateWithLifecycle()
     var mode by remember { mutableStateOf(AddMode.Chat) }
-    var voiceOn by remember { mutableStateOf(false) }
     var historyOpen by remember { mutableStateOf(false) }
     var manualPickerOpen by remember { mutableStateOf(false) }
     var manualSession by remember { mutableStateOf<CategoryTemplate?>(null) }
@@ -61,87 +60,83 @@ fun AddRoute(
     // come back from Settings).
     LaunchedEffect(Unit) { vm.refreshAiAvailability() }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding(),
-    ) {
-        when (mode) {
-            AddMode.Chat -> AddChat(
-                state = state,
-                conversations = vm.recentConversations,
-                historyOpen = historyOpen,
-                onToggleHistory = { historyOpen = !historyOpen },
-                onOpenManual = { manualPickerOpen = true },
-                onNewChat = { vm.newConversation() },
-                onSendText = vm::sendText,
-                onSendPhoto = vm::sendPhoto,
-                onStartVoice = { voiceOn = true },
-                onOpenDraft = { mode = AddMode.Preview },
-                onGoSettings = onGoSettings,
-            )
-            AddMode.Preview -> AddPreview(
-                draft = state.draft,
-                onBack = { mode = AddMode.Chat },
-                onUpdateField = vm::updateDraftField,
-                onConfirm = {
-                    vm.commitDraft { id ->
-                        // After save, drop back into a fresh chat so the
-                        // user can keep adding without going back through
-                        // the control island.
-                        vm.newConversation()
-                        mode = AddMode.Chat
-                        onSaved(id)
-                    }
-                },
-            )
-        }
-
-        if (voiceOn) {
-            VoiceCapture(
-                onResult = { transcript ->
-                    voiceOn = false
-                    vm.sendVoice(transcript)
-                },
-                onCancel = { voiceOn = false },
-                onUnavailable = {
-                    // Some Chinese ROMs without Google services have no
-                    // SpeechRecognizer. Fall back so the user still
-                    // gets feedback.
-                    voiceOn = false
-                    vm.sendVoice("（设备未提供语音识别 · 已记录占位语音）")
-                },
-            )
+    // Cycle 0019：消费 shareIntake — 从外部 app 分享进来的文字一旦到，就把
+    // 它当成用户在录入页发了一条文本消息派给 AI；消费后清空。
+    val app = androidx.compose.ui.platform.LocalContext.current
+        .applicationContext as com.treasure.TreasureApp
+    LaunchedEffect(Unit) {
+        app.shareIntake.collect { text ->
+            if (!text.isNullOrBlank()) {
+                vm.sendText(text)
+                app.shareIntake.value = null
+            }
         }
     }
 
-    // Manual pop-up: 4 category chips → opens CategoryForm in a sheet
-    if (manualPickerOpen) {
-        ManualCategoryPicker(
-            onCancel = { manualPickerOpen = false },
-            onPick = { c ->
-                manualPickerOpen = false
-                manualSession = CategoryTemplates.forCategory(c)
-            },
-        )
-    }
-    manualSession?.let { template ->
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
-            onDismissRequest = { manualSession = null },
-            sheetState = sheetState,
-            containerColor = colors.paper,
-            contentColor = colors.ink,
+    Box(modifier = Modifier.fillMaxSize().background(colors.paper)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
         ) {
-            CategoryForm(
-                template = template,
-                onCancel = { manualSession = null },
-                onSaved = { id ->
-                    manualSession = null
-                    onSaved(id)
+            when (mode) {
+                AddMode.Chat -> AddChat(
+                    state = state,
+                    conversations = recents,
+                    historyOpen = historyOpen,
+                    onToggleHistory = { historyOpen = !historyOpen },
+                    onOpenManual = { manualPickerOpen = true },
+                    onNewChat = { vm.newConversation() },
+                    onPickConversation = { id, title -> vm.openConversation(id, title) },
+                    onRenameConversation = vm::renameConversation,
+                    onDeleteConversation = vm::deleteConversation,
+                    onSendText = vm::sendText,
+                    onSendPhoto = vm::sendPhoto,
+                    onOpenDraft = { mode = AddMode.Preview },
+                    onGoSettings = onGoSettings,
+                )
+                AddMode.Preview -> AddPreview(
+                    draft = state.draft,
+                    onBack = { mode = AddMode.Chat },
+                    onUpdateField = vm::updateDraftField,
+                    onConfirm = {
+                        vm.commitDraft { id ->
+                            vm.newConversation()
+                            mode = AddMode.Chat
+                            onSaved(id)
+                        }
+                    },
+                )
+            }
+        }
+
+        // Manual pop-up: 4 category chips → opens CategoryForm in a sheet
+        if (manualPickerOpen) {
+            ManualCategoryPicker(
+                onCancel = { manualPickerOpen = false },
+                onPick = { c ->
+                    manualPickerOpen = false
+                    manualSession = CategoryTemplates.forCategory(c)
                 },
             )
+        }
+        manualSession?.let { template ->
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                onDismissRequest = { manualSession = null },
+                sheetState = sheetState,
+                containerColor = colors.paper,
+                contentColor = colors.ink,
+            ) {
+                CategoryForm(
+                    template = template,
+                    onCancel = { manualSession = null },
+                    onSaved = { id ->
+                        manualSession = null
+                        onSaved(id)
+                    },
+                )
+            }
         }
     }
 }
@@ -170,18 +165,6 @@ private fun ManualCategoryPicker(
                 .padding(20.dp)
                 .clickable(enabled = false) {},
         ) {
-            Text(
-                text = "手动录入 · 选品类",
-                color = colors.ink,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "TAP A ROOM TO BEGIN",
-                color = colors.sub,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Spacer(Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Category.entries.forEach { c ->
                     Row(

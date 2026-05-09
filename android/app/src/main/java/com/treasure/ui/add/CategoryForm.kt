@@ -10,7 +10,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,8 +36,14 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.treasure.core.ai.ItemDraft
+import com.treasure.core.domain.HeroVector
+import com.treasure.core.domain.Item
 import com.treasure.core.domain.ItemStatus
+import com.treasure.illust.HeroIllustration
 import com.treasure.theme.LocalTreasureColors
+import com.treasure.ui.components.EditPageHeader
+import com.treasure.ui.components.HeroAvatarPicker
+import com.treasure.ui.components.SectionDivider
 import java.time.LocalDate
 
 /**
@@ -57,6 +66,7 @@ fun CategoryForm(
     var acquired by remember { mutableStateOf(LocalDate.now().toString()) }
     var oneLiner by remember { mutableStateOf(initial?.oneLiner.orEmpty()) }
     var status by remember { mutableStateOf(ItemStatus.OWNED) }
+    var heroVector by remember(template.category) { mutableStateOf(template.heroVector) }
     val specValues = remember {
         mutableStateListOf<String>().apply {
             // First 4 of AI's specs map to the template hero slots positionally
@@ -68,59 +78,102 @@ fun CategoryForm(
 
     val canSave = brand.isNotBlank() && model.isNotBlank()
 
+    val pageTitle = if (initial != null) "Refine" else "New"
+    val pageSubtitle = template.category.nameZh
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(bottom = 24.dp),
     ) {
-        TopBar(
-            title = if (initial != null) "AI 预填 · ${template.category.nameZh}"
-                    else "新增 · ${template.category.nameZh}",
-            canSave = canSave,
-            onCancel = onCancel,
-            onSave = {
-                vm.saveManual(
-                    template = template,
-                    brand = brand,
-                    model = model,
-                    nickname = nickname,
-                    acquired = acquired,
-                    oneLiner = oneLiner,
-                    status = status,
-                    heroSpecValues = specValues.toList(),
-                    onSaved = onSaved,
+        EditPageHeader(
+            title = pageTitle,
+            subtitle = pageSubtitle,
+            leading = {
+                Text(
+                    text = "取消",
+                    color = colors.sub,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(onClick = onCancel)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                )
+            },
+            trailing = {
+                Text(
+                    text = "保存",
+                    color = if (canSave) colors.terra else colors.sub.copy(alpha = 0.4f),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier
+                        .clickable(enabled = canSave, onClick = {
+                            vm.saveManual(
+                                template = template,
+                                brand = brand,
+                                model = model,
+                                nickname = nickname,
+                                acquired = acquired,
+                                oneLiner = oneLiner,
+                                status = status,
+                                heroSpecValues = specValues.toList(),
+                                heroVector = heroVector,
+                                onSaved = onSaved,
+                            )
+                        })
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                 )
             },
         )
 
+        Spacer(Modifier.height(8.dp))
+        HeroAvatarPicker(
+            category = template.category,
+            palette = template.palette,
+            options = remember(template.category) { heroVectorOptionsFor(template.category) },
+            selected = heroVector,
+            onSelect = { heroVector = it },
+        )
+        Spacer(Modifier.height(8.dp))
+
+        // 跟 Edit 页一致的 Section 节奏：基础 / 标签 / 参数。手动录入还没物品，
+        // 所以历史 / 实拍 / DANGER ZONE 不出现。
         Section("基础")
         Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            LabeledField("品牌", brand,    { brand = it })
-            LabeledField("型号", model,    { model = it })
-            LabeledField("昵称", nickname, { nickname = it })
-            LabeledField("简介", oneLiner, { oneLiner = it })
+            LabeledField("品牌", brand,    { brand = it }, hint = "如 Yonex / Sony / Apple")
+            LabeledField("型号", model,    { model = it }, hint = "如 NF-700 · α7 IV")
+            LabeledField("昵称", nickname, { nickname = it }, hint = "私密外号 · 可空")
+            LabeledField("简介", oneLiner, { oneLiner = it }, hint = "一句话感受")
         }
 
-        Section("时间")
-        Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            LabeledField("购入", acquired, { acquired = it }, hint = "YYYY-MM-DD")
+        Section("标签")
+        Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "状态",
+                    color = colors.sub,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.width(56.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Chip("Owned",  status == ItemStatus.OWNED)  { status = ItemStatus.OWNED }
+                    Chip("Parted", status == ItemStatus.PARTED) { status = ItemStatus.PARTED }
+                    Chip("Rented", status == ItemStatus.RENTED) { status = ItemStatus.RENTED }
+                }
+            }
         }
 
-        Section("状态")
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Chip("Owned",  status == ItemStatus.OWNED)  { status = ItemStatus.OWNED }
-            Chip("Parted", status == ItemStatus.PARTED) { status = ItemStatus.PARTED }
-            Chip("Rented", status == ItemStatus.RENTED) { status = ItemStatus.RENTED }
-        }
-
-        Section("关键参数 · ${template.category.nameZh} 模板")
+        Section("参数 · ${template.category.nameZh}")
         Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             template.heroSpecLabels.forEachIndexed { i, label ->
-                LabeledField(label, specValues[i], { specValues[i] = it })
+                LabeledField(
+                    label = label,
+                    value = specValues[i],
+                    onValueChange = { specValues[i] = it },
+                    hint = template.heroSpecHints.getOrNull(i),
+                )
             }
         }
 
@@ -129,65 +182,7 @@ fun CategoryForm(
 }
 
 @Composable
-private fun TopBar(
-    title: String,
-    canSave: Boolean,
-    onCancel: () -> Unit,
-    onSave: () -> Unit,
-) {
-    val colors = LocalTreasureColors.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "取消",
-            color = colors.sub,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .clickable(onClick = onCancel)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = title,
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = "保存",
-            color = if (canSave) colors.terra else colors.sub.copy(alpha = 0.4f),
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier
-                .clickable(enabled = canSave, onClick = onSave)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-        )
-    }
-}
-
-@Composable
-private fun Section(label: String) {
-    val colors = LocalTreasureColors.current
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = label,
-                color = colors.sub,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Spacer(Modifier.width(10.dp))
-            Box(modifier = Modifier
-                .weight(1f)
-                .height(0.5.dp)
-                .background(colors.line))
-        }
-    }
-}
+private fun Section(label: String) = SectionDivider(label = label)
 
 @Composable
 private fun LabeledField(

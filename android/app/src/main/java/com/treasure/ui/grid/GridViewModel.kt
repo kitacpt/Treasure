@@ -16,7 +16,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 
 data class GridUiState(
-    val currentCategory: Category = Category.PHOTO,
+    /** null = 全部品类聚合 */
+    val currentCategory: Category? = Category.PHOTO,
     val itemsInCategory: List<Item> = emptyList(),
     val countByCategory: Map<Category, Int> = emptyMap(),
     val totalCount: Int = 0,
@@ -24,19 +25,20 @@ data class GridUiState(
 
 class GridViewModel(
     private val repo: ItemRepository,
-    initialCategory: Category,
+    initialCategory: Category?,
 ) : ViewModel() {
 
-    private val selected = MutableStateFlow(initialCategory)
+    private val selected = MutableStateFlow<Category?>(initialCategory)
 
-    fun selectCategory(category: Category) {
+    /** 传 null 切到 "全部" 聚合视图 */
+    fun selectCategory(category: Category?) {
         selected.value = category
     }
 
     val state: StateFlow<GridUiState> = combine(repo.items, selected) { items, cat ->
         GridUiState(
             currentCategory = cat,
-            itemsInCategory = items.filter { it.category == cat },
+            itemsInCategory = if (cat == null) items else items.filter { it.category == cat },
             countByCategory = items.groupBy { it.category }.mapValues { it.value.size },
             totalCount = items.size,
         )
@@ -49,11 +51,15 @@ class GridViewModel(
     companion object {
         const val ARG_CATEGORY_ID = "categoryId"
 
+        const val ALL_FILTER_ID = "all"
+
         fun factory(initialCategoryId: String): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer {
                     val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as TreasureApp
-                    GridViewModel(app.repository, Category.fromId(initialCategoryId))
+                    val initial = if (initialCategoryId == ALL_FILTER_ID) null
+                                  else Category.fromId(initialCategoryId)
+                    GridViewModel(app.repository, initial)
                 }
             }
     }

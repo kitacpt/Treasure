@@ -28,18 +28,25 @@ class AnthropicClient(
     private val apiKey: String,
     private val model: String = DEFAULT_MODEL,
     private val baseUrl: String = "https://api.anthropic.com",
+    /** null = 用 provider 的默认采样温度 */
+    private val temperature: Double? = null,
+    /** true 时给 messages 请求加 `thinking` block */
+    private val thinkingEnabled: Boolean = false,
     httpClient: OkHttpClient? = null,
 ) : AiClient {
 
-    private val client: OkHttpClient = httpClient ?: defaultHttpClient()
+    private val client: OkHttpClient = httpClient ?: defaultHttpClient(
+        callTimeoutSec = if (thinkingEnabled) 360L else 120L,
+    )
     private val json = Json { ignoreUnknownKeys = true }
 
     override suspend fun extractItemDraft(
         text: String,
         imageJpegBytes: ByteArray?,
+        priorTurns: List<AiTurn>,
     ): Result<ItemDraft> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = buildPayload(text, imageJpegBytes)
+            val payload = buildPayload(text, imageJpegBytes, priorTurns)
             val response = client.newCall(
                 Request.Builder()
                     .url("$baseUrl/v1/messages")
@@ -60,12 +67,23 @@ class AnthropicClient(
         }
     }
 
-    private fun buildPayload(text: String, image: ByteArray?): String {
+    private fun buildPayload(
+        text: String,
+        image: ByteArray?,
+        priorTurns: List<AiTurn>,
+    ): String {
         val toolSchema = json.parseToJsonElement(EXTRACT_TOOL_PARAMETERS).jsonObject
         val payload = buildJsonObject {
             put("model", model)
-            put("max_tokens", 1024)
+            put("max_tokens", if (thinkingEnabled) 4096 else 1024)
             put("system", SYSTEM_PROMPT)
+            temperature?.let { put("temperature", it) }
+            if (thinkingEnabled) {
+                putJsonObject("thinking") {
+                    put("type", "enabled")
+                    put("budget_tokens", 2048)
+                }
+            }
             putJsonArray("tools") {
                 add(buildJsonObject {
                     put("name", EXTRACT_TOOL_NAME)
@@ -73,11 +91,27 @@ class AnthropicClient(
                     put("input_schema", toolSchema)
                 })
             }
-            putJsonObject("tool_choice") {
-                put("type", "tool")
-                put("name", EXTRACT_TOOL_NAME)
+            // thinking 开启时不能强制 tool_choice = tool —— 让模型 auto 选
+            if (thinkingEnabled) {
+                putJsonObject("tool_choice") { put("type", "auto") }
+            } else {
+                putJsonObject("tool_choice") {
+                    put("type", "tool")
+                    put("name", EXTRACT_TOOL_NAME)
+                }
             }
             putJsonArray("messages") {
+                priorTurns.forEach { turn ->
+                    add(buildJsonObject {
+                        put("role", if (turn.role == AiRole.USER) "user" else "assistant")
+                        putJsonArray("content") {
+                            add(buildJsonObject {
+                                put("type", "text")
+                                put("text", turn.text)
+                            })
+                        }
+                    })
+                }
                 add(buildJsonObject {
                     put("role", "user")
                     putJsonArray("content") {
@@ -107,20 +141,39 @@ class AnthropicClient(
         val response = json.parseToJsonElement(body).jsonObject
         val content = response["content"]?.jsonArray
             ?: throw IllegalStateException("response missing 'content'")
+        // 优先：tool_use block（强制 tool_choice 时一定有）
         val toolUse = content.firstOrNull {
             it.jsonObject["type"]?.jsonPrimitive?.content == "tool_use"
-        }?.jsonObject ?: throw IllegalStateException("response had no tool_use block")
-        val input = toolUse["input"]?.jsonObject
-            ?: throw IllegalStateException("tool_use missing 'input'")
-        return json.decodeFromJsonElement(ItemDraft.serializer(), input)
+        }?.jsonObject
+        if (toolUse != null) {
+            val input = toolUse["input"]?.jsonObject
+                ?: throw IllegalStateException("tool_use missing 'input'")
+            return json.decodeFromJsonElement(ItemDraft.serializer(), input)
+        }
+        // 回退：thinking 模式 + tool_choice=auto 时，模型可能把 JSON 直接写
+        // 在 text block 里。抓不到 JSON 就当用户没提物品 — 模型聊天回复 surface
+        // 成普通助手消息，不当错误。
+        val textBlock = content.firstOrNull {
+            it.jsonObject["type"]?.jsonPrimitive?.content == "text"
+        }?.jsonObject?.get("text")?.jsonPrimitive?.content
+            ?: throw IllegalStateException("response had no tool_use or text block")
+        val jsonChunk = extractFirstJsonObject(textBlock)
+        if (jsonChunk != null) {
+            return json.decodeFromString(ItemDraft.serializer(), jsonChunk)
+        }
+        throw ChatOnlyResponseException(textBlock.trim())
     }
 
     companion object {
         const val DEFAULT_MODEL = "claude-haiku-4-5-20251001"
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
-        private fun defaultHttpClient() = OkHttpClient.Builder()
+        private fun defaultHttpClient(callTimeoutSec: Long = 120) = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(120, TimeUnit.SECONDS)
+            // OkHttp 默认 readTimeout = 10s。thinking 模型第一个 byte 可能
+            // 30-180s 之后才到，不抬高这条 callTimeout 调多大都救不了。
+            .readTimeout(callTimeoutSec, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(callTimeoutSec, TimeUnit.SECONDS)
             .build()
     }
 }

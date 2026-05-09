@@ -12,7 +12,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 @Composable
-fun Car(palette: List<Color>, modifier: Modifier = Modifier) {
+fun Car(palette: IllustPalette, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         drawInViewBox(380f, 220f) {
             val (c0, c1, c2, c3) = palette4(palette)

@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -31,6 +32,7 @@ import com.treasure.core.domain.Category
 import com.treasure.core.domain.Item
 import com.treasure.theme.LocalTreasureColors
 import com.treasure.illust.HeroIllustration
+import com.treasure.ui.components.HeroAvatar
 import com.treasure.ui.components.Ornament
 
 @Composable
@@ -124,7 +126,6 @@ private fun Tally(state: PortalUiState) {
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
         TallyItem(state.totalItems, "items")
-        TallyItem(state.ownedCount, "owned")
         TallyItem(state.roomsCount, "rooms")
     }
 }
@@ -165,37 +166,55 @@ private fun DoorwaysGrid(
     onEnterCategory: (Category) -> Unit,
 ) {
     val cats = Category.entries
+    val romans = listOf("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X")
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 22.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            DoorwayCard(cats[0], "I",
-                state.countByCategory[cats[0]] ?: 0,
-                state.latestByCategory[cats[0]],
-                Modifier.weight(1f),
-                onClick = { onEnterCategory(cats[0]) })
-            DoorwayCard(cats[1], "II",
-                state.countByCategory[cats[1]] ?: 0,
-                state.latestByCategory[cats[1]],
-                Modifier.weight(1f),
-                onClick = { onEnterCategory(cats[1]) })
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            DoorwayCard(cats[2], "III",
-                state.countByCategory[cats[2]] ?: 0,
-                state.latestByCategory[cats[2]],
-                Modifier.weight(1f),
-                onClick = { onEnterCategory(cats[2]) })
-            DoorwayCard(cats[3], "IV",
-                state.countByCategory[cats[3]] ?: 0,
-                state.latestByCategory[cats[3]],
-                Modifier.weight(1f),
-                onClick = { onEnterCategory(cats[3]) })
+        cats.chunked(2).forEachIndexed { rowIdx, pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                pair.forEachIndexed { colIdx, c ->
+                    val romanIdx = rowIdx * 2 + colIdx
+                    DoorwayCard(
+                        category = c,
+                        roman = romans.getOrNull(romanIdx) ?: "",
+                        count = state.countByCategory[c] ?: 0,
+                        latest = state.latestByCategory[c],
+                        modifier = Modifier.weight(1f),
+                        onClick = { onEnterCategory(c) },
+                    )
+                }
+                if (pair.size == 1) {
+                    Box(modifier = Modifier.weight(1f)) {}
+                }
+            }
         }
     }
+}
+
+/**
+ * 当某品类还没有任何物品时，给 doorway 用品类模板里的默认 hero vector +
+ * palette 合成一个 stub Item，让 [HeroIllustration] 能画出该品类的代表插画
+ * （比如 Coffee 默认 espresso machine、Wine 默认 wine bottle），而不是兜底
+ * 的 generic 占位图。
+ */
+private fun stubItemFor(category: Category): Item {
+    val tpl = com.treasure.ui.add.CategoryTemplates.forCategory(category)
+    return Item(
+        id = "stub-${category.id}",
+        category = category,
+        brand = "", model = "", nickname = "", acquired = "", parted = null,
+        status = com.treasure.core.domain.ItemStatus.OWNED,
+        palette = tpl.palette,
+        oneLiner = "",
+        heroVector = tpl.heroVector,
+        specs = emptyList(),
+        history = emptyList(),
+        photos = emptyList(),
+        createdAt = 0L, updatedAt = 0L,
+    )
 }
 
 @Composable
@@ -232,7 +251,9 @@ private fun DoorwayCard(
                 .aspectRatio(1.6f),
             contentAlignment = Alignment.Center,
         ) {
-            HeroIllustration(item = latest, modifier = Modifier.fillMaxSize())
+            // 没有任何物品时用品类模板默认 vector 兜底
+            val displayItem = latest ?: remember(category) { stubItemFor(category) }
+            HeroAvatar(item = displayItem, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.height(10.dp))
         Box(
@@ -274,7 +295,7 @@ private fun LatestEntryCard(item: Item, onOpenItem: (String) -> Unit) {
                 .height(54.dp)
                 .aspectRatio(1.4f),
         ) {
-            HeroIllustration(item = item, modifier = Modifier.fillMaxSize())
+            HeroAvatar(item = item, modifier = Modifier.fillMaxSize())
         }
         Column(
             modifier = Modifier.padding(start = 14.dp).weight(1f),

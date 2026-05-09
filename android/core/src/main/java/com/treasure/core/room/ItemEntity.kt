@@ -9,6 +9,10 @@ import com.treasure.core.domain.HeroVector
 import com.treasure.core.domain.HistoryEvent
 import com.treasure.core.domain.Item
 import com.treasure.core.domain.ItemStatus
+import com.treasure.core.domain.PhotoCallout
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -28,6 +32,10 @@ internal data class ItemEntity(
     @ColumnInfo(name = "specs_json") val specsJson: String,
     @ColumnInfo(name = "history_json") val historyJson: String,
     @ColumnInfo(name = "photos_json") val photosJson: String,
+    /** Cycle 0010：照片文字标注 — JSON `Map<path, List<PhotoCallout>>`。空就是 "{}". */
+    @ColumnInfo(name = "callouts_json", defaultValue = "{}") val calloutsJson: String,
+    /** Cycle 0016：影集里被选作头像的那张照片 path，null = 用线描。 */
+    @ColumnInfo(name = "avatar_photo_path") val avatarPhotoPath: String?,
     @ColumnInfo(name = "created_at") val createdAt: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
 ) {
@@ -46,6 +54,8 @@ internal data class ItemEntity(
         specs = JsonCodec.decodeHeroSpecs(specsJson),
         history = JsonCodec.decodeHistory(historyJson),
         photos = JsonCodec.decodeStringList(photosJson),
+        callouts = JsonCodec.decodeCallouts(calloutsJson),
+        avatarPhotoPath = avatarPhotoPath,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
@@ -66,6 +76,8 @@ internal data class ItemEntity(
             specsJson = JsonCodec.encodeHeroSpecs(item.specs),
             historyJson = JsonCodec.encodeHistory(item.history),
             photosJson = JsonCodec.encodeStringList(item.photos),
+            calloutsJson = JsonCodec.encodeCallouts(item.callouts),
+            avatarPhotoPath = item.avatarPhotoPath,
             createdAt = item.createdAt,
             updatedAt = item.updatedAt,
         )
@@ -86,4 +98,13 @@ internal object JsonCodec {
     fun encodeHistory(value: List<HistoryEvent>): String = json.encodeToString(value)
     fun decodeHistory(text: String): List<HistoryEvent> =
         if (text.isBlank()) emptyList() else json.decodeFromString(text)
+
+    private val calloutsSerializer = MapSerializer(
+        String.serializer(),
+        ListSerializer(PhotoCallout.serializer()),
+    )
+    fun encodeCallouts(value: Map<String, List<PhotoCallout>>): String =
+        json.encodeToString(calloutsSerializer, value)
+    fun decodeCallouts(text: String): Map<String, List<PhotoCallout>> =
+        if (text.isBlank()) emptyMap() else json.decodeFromString(calloutsSerializer, text)
 }

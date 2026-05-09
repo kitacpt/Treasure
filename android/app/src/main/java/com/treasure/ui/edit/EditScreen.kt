@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -64,6 +65,9 @@ import com.treasure.illust.HeroIllustration
 import com.treasure.theme.LocalTreasureColors
 import com.treasure.theme.TreasureColors
 import com.treasure.ui.components.BackArrow
+import com.treasure.ui.components.EditPageHeader
+import com.treasure.ui.components.InlineDropdown
+import com.treasure.ui.components.SectionDivider
 import kotlin.math.roundToInt
 
 @Composable
@@ -86,6 +90,7 @@ fun EditRoute(
         onCancel = onDone,
         onUpdate = vm::update,
         onAddPhoto = vm::addPhoto,
+        onAddPhotos = vm::addPhotos,
         onRemovePhoto = vm::removePhoto,
         onDelete = { vm.delete(onDone) },
     )
@@ -97,6 +102,7 @@ fun EditScreen(
     onCancel: () -> Unit,
     onUpdate: (Item) -> Unit,
     onAddPhoto: (android.net.Uri) -> Unit,
+    onAddPhotos: (List<android.net.Uri>) -> Unit,
     onRemovePhoto: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -111,6 +117,7 @@ fun EditScreen(
     var status by remember(item.id) { mutableStateOf(item.status) }
     var category by remember(item.id) { mutableStateOf(item.category) }
     var heroVector by remember(item.id) { mutableStateOf(item.heroVector) }
+    var avatarPhoto by remember(item.id) { mutableStateOf(item.avatarPhotoPath) }
     val specs = remember(item.id) {
         mutableStateListOf<HeroSpec>().apply { addAll(item.specs) }
     }
@@ -124,6 +131,7 @@ fun EditScreen(
         status != item.status ||
         category != item.category ||
         heroVector != item.heroVector ||
+        avatarPhoto != item.avatarPhotoPath ||
         specs.toList() != item.specs
 
     fun commit() {
@@ -137,26 +145,98 @@ fun EditScreen(
             status = status,
             category = category,
             heroVector = heroVector,
+            avatarPhotoPath = avatarPhoto,
             specs = specs.toList()
                 .filter { it.label.isNotBlank() || it.value.isNotBlank() },
         ))
+    }
+
+    // 影集管理：launchers 必须在 Composable scope，所以扯到 EditScreen 顶层，
+    // 然后把 onTakePhoto / onPickPhotos 当回调传给头像选择器。
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var pendingCaptureUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val pickMultiple = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 9),
+    ) { uris -> if (uris.isNotEmpty()) onAddPhotos(uris) }
+    val takePicture = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+    ) { success ->
+        val uri = pendingCaptureUri
+        pendingCaptureUri = null
+        if (success && uri != null) onAddPhoto(uri)
+    }
+    val cameraPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) launchCamera(context, takePicture) { pendingCaptureUri = it }
+    }
+    val startCamera: () -> Unit = {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.CAMERA,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            launchCamera(context, takePicture) { pendingCaptureUri = it }
+        } else {
+            cameraPermLauncher.launch(android.Manifest.permission.CAMERA)
+        }
+    }
+    val pickPhotos: () -> Unit = {
+        pickMultiple.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+        )
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.paper)
-            .statusBarsPadding(),
+            .statusBarsPadding()
+            .imePadding(),
     ) {
         LazyColumn(
             contentPadding = PaddingValues(top = 8.dp, bottom = 60.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
-            item { TopBar(dirty = dirty, onBack = onCancel, onSave = ::commit) }
-            item { Spacer(Modifier.height(18.dp)) }
             item {
-                Header()
-                Spacer(Modifier.height(20.dp))
+                EditPageHeader(
+                    title = "Edit",
+                    subtitle = item.category.nameZh,
+                    leading = { BackArrow(color = colors.ink, onClick = onCancel) },
+                    trailing = {
+                        Text(
+                            text = if (dirty) "保存" else "已保存",
+                            color = if (dirty) colors.terra else colors.sub.copy(alpha = 0.5f),
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier
+                                .clickable(enabled = dirty, onClick = ::commit)
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                        )
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // 头像式插画选择器：默认只展示选中那一张大图，点开才展候选
+            item {
+                Spacer(Modifier.height(6.dp))
+                com.treasure.ui.components.HeroAvatarPicker(
+                    category = category,
+                    palette = item.palette,
+                    options = remember(category) { com.treasure.ui.add.heroVectorOptionsFor(category) },
+                    selected = heroVector,
+                    onSelect = {
+                        heroVector = it
+                        // 选了线描就清掉头像照片，让头像回到插画
+                        avatarPhoto = null
+                    },
+                    photoOptions = item.photos,
+                    selectedPhoto = avatarPhoto,
+                    onSelectPhoto = { avatarPhoto = it },
+                    onTakePhoto = startCamera,
+                    onPickPhotos = pickPhotos,
+                    onRemovePhoto = onRemovePhoto,
+                )
+                Spacer(Modifier.height(8.dp))
             }
 
             item { Section("基础") }
@@ -169,14 +249,9 @@ fun EditScreen(
                 }
             }
 
-            item { Section("时间") }
-            item {
-                Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LabeledField("购入", acquired, { acquired = it }, hint = "YYYY-MM-DD")
-                    LabeledField("出手", parted,   { parted = it },   hint = "YYYY-MM-DD · 没出手就空")
-                }
-            }
-
+            // “时间” section 移除：购入 / 出手 都由 “历史” section 的 ACQUIRED /
+            // PARTED 事件负责。Item.acquired / parted 字段仍存（兼容老物品 +
+            // 历史事件转换），用户改时间走历史。
             item { Section("标签") }
             item {
                 Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -192,23 +267,21 @@ fun EditScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FieldLabel("品类")
                         Spacer(Modifier.width(LABEL_GAP))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Category.entries.forEach { c ->
-                                Chip(c.nameZh, category == c) { category = c }
-                            }
-                        }
+                        InlineDropdown(
+                            options = Category.entries,
+                            selected = category,
+                            label = { it.nameZh },
+                            onSelect = { category = it },
+                        )
                     }
                 }
             }
 
-            item { Section("插画") }
+            // “插画” section gone — moved to the avatar picker at the top.
+            // Keep an empty placeholder item so existing surrounding code
+            // doesn't shift unexpectedly when re-reading.
             item {
-                HeroVectorPicker(
-                    selected = heroVector,
-                    palette = item.palette,
-                    category = category,
-                    onSelect = { heroVector = it },
-                )
+                Spacer(Modifier.height(0.dp))
             }
 
             item { Section("参数 · 拖动选前 4 作关键参数") }
@@ -238,15 +311,8 @@ fun EditScreen(
                 )
             }
 
-            item { Section("实拍") }
-            item {
-                PhotoSection(
-                    photos = item.photos,
-                    onAddPhoto = onAddPhoto,
-                    onRemovePhoto = onRemovePhoto,
-                )
-            }
-
+            // 实拍 section 整合进顶部头像选择器（cycle 0017）：
+            // 拍照 / 选照片 / 长按删都在那里。
             item { Section("DANGER ZONE") }
             item { DangerZone(onDelete = onDelete) }
 
@@ -258,60 +324,9 @@ fun EditScreen(
 private val LABEL_WIDTH = 56.dp
 private val LABEL_GAP = 12.dp
 
-@Composable
-private fun TopBar(dirty: Boolean, onBack: () -> Unit, onSave: () -> Unit) {
-    val colors = LocalTreasureColors.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        BackArrow(color = colors.ink, onClick = onBack)
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = if (dirty) "保存" else "已保存",
-            color = if (dirty) colors.terra else colors.sub.copy(alpha = 0.5f),
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier
-                .clickable(enabled = dirty, onClick = onSave)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-        )
-    }
-}
 
 @Composable
-private fun Header() {
-    val colors = LocalTreasureColors.current
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
-        Text(
-            text = "EDIT",
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-        )
-    }
-}
-
-@Composable
-internal fun Section(label: String) {
-    val colors = LocalTreasureColors.current
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 26.dp, bottom = 12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = label,
-                color = colors.sub,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Spacer(Modifier.width(10.dp))
-            Box(modifier = Modifier
-                .weight(1f)
-                .height(0.5.dp)
-                .background(colors.line))
-        }
-        Spacer(Modifier.height(10.dp))
-    }
-}
+internal fun Section(label: String) = SectionDivider(label = label)
 
 @Composable
 internal fun FieldLabel(text: String) {
@@ -454,56 +469,6 @@ internal fun AddRowButton(label: String, onClick: () -> Unit) {
 
 // ── Hero vector picker ─────────────────────────────────────────────────
 
-@Composable
-private fun HeroVectorPicker(
-    selected: HeroVector,
-    palette: List<String>,
-    category: Category,
-    onSelect: (HeroVector) -> Unit,
-) {
-    val colors = LocalTreasureColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        HeroVector.entries.forEach { v ->
-            val on = v == selected
-            Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(colors.card)
-                    .border(if (on) 1.5.dp else 0.5.dp, if (on) colors.terra else colors.line)
-                    .clickable { onSelect(v) }
-                    .padding(8.dp),
-            ) {
-                HeroIllustration(
-                    item = previewItem(v, palette, category),
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-    }
-}
-
-private fun previewItem(v: HeroVector, palette: List<String>, category: Category): Item =
-    Item(
-        id = "preview",
-        category = category,
-        brand = "", model = "", nickname = "", acquired = "", parted = null,
-        status = ItemStatus.OWNED,
-        palette = palette,
-        oneLiner = "",
-        heroVector = v,
-        specs = emptyList(),
-        history = emptyList(),
-        photos = emptyList(),
-        createdAt = 0L, updatedAt = 0L,
-    )
-
 // ── Reorderable specs ─────────────────────────────────────────────────
 
 private val ROW_HEIGHT = 56.dp
@@ -528,9 +493,12 @@ private fun ReorderableSpecs(
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
         specs.forEachIndexed { idx, spec ->
-            // Hero divider sits BEFORE row index HERO_COUNT (between hero and tail)
+            // Hero divider sits BEFORE row index HERO_COUNT (between hero and tail).
+            // 拖动时 make-room shift 只按 rowHeightPx 算，divider 自己的高度会让
+            // 视觉上相邻行错位 + 被拖动行盖住分割线。所以拖动期间换成同高 Spacer，
+            // 拖完再展示分割线 — 看起来才像上下换位。
             if (idx == Item.HERO_SPEC_COUNT && specs.size > Item.HERO_SPEC_COUNT) {
-                HeroDivider()
+                if (dragging == -1) HeroDivider() else HeroDividerSpacer()
             }
 
             val isDragging = dragging == idx
@@ -649,6 +617,13 @@ private fun HeroDivider() {
                 .background(colors.terra.copy(alpha = 0.5f)),
         )
     }
+}
+
+/** 拖动时占位用的同高 spacer：跟 [HeroDivider] 视觉高度对齐
+ *  (vertical padding 8dp × 2 + 0.5dp line ≈ 16.5dp)，避免 layout 跳动。 */
+@Composable
+private fun HeroDividerSpacer() {
+    Spacer(modifier = Modifier.fillMaxWidth().height(16.5.dp))
 }
 
 @Composable
@@ -820,13 +795,13 @@ private fun HistoryEditDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     FieldLabel("类型")
                     Spacer(Modifier.width(LABEL_GAP))
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        HistoryKind.entries.forEach { k ->
-                            Chip(label = "${kindGlyph(k)} ${k.name.lowercase()}", selected = kind == k) {
-                                kind = k
-                            }
-                        }
-                    }
+                    InlineDropdown(
+                        options = HistoryKind.entries,
+                        selected = kind,
+                        label = { kindLabelZh(it) },
+                        glyph = { kindGlyph(it) },
+                        onSelect = { kind = it },
+                    )
                 }
                 LabeledField("标题", title, { title = it })
                 LabeledField("备注", note, { note = it })
@@ -855,6 +830,14 @@ private fun kindGlyph(kind: HistoryKind): String = when (kind) {
     HistoryKind.PARTED    -> "−"
 }
 
+private fun kindLabelZh(kind: HistoryKind): String = when (kind) {
+    HistoryKind.ACQUIRED  -> "购入"
+    HistoryKind.MILESTONE -> "里程碑"
+    HistoryKind.MAINTAIN  -> "保养"
+    HistoryKind.MOD       -> "改装"
+    HistoryKind.PARTED    -> "出手"
+}
+
 private fun kindColor(kind: HistoryKind, colors: TreasureColors): Color = when (kind) {
     HistoryKind.ACQUIRED  -> colors.terra
     HistoryKind.MILESTONE -> colors.ink
@@ -863,104 +846,20 @@ private fun kindColor(kind: HistoryKind, colors: TreasureColors): Color = when (
     HistoryKind.PARTED    -> colors.sub
 }
 
-// ── Photo section ───────────────────────────────────────────────────────
-
-@Composable
-private fun PhotoSection(
-    photos: List<String>,
-    onAddPhoto: (android.net.Uri) -> Unit,
-    onRemovePhoto: (String) -> Unit,
+private fun launchCamera(
+    context: android.content.Context,
+    launcher: androidx.activity.compose.ManagedActivityResultLauncher<android.net.Uri, Boolean>,
+    onPending: (android.net.Uri) -> Unit,
 ) {
-    val colors = LocalTreasureColors.current
-    var pendingDelete by remember { mutableStateOf<String?>(null) }
-
-    val pickPhoto = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-    ) { uri -> if (uri != null) onAddPhoto(uri) }
-
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
-        val rows = (listOf(null) + photos.map { it }).chunked(3)
-        rows.forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { entry ->
-                    Box(modifier = Modifier.weight(1f)) {
-                        if (entry == null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(1f)
-                                    .background(colors.card)
-                                    .border(0.5.dp, colors.terra.copy(alpha = 0.6f))
-                                    .clickable {
-                                        pickPhoto.launch(
-                                            PickVisualMediaRequest(
-                                                ActivityResultContracts.PickVisualMedia.ImageOnly,
-                                            ),
-                                        )
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = "+",
-                                    color = colors.terra,
-                                    style = MaterialTheme.typography.titleLarge,
-                                )
-                            }
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(1f)
-                                    .background(colors.card)
-                                    .border(0.5.dp, colors.line)
-                                    .pointerInput(entry) {
-                                        detectTapGestures(onLongPress = { pendingDelete = entry })
-                                    },
-                            ) {
-                                AsyncImage(
-                                    model = entry,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop,
-                                )
-                            }
-                        }
-                    }
-                }
-                repeat(3 - row.size) {
-                    Box(modifier = Modifier.weight(1f)) { }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = if (photos.isEmpty()) "点 + 添加实拍照片"
-                   else "长按一张可删除 · ${photos.size} 张",
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-        )
-    }
-
-    if (pendingDelete != null) {
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("删除这张照片？") },
-            text = { Text("文件会一并清除，无法恢复。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingDelete?.let(onRemovePhoto)
-                    pendingDelete = null
-                }) { Text("删除", color = colors.terra) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
-            },
-            containerColor = colors.paper,
-            titleContentColor = colors.ink,
-            textContentColor = colors.sub,
-        )
-    }
+    val dir = java.io.File(context.filesDir, "captures").apply { mkdirs() }
+    val file = java.io.File(dir, "${java.util.UUID.randomUUID()}.jpg")
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file,
+    )
+    onPending(uri)
+    launcher.launch(uri)
 }
 
 // ── Danger zone ─────────────────────────────────────────────────────────

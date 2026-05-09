@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 
 @Composable
-fun Tablet(palette: List<Color>, modifier: Modifier = Modifier) {
+fun Tablet(palette: IllustPalette, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         drawInViewBox(240f, 320f) {
             val (c0, _, c2, _) = palette4(palette)

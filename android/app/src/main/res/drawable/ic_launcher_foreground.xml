@@ -1,63 +1,100 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <!--
-      Treasure icon — a heavy ink ring on paper, with terra runes carved
-      in. Adaptive-icon safe zone is the inner 72×72 square centred at
-      (54,54); ring outer radius 30 keeps everything inside.
+      Treasure icon — the One Ring read as a museum specimen. Cycle 0013
+      shrinks the band to outer radius 23 / inner 17.5 and removes the
+      three central terra dots, leaving just the gold band itself.
     -->
 
-    <!-- The ring itself: heavy ink stroke, no fill -->
+    <!-- Soft cast shadow under the ring -->
     <path
-        android:strokeColor="#1A1815"
-        android:strokeWidth="6"
-        android:fillColor="#00000000"
-        android:pathData="M54,24 a30,30 0 1,0 0,60 a30,30 0 1,0 0,-60" />
+        android:fillColor="#1A1A1815"
+        android:pathData="M54,80 m-19,0 a19,3 0 1,0 38,0 a19,3 0 1,0 -38,0" />
 
-    <!-- Inner thin band that suggests the ring's shoulder -->
+    <!-- Ring body: annulus filled with a forged-gold linear gradient.
+         evenOdd fill turns the inner subpath into a hole. -->
     <path
-        android:strokeColor="#1A1815"
+        android:fillType="evenOdd"
+        android:pathData="M31,54 a23,23 0 1,0 46,0 a23,23 0 1,0 -46,0 Z M36.5,54 a17.5,17.5 0 1,1 35,0 a17.5,17.5 0 1,1 -35,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="34"
+                android:startY="32"
+                android:endX="76"
+                android:endY="78">
+                <item android:offset="0.00" android:color="#FFF3DD8D" />
+                <item android:offset="0.20" android:color="#FFD8B05F" />
+                <item android:offset="0.55" android:color="#FFA47836" />
+                <item android:offset="0.85" android:color="#FF5C3F12" />
+                <item android:offset="1.00" android:color="#FF2C1D08" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Top-left highlight crescent on the outer rim -->
+    <path
+        android:strokeColor="#FFF6E5B0"
         android:strokeWidth="0.6"
-        android:fillColor="#00000000"
-        android:pathData="M54,29 a25,25 0 1,0 0,50 a25,25 0 1,0 0,-50" />
-
-    <!-- Top inscription rune (paper-coloured, carved INTO the ink band) -->
-    <path
-        android:strokeColor="#F4F1EA"
-        android:strokeWidth="1.2"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M48,24 L52,22 L52,26 L56,22 L56,26 L60,24" />
+        android:pathData="M33,50 a22,22 0 0,1 19,-19" />
 
-    <!-- Bottom inscription rune -->
+    <!-- Bottom-right shadow crescent on the outer rim -->
     <path
-        android:strokeColor="#F4F1EA"
-        android:strokeWidth="1.2"
+        android:strokeColor="#FF1B1106"
+        android:strokeWidth="0.6"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M48,84 L52,82 L52,86 L56,82 L56,86 L60,84" />
+        android:pathData="M75,58 a22,22 0 0,1 -19,19" />
 
-    <!-- Left + right tick marks on the band -->
+    <!-- Inner-edge bevel: bright on top, dark on bottom -->
     <path
-        android:strokeColor="#F4F1EA"
-        android:strokeWidth="1"
+        android:strokeColor="#FFF0D78A"
+        android:strokeWidth="0.45"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M22,52 L22,56 M86,52 L86,56" />
+        android:pathData="M38.5,50 a16.5,16.5 0 0,1 15.5,-13" />
+    <path
+        android:strokeColor="#FF22160A"
+        android:strokeWidth="0.45"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M70,58 a16.5,16.5 0 0,1 -15.5,13" />
 
-    <!-- Centre treasure dot — terra accent -->
+    <!-- Engraved top rune (paper-coloured carving on the gold band) -->
     <path
-        android:fillColor="#8A3A1F"
-        android:pathData="M54,54 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0" />
+        android:strokeColor="#FFF4F1EA"
+        android:strokeWidth="0.8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M49,34.5 L51.2,33.2 L51.2,35.8 L54,33 L54,36 L56.8,33.2 L56.8,35.8 L59,34.5" />
 
-    <!-- Two small terra inscription dots flanking the centre -->
+    <!-- Bottom rune (mirrors top) -->
     <path
-        android:fillColor="#8A3A1F"
-        android:pathData="M44,54 m-1.1,0 a1.1,1.1 0 1,0 2.2,0 a1.1,1.1 0 1,0 -2.2,0" />
+        android:strokeColor="#FFF4F1EA"
+        android:strokeWidth="0.8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M49,73.5 L51.2,72.2 L51.2,74.8 L54,72 L54,75 L56.8,72.2 L56.8,74.8 L59,73.5" />
+
+    <!-- Side ticks on the band (left + right) -->
     <path
-        android:fillColor="#8A3A1F"
-        android:pathData="M64,54 m-1.1,0 a1.1,1.1 0 1,0 2.2,0 a1.1,1.1 0 1,0 -2.2,0" />
+        android:strokeColor="#FFF4F1EA"
+        android:strokeWidth="0.6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M33,52.5 L33,55.5 M75,52.5 L75,55.5" />
+
+    <!-- Tiny ink-engraved hairlines along the band (richness pass) -->
+    <path
+        android:strokeColor="#3A1A1208"
+        android:strokeWidth="0.22"
+        android:fillColor="#00000000"
+        android:pathData="M42,44 L44.5,42.5 M64,42.5 L66,44 M42,64 L44.5,65.5 M64,65.5 L66,64" />
 </vector>

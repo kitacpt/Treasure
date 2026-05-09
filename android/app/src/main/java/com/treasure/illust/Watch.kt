@@ -11,7 +11,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 
 @Composable
-fun Watch(palette: List<Color>, modifier: Modifier = Modifier) {
+fun Watch(palette: IllustPalette, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         drawInViewBox(240f, 320f) {
             val (c0, c1, c2, _) = palette4(palette)

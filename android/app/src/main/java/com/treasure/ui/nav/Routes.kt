@@ -1,22 +1,19 @@
 package com.treasure.ui.nav
 
-import com.treasure.core.domain.Category
-
 /**
  * Route catalogue. Stringly-typed because nav-compose's type-safe routes
  * (the `@Serializable` ones) are still evolving — keep it boring.
+ *
+ * Cycle 0010 折叠成只有 3 个：
+ * - Main 是包含 Portal / Grid / Add / Settings 的横滑 Pager
+ * - Detail / Edit 仍是 push 上来的覆盖屏
  */
 object Routes {
-    const val Portal = "portal"
-    const val GridPattern = "grid/{categoryId}"
-    fun grid(categoryId: String) = "grid/$categoryId"
-    fun grid(category: Category) = grid(category.id)
+    const val Main = "main"
 
     const val DetailPattern = "detail/{itemId}"
     fun detail(itemId: String) = "detail/$itemId"
 
-    const val Add = "add"
-    const val Settings = "settings"
     const val EditPattern = "edit/{itemId}"
     fun edit(itemId: String) = "edit/$itemId"
 }

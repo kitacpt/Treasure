@@ -59,19 +59,30 @@ class DetailViewModel(
      * storage and append its absolute path to the item.
      */
     fun addPhoto(uri: Uri) {
+        addPhotos(listOf(uri))
+    }
+
+    /** Copy a batch of picked photos in one shot. */
+    fun addPhotos(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         viewModelScope.launch {
             val item = state.value.item ?: return@launch
             val app = getApplication<Application>()
-            val savedPath = withContext(Dispatchers.IO) {
+            val savedPaths = withContext(Dispatchers.IO) {
                 val dir = File(app.filesDir, "photos/${item.id}").apply { mkdirs() }
-                val dest = File(dir, "${UUID.randomUUID()}.jpg")
-                app.contentResolver.openInputStream(uri)?.use { input ->
-                    dest.outputStream().use { out -> input.copyTo(out) }
+                uris.mapNotNull { uri ->
+                    val dest = File(dir, "${UUID.randomUUID()}.jpg")
+                    runCatching {
+                        app.contentResolver.openInputStream(uri)?.use { input ->
+                            dest.outputStream().use { out -> input.copyTo(out) }
+                        }
+                    }
+                    if (dest.exists() && dest.length() > 0) dest.absolutePath else null
                 }
-                if (dest.exists() && dest.length() > 0) dest.absolutePath else null
-            } ?: return@launch
+            }
+            if (savedPaths.isEmpty()) return@launch
             repo.upsert(item.copy(
-                photos = item.photos + savedPath,
+                photos = item.photos + savedPaths,
                 updatedAt = System.currentTimeMillis(),
             ))
         }
@@ -83,6 +94,31 @@ class DetailViewModel(
             val item = state.value.item ?: return@launch
             repo.upsert(item.copy(
                 photos = item.photos - path,
+                callouts = item.callouts - path,
+                // 删的若是当前头像照片，就把头像清空回到线描
+                avatarPhotoPath = item.avatarPhotoPath?.takeIf { it != path },
+                updatedAt = System.currentTimeMillis(),
+            ))
+        }
+    }
+
+    /**
+     * Cycle 0012：用一份新的列表替换某张照片的全部 callout。空列表时把
+     * 这条 path 整个从 map 里抹掉，免得 JSON 里堆空数组。
+     */
+    fun setCallouts(
+        path: String,
+        list: List<com.treasure.core.domain.PhotoCallout>,
+    ) {
+        viewModelScope.launch {
+            val item = state.value.item ?: return@launch
+            val newCallouts = if (list.isEmpty()) {
+                item.callouts - path
+            } else {
+                item.callouts + (path to list)
+            }
+            repo.upsert(item.copy(
+                callouts = newCallouts,
                 updatedAt = System.currentTimeMillis(),
             ))
         }

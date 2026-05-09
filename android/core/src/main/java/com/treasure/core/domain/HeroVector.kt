@@ -21,5 +21,11 @@ enum class HeroVector {
     EARBUDS,
     KINDLE,
     WATCH,
+    // Cycle 0011：咖啡 / 酒水
+    ESPRESSO_MACHINE,
+    COFFEE_GRINDER,
+    COFFEE_BEAN,
+    WINE_BOTTLE,
+    COCKTAIL_GLASS,
     GENERIC,
 }

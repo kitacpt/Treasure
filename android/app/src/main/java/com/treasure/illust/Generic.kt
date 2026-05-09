@@ -13,7 +13,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
  * Renders a labeled blank museum plate so the layout still feels intentional.
  */
 @Composable
-fun Generic(palette: List<Color>, modifier: Modifier = Modifier) {
+fun Generic(palette: IllustPalette, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         drawInViewBox(240f, 240f) {
             val (c0, c1, c2, _) = palette4(palette)

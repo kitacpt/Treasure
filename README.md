@@ -15,22 +15,26 @@
 3. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) —— v2 录入页设计稿
 4. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
 5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
-6. [`docs/adr/`](docs/adr/) —— 5 份决策记录
-7. [`openspec/`](openspec/) —— cycle 0001-0008 的 proposal / spec / notes
+6. [`docs/adr/`](docs/adr/) —— 6 份决策记录
+7. [`openspec/`](openspec/) —— cycle 0001-0020 的 proposal / spec / notes
 
-## 当前状态（2026-05-07）
+## 当前状态（2026-05-09）
 
-**cycle 0001 → 0008 全部落地**。v0.11.0 APK（13 MB，debug 签名），装到 vivo X200 Pro mini 上端到端跑通：
+**cycle 0001 → 0020 全部落地**。13 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
 
-- Portal · Grid · Detail · Edit · Add (RECORD) · Settings 全屏导航
-- Detail 抽屉（历史 / 参数 / 影集，全只读）+ 明信片翻面（看实拍）
-- Detail 右上点 → Edit 单页表单（基础 / 时间 / 标签 / 插画 / 参数 / 历史 / 实拍 / 删除）
-- Add (RECORD) chat-first：📷 真照片 + 文本 + 🎙 真 STT (zh-CN) + → AI 解析 → 草稿预览 → 确认入库
-- AI：Anthropic / OpenAI / Custom provider，BYO key 存 EncryptedSharedPreferences
-- 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`（cycle 0003）
-- Schema v5（Room，单表 items + JSON 列）；⚠️ 仍 `fallbackToDestructiveMigration()`
-- 11 个博物馆线描插画 + 自家 LotR 风 app 图标
-- 8 条种子数据（首启写入），edge-to-edge，控制岛在 Detail/Edit 屏隐藏
+- 6 个品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画
+- 主屏 4 tab 横滑切换：门厅 / 图鉴 / 录入 / 设置（HorizontalPager）；Detail / Edit 是 push 上来的覆盖屏
+- Detail 抽屉（历史 / 参数 / 影集）+ 明信片翻面；影集点缩略图 → 全屏 viewer（横滑翻页 / 双指缩放 / 长按图加注 / 长按已有标注改或删，cycle 0012）
+- Detail 右上点 → Edit 单页表单，与手动录入共用 EditPageHeader + SectionDivider；状态 / 品类 / 历史类型用统一的 `InlineDropdown`，不再换行
+- Edit 实拍：📷 拍照（FileProvider + 直调系统相机）+ + 多选照片（最多 9 张）
+- Add (RECORD) chat-first：对话已落 Room（add_conversations / add_messages）；切回历史抽屉里点旧对话能 reload
+- AI：多轮 — `extractItemDraft` 现在带 `priorTurns`，把当前对话最后 20 条文字作为上下文喂回模型；Anthropic / OpenAI / Kimi · Moonshot / DeepSeek / 通义千问 / 智谱 GLM / Xiaomi MiLM / 自定义 共 8 个 preset，BYO key 存 EncryptedSharedPreferences；Settings 抽屉 "高阶" 段可调 temperature 和 thinking（cycle 0014）
+- 手动录入：4 品类模板，顶部居中 124dp 大插画 + 56dp 横滚选项；italic tagline + 每个字段单位 / 示例 hint
+- Settings：单张摘要卡 + 连通 pill + 底部抽屉编辑
+- 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`；相机直拍中转 `filesDir/captures/`；callout 数据 `Map<path, List<{x, y, text}>>` 跟 item 一起入库
+- Schema **v8**（Room；cycle 0016 加 `avatar_photo_path` 列）；从 cycle 0010 起 `exportSchema = true`，Migration 写在 `core/room/Migrations.kt`，schema JSON 在 `core/schemas/`，不再 destructive — 见 [ADR-0006](docs/adr/0006-schema-migrations.md)
+- 16 个博物馆线描插画（含 cycle 0011 加的 espresso machine / coffee grinder / coffee bean / wine bottle / cocktail glass）+ 立体魔戒 app 图标（gradient 金环 + 高光阴影 + radial-gradient 中心宝石，cycle 0012）
+- 8 条种子数据（首启写入），edge-to-edge，控制岛在 Detail / Edit 屏自然隐藏
 
 GitHub：<https://github.com/kitacpt/Treasure>
 
@@ -53,3 +57,4 @@ treasure/
 - **数据**：Local-first，Room 为权威源；FastAPI 同步层可选，先搭脚手架（[ADR-0003](docs/adr/0003-local-first-with-optional-sync.md)）
 - **AI**：用户自带 API key（Anthropic / 模型 / Key），设备直连 provider，不走代理（[ADR-0004](docs/adr/0004-byo-ai-key.md)）
 - **插画**：种子物品的 SVG 打包进 app；用户新增物品的插画由配置好的 AI 生成（[ADR-0005](docs/adr/0005-museum-illustration.md)）
+- **Schema**：从 cycle 0010 起停止 destructive，每改 schema 必须 bump version + 写 Migration + 提交 schema JSON（[ADR-0006](docs/adr/0006-schema-migrations.md)）

@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 
 @Composable
-fun Earbuds(palette: List<Color>, modifier: Modifier = Modifier) {
+fun Earbuds(palette: IllustPalette, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         drawInViewBox(300f, 220f) {
             val (c0, c1, c2, _) = palette4(palette)

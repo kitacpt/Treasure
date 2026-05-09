@@ -15,7 +15,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,6 +29,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -57,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.treasure.illust.HeroIllustration
+import com.treasure.theme.Cormorant
 import com.treasure.theme.LocalTreasureColors
 
 private const val DEFAULT_TITLE = "New entry"
@@ -69,9 +77,11 @@ fun AddChat(
     onToggleHistory: () -> Unit,
     onOpenManual: () -> Unit,
     onNewChat: () -> Unit,
+    onPickConversation: (id: String, title: String) -> Unit,
+    onRenameConversation: (id: String, newTitle: String) -> Unit,
+    onDeleteConversation: (String) -> Unit,
     onSendText: (String) -> Unit,
     onSendPhoto: (android.net.Uri) -> Unit,
-    onStartVoice: () -> Unit,
     onOpenDraft: () -> Unit,
     onGoSettings: () -> Unit,
 ) {
@@ -125,10 +135,27 @@ fun AddChat(
                 title = state.conversationTitle,
                 onTapTitle = onToggleHistory,
                 onTapHistory = onToggleHistory,
-                onTapNewChat = onNewChat,
                 onTapManual = onOpenManual,
             )
 
+            if (!state.aiAvailable) {
+                NotConfiguredBanner(onGoSettings = onGoSettings)
+            }
+
+            // The composer floats over the bottom of this column at
+            // navigationBarsPadding + 100dp (roughly 150–170dp tall once
+            // the composer + control island stack). Add equivalent bottom
+            // contentPadding so messages can scroll fully into view above
+            // the composer instead of disappearing under it.
+            //
+            // Cycle 0014：键盘弹起时也要让消息往上腾出位置 — bottom inset 取
+            // max(navigationBars, ime)。Compose 的 imePadding 在 IME 上来时
+            // 自动是包含 navBar 的高度。
+            val bottomNavInset = WindowInsets.navigationBars
+                .asPaddingValues().calculateBottomPadding()
+            val bottomImeInset = WindowInsets.ime
+                .asPaddingValues().calculateBottomPadding()
+            val effectiveBottom = maxOf(bottomNavInset, bottomImeInset)
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -138,7 +165,7 @@ fun AddChat(
                     start = 22.dp,
                     end = 22.dp,
                     top = 18.dp,
-                    bottom = 18.dp,
+                    bottom = 18.dp + effectiveBottom + 160.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -148,15 +175,17 @@ fun AddChat(
                 }
                 if (state.busy) item { TypingIndicator() }
             }
-
-            if (!state.aiAvailable) {
-                NotConfiguredBanner(onGoSettings = onGoSettings)
-            }
         }
 
         // Composer floats above the global control island. Control island
         // sits at navigationBarsPadding + 18dp + ~50dp tall; we sit at
         // 100dp so we're always at least 32dp clear of its top edge.
+        //
+        // Cycle 0014：用 imePadding 替代 navigationBarsPadding — 没键盘时
+        // imePadding 等价 navigationBars，键盘升起时 composer 自动跟着上浮。
+        // bottom 也按是否在用键盘做判断：键盘起时不再给 100dp 控制岛缓冲，
+        // 因为控制岛在键盘下面被挡住了。
+        val imeOpen = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
         Composer(
             input = input,
             onInputChange = { input = it },
@@ -166,22 +195,24 @@ fun AddChat(
                 input = ""
             },
             onTakePhoto = ::launchPhotoFlow,
-            onStartVoice = onStartVoice,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 100.dp, start = 14.dp, end = 14.dp),
+                .imePadding()
+                .padding(
+                    bottom = if (imeOpen) 8.dp else 100.dp,
+                    start = 14.dp,
+                    end = 14.dp,
+                ),
         )
 
         if (historyOpen) {
             HistoryDropdown(
                 conversations = conversations,
                 onDismiss = onToggleHistory,
-                onPick = { onToggleHistory() }, // noop until real persistence lands
-                onNewChat = {
-                    onToggleHistory()
-                    onNewChat()
-                },
+                onPick = { c -> onPickConversation(c.id, c.title) }, // 抽屉里点切换不自动收
+                onRename = onRenameConversation,
+                onDelete = onDeleteConversation,
+                onNewChat = onNewChat, // 同样：点新增也不自动收
             )
         }
     }
@@ -217,55 +248,48 @@ private fun ChatHeader(
     title: String,
     onTapTitle: () -> Unit,
     onTapHistory: () -> Unit,
-    onTapNewChat: () -> Unit,
     onTapManual: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
-    val showSubtitle = title.isNotBlank() && title != DEFAULT_TITLE
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 22.dp, end = 14.dp, top = 18.dp, bottom = 14.dp)
             .border(0.dp, Color.Transparent),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "RECORD",
+                text = "Record",
                 color = colors.ink,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontFamily = MaterialTheme.typography.labelSmall.fontFamily,
-                    letterSpacing = 4.sp,
-                    fontSize = 22.sp,
-                ),
+                style = MaterialTheme.typography.titleLarge,
             )
-            if (showSubtitle) {
-                Spacer(Modifier.height(2.dp))
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable(onClick = onTapTitle)
-                        .padding(vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = title,
-                        color = colors.sub,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontStyle = FontStyle.Italic,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "▾",
-                        color = colors.sub,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
+            Spacer(Modifier.height(4.dp))
+            // Cycle 0018：副标永远 = 当前对话标题（已含 HH:MM 或 AI 改名后的
+            // "Brand Model"）。点副标打开历史抽屉，方便跨对话切换。
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable(onClick = onTapTitle)
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title.ifBlank { DEFAULT_TITLE },
+                    color = colors.sub,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontStyle = FontStyle.Italic,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = "▾",
+                    color = colors.sub,
+                    style = MaterialTheme.typography.labelSmall,
+                )
             }
         }
         IconCircleButton(onClick = onTapHistory) { ClockGlyph(colors.ink) }
-        IconCircleButton(onClick = onTapNewChat) { PlusGlyph(colors.ink) }
         ManualPill(onClick = onTapManual)
     }
     Box(modifier = Modifier
@@ -350,48 +374,170 @@ private fun ManualGlyph(color: Color) {
  * tiny ornament header. The previous version was a sharp 2dp-corner panel
  * that felt too clinical against the museum-paper rest of the app.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun HistoryDropdown(
     conversations: List<FakeConversation>,
     onDismiss: () -> Unit,
     onPick: (FakeConversation) -> Unit,
+    onRename: (id: String, newTitle: String) -> Unit,
+    onDelete: (String) -> Unit,
     onNewChat: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.ink.copy(alpha = 0.18f))
-            .clickable(onClick = onDismiss),
+    var renaming by remember { mutableStateOf<FakeConversation?>(null) }
+    var deleting by remember { mutableStateOf<FakeConversation?>(null) }
+
+    // Cycle 0018：跟手动录入屏一样的 ModalBottomSheet — 从底部上滑，
+    // 一致的拖把手 + 圆角。点 scrim / 滑下去关；点对话行 / 新对话不
+    // 自动收，让用户连续切几段。
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+    )
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = colors.paper,
+        contentColor = colors.ink,
     ) {
         Column(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 60.dp, end = 14.dp, start = 14.dp)
-                .widthIn(min = 240.dp, max = 290.dp)
-                .shadow(12.dp, RoundedCornerShape(14.dp), clip = false)
-                .clip(RoundedCornerShape(14.dp))
-                .background(colors.paper)
-                .border(0.5.dp, colors.line, RoundedCornerShape(14.dp))
-                .padding(vertical = 14.dp)
-                .clickable(enabled = false) {},
+                .fillMaxWidth()
+                .heightIn(max = 560.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 12.dp),
         ) {
             HistoryHeader()
             Spacer(Modifier.height(10.dp))
             HistoryDivider(colors.line)
-            conversations.forEach { c ->
-                Spacer(Modifier.height(4.dp))
-                HistoryRow(
-                    conv = c,
-                    onClick = { onPick(c) },
-                )
-                Spacer(Modifier.height(4.dp))
-                HistoryDivider(colors.line)
+            androidx.compose.foundation.lazy.LazyColumn(
+                modifier = Modifier.weight(1f, fill = false),
+            ) {
+                if (conversations.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "（暂无历史）",
+                                color = colors.sub,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                } else {
+                    items(conversations.size) { idx ->
+                        val c = conversations[idx]
+                        Spacer(Modifier.height(4.dp))
+                        HistoryRow(
+                            conv = c,
+                            onClick = { onPick(c) }, // 不自动 onDismiss
+                            onRename = { renaming = c },
+                            onDelete = { deleting = c },
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        HistoryDivider(colors.line)
+                    }
+                }
             }
             Spacer(Modifier.height(6.dp))
-            NewChatRow(onClick = onNewChat)
+            NewChatRow(onClick = onNewChat) // 不自动 onDismiss
         }
     }
+
+    renaming?.let { c ->
+        RenameConversationDialog(
+            initial = c.title,
+            onCancel = { renaming = null },
+            onConfirm = { newName ->
+                onRename(c.id, newName)
+                renaming = null
+            },
+        )
+    }
+    deleting?.let { c ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("删除这段对话？") },
+            text = {
+                Text(
+                    text = "“${c.title}” 的所有消息都会被清掉，无法恢复。",
+                    color = colors.sub,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    onDelete(c.id)
+                    deleting = null
+                }) { Text("删除", color = colors.terra) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { deleting = null }) {
+                    Text("取消")
+                }
+            },
+            containerColor = colors.paper,
+            titleContentColor = colors.ink,
+            textContentColor = colors.sub,
+        )
+    }
+}
+
+@Composable
+private fun RenameConversationDialog(
+    initial: String,
+    onCancel: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    var text by remember { mutableStateOf(initial) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("改对话名") },
+        text = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(colors.card)
+                    .border(0.5.dp, colors.line)
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                if (text.isEmpty()) {
+                    Text(
+                        text = "比如 “Yonex VTZF2”",
+                        color = colors.sub.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                BasicTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    cursorBrush = SolidColor(colors.terra),
+                    textStyle = LocalTextStyle.current.copy(
+                        color = colors.ink,
+                        fontFamily = MaterialTheme.typography.bodyMedium.fontFamily,
+                        fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = { onConfirm(text) },
+                enabled = text.isNotBlank(),
+            ) { Text("保存", color = colors.terra) }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onCancel) { Text("取消") }
+        },
+        containerColor = colors.paper,
+        titleContentColor = colors.ink,
+        textContentColor = colors.sub,
+    )
 }
 
 @Composable
@@ -433,9 +579,11 @@ private fun HistoryDivider(color: Color) {
 private fun HistoryRow(
     conv: FakeConversation,
     onClick: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
@@ -443,30 +591,54 @@ private fun HistoryRow(
             .background(if (conv.current) colors.card else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = conv.title,
-                color = colors.ink,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-            )
-            if (conv.current) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(colors.terra),
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Cycle 0018：title 在创建时就含 HH:MM 后缀（"New entry · 15:32"），
+                // 这里直接展示 — 与 ChatHeader 副标保持一字不差。
+                Text(
+                    text = conv.title,
+                    color = colors.ink,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
                 )
+                if (conv.current) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(colors.terra),
+                    )
+                }
             }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = conv.date.replace("-", "·"),
+                color = colors.sub,
+                style = MaterialTheme.typography.labelSmall,
+            )
         }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = conv.date.replace("-", "·"),
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-        )
+        Spacer(Modifier.width(6.dp))
+        IconGlyphButton(onClick = onRename) {
+            Text("✎", color = colors.sub, style = MaterialTheme.typography.bodyMedium)
+        }
+        Spacer(Modifier.width(2.dp))
+        IconGlyphButton(onClick = onDelete) {
+            Text("✕", color = colors.sub, style = MaterialTheme.typography.bodyMedium)
+        }
     }
+}
+
+@Composable
+private fun IconGlyphButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { content() }
 }
 
 @Composable
@@ -519,8 +691,11 @@ private fun AssistantBubble(text: String) {
             Text(
                 text = text,
                 color = colors.ink,
-                style = MaterialTheme.typography.bodyLarge,
-                fontStyle = FontStyle.Italic,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontFamily = Cormorant,
+                    fontStyle = FontStyle.Italic,
+                    fontSize = 16.sp,
+                ),
             )
         }
     }
@@ -595,8 +770,11 @@ private fun UserVoiceBubble(text: String, duration: String) {
             Text(
                 text = "\"$text\"",
                 color = colors.paper.copy(alpha = 0.85f),
-                style = MaterialTheme.typography.bodyLarge,
-                fontStyle = FontStyle.Italic,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontFamily = Cormorant,
+                    fontStyle = FontStyle.Italic,
+                    fontSize = 15.sp,
+                ),
             )
         }
     }
@@ -667,8 +845,7 @@ private fun DraftCtaCard(message: AddMessage.DraftCta, onOpen: () -> Unit) {
             Text(
                 text = "轻点过目，确认后收入图鉴",
                 color = colors.sub,
-                style = MaterialTheme.typography.bodyMedium,
-                fontStyle = FontStyle.Italic,
+                style = MaterialTheme.typography.displayMedium,
             )
         }
         Text(
@@ -693,8 +870,7 @@ private fun TypingIndicator() {
             Text(
                 text = "正在思考…",
                 color = colors.sub,
-                style = MaterialTheme.typography.bodyMedium,
-                fontStyle = FontStyle.Italic,
+                style = MaterialTheme.typography.displayMedium,
             )
         }
     }
@@ -730,7 +906,6 @@ private fun Composer(
     busy: Boolean,
     onSend: () -> Unit,
     onTakePhoto: () -> Unit,
-    onStartVoice: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTreasureColors.current
@@ -776,17 +951,9 @@ private fun Composer(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+        // Cycle 0017：暂时去掉语音按钮 — vivo 国行 SR 不可用 + 云端 STT
+        // 还没接，留着只会让用户点了报 "占位语音"。等云端 STT 上来再加回。
         Spacer(Modifier.width(8.dp))
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(Color.Transparent)
-                .border(0.5.dp, colors.ink, CircleShape)
-                .clickable(onClick = onStartVoice),
-            contentAlignment = Alignment.Center,
-        ) { MicGlyph(colors.ink) }
-        Spacer(Modifier.width(6.dp))
         val canSend = input.isNotBlank() && !busy
         Box(
             modifier = Modifier
@@ -859,30 +1026,44 @@ private fun ArrowUpGlyph(color: Color) {
 
 // ─── not configured banner ────────────────────────────────────────────
 
+/**
+ * 一行小字提示，藏在头部分割线下方。没有方框、没有按钮 — 把
+ * 这件事当成博物馆图鉴边角的一句脚注，而不是 toast。
+ */
 @Composable
 private fun NotConfiguredBanner(onGoSettings: () -> Unit) {
     val colors = LocalTreasureColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .padding(bottom = 8.dp)
-            .clip(RoundedCornerShape(2.dp))
-            .background(colors.card)
-            .border(0.5.dp, colors.line)
             .clickable(onClick = onGoSettings)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 22.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        Box(
+            modifier = Modifier
+                .size(5.dp)
+                .clip(CircleShape)
+                .background(colors.terra),
+        )
         Text(
-            text = "尚未配置 AI · ",
+            text = "尚未配置 AI",
             color = colors.sub,
             style = MaterialTheme.typography.labelSmall,
         )
         Text(
-            text = "去设置",
+            text = "·",
+            color = colors.sub.copy(alpha = 0.5f),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Text(
+            text = "前往设置",
             color = colors.terra,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontFamily = com.treasure.theme.Cormorant,
+                fontSize = 13.sp,
+            ),
         )
         Spacer(Modifier.weight(1f))
         Text(

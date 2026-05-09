@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -61,6 +62,7 @@ import com.treasure.core.domain.HistoryKind
 import com.treasure.core.domain.Item
 import com.treasure.core.domain.ItemStatus
 import com.treasure.illust.HeroIllustration
+import com.treasure.ui.components.HeroAvatar
 import com.treasure.theme.LocalTreasureColors
 import com.treasure.ui.components.BackArrow
 import com.treasure.ui.components.DotButton
@@ -77,6 +79,7 @@ fun DetailRoute(
         state = state,
         onBack = onBack,
         onEdit = { state.item?.let { onEdit(it.id) } },
+        onSetCallouts = vm::setCallouts,
     )
 }
 
@@ -85,9 +88,13 @@ fun DetailScreen(
     state: DetailUiState,
     onBack: () -> Unit,
     onEdit: () -> Unit,
+    onSetCallouts: (String, List<com.treasure.core.domain.PhotoCallout>) -> Unit = { _, _ -> },
 ) {
     val colors = LocalTreasureColors.current
     val item = state.item
+    var fullscreenIndex by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<Int?>(null)
+    }
 
     if (!state.loaded) {
         Box(modifier = Modifier.fillMaxSize().background(colors.paper))
@@ -126,7 +133,12 @@ fun DetailScreen(
         sheetShadowElevation = 8.dp,
         sheetTonalElevation = 0.dp,
         containerColor = colors.paper,
-        sheetContent = { DrawerContent(item = item) },
+        sheetContent = {
+            DrawerContent(
+                item = item,
+                onOpenPhoto = { idx -> fullscreenIndex = idx },
+            )
+        },
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -136,6 +148,16 @@ fun DetailScreen(
         ) {
             DetailFront(item = item, onBack = onBack, onEdit = onEdit)
         }
+    }
+
+    fullscreenIndex?.let { idx ->
+        com.treasure.ui.photo.FullscreenPhotoViewer(
+            photos = item.photos,
+            initialIndex = idx,
+            callouts = item.callouts,
+            onSetCallouts = onSetCallouts,
+            onClose = { fullscreenIndex = null },
+        )
     }
 }
 
@@ -211,7 +233,7 @@ private fun HeroFront(item: Item) {
         modifier = Modifier.fillMaxSize().padding(28.dp),
         contentAlignment = Alignment.Center,
     ) {
-        HeroIllustration(item = item, modifier = Modifier.fillMaxSize())
+        HeroAvatar(item = item, modifier = Modifier.fillMaxSize())
     }
     Box(
         modifier = Modifier.fillMaxSize().padding(end = 14.dp, bottom = 12.dp),
@@ -420,7 +442,10 @@ private enum class DrawerTab(val label: String) {
 }
 
 @Composable
-private fun DrawerContent(item: Item) {
+private fun DrawerContent(
+    item: Item,
+    onOpenPhoto: (Int) -> Unit,
+) {
     var selected by remember { mutableStateOf(DrawerTab.History) }
     val configuration = LocalConfiguration.current
     val drawerHeight = (configuration.screenHeightDp * 0.78f).dp
@@ -442,7 +467,7 @@ private fun DrawerContent(item: Item) {
             when (selected) {
                 DrawerTab.History -> HistoryList(item.history)
                 DrawerTab.Specs   -> SpecsList(item)
-                DrawerTab.Album   -> AlbumList(item.photos)
+                DrawerTab.Album   -> AlbumList(item.photos, onOpenPhoto)
             }
         }
     }
@@ -638,7 +663,7 @@ private fun SpecRow(label: String, value: String) {
 }
 
 @Composable
-private fun AlbumList(photos: List<String>) {
+private fun AlbumList(photos: List<String>, onOpenPhoto: (Int) -> Unit) {
     val colors = LocalTreasureColors.current
     if (photos.isEmpty()) { Empty("还没有实拍 · 点右上 · 编辑添加"); return }
     Column(
@@ -652,12 +677,13 @@ private fun AlbumList(photos: List<String>) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) {
-            items(items = photos, key = { it }) { path ->
+            itemsIndexed(items = photos, key = { _, p -> p }) { idx, path ->
                 Box(
                     modifier = Modifier
                         .aspectRatio(1f)
                         .background(colors.card)
-                        .border(0.5.dp, colors.line),
+                        .border(0.5.dp, colors.line)
+                        .clickable { onOpenPhoto(idx) },
                 ) {
                     AsyncImage(
                         model = path,
@@ -670,7 +696,7 @@ private fun AlbumList(photos: List<String>) {
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            text = "${photos.size} 张实拍 · 编辑请点右上 ·",
+            text = "${photos.size} 张实拍 · 点击查看大图 / 长按加注",
             color = colors.sub,
             style = MaterialTheme.typography.labelSmall,
         )

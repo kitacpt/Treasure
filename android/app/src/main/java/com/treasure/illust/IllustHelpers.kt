@@ -1,11 +1,27 @@
 package com.treasure.illust
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import kotlin.math.min
+
+/**
+ * Stable palette wrapper: List<Color> is unstable to the Compose runtime, so
+ * passing it directly forces every illustration to recompose on every parent
+ * recomposition (no skipping, even if the colors didn't change). Wrapping it
+ * in an @Immutable type lets Compose skip the Canvas / draw call when the
+ * Item that owns the palette didn't change.
+ */
+@Immutable
+@JvmInline
+value class IllustPalette(val colors: List<Color>) {
+    companion object {
+        val Empty = IllustPalette(emptyList())
+    }
+}
 
 /**
  * Shared utilities for the museum-plate illustrations. Each shape is drawn in
@@ -42,11 +58,11 @@ internal inline fun DrawScope.drawInViewBox(
 
 internal data class P4(val c0: Color, val c1: Color, val c2: Color, val c3: Color)
 
-internal fun palette4(palette: List<Color>, default: P4 = DefaultPalette): P4 = P4(
-    palette.getOrNull(0) ?: default.c0,
-    palette.getOrNull(1) ?: default.c1,
-    palette.getOrNull(2) ?: default.c2,
-    palette.getOrNull(3) ?: default.c3,
+internal fun palette4(palette: IllustPalette, default: P4 = DefaultPalette): P4 = P4(
+    palette.colors.getOrNull(0) ?: default.c0,
+    palette.colors.getOrNull(1) ?: default.c1,
+    palette.colors.getOrNull(2) ?: default.c2,
+    palette.colors.getOrNull(3) ?: default.c3,
 )
 
 internal val DefaultPalette = P4(

@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 
 @Composable
-fun Shoes(palette: List<Color>, modifier: Modifier = Modifier) {
+fun Shoes(palette: IllustPalette, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         drawInViewBox(340f, 220f) {
             val (c0, c1, c2, _) = palette4(palette)
