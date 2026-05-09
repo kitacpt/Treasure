@@ -680,6 +680,33 @@ private fun MessageRow(message: AddMessage, onOpenDraft: () -> Unit) {
         is AddMessage.UserPhoto -> UserPhotoBubble(uri = message.uri)
         is AddMessage.UserVoice -> UserVoiceBubble(text = message.text, duration = message.duration)
         is AddMessage.DraftCta -> DraftCtaCard(message = message, onOpen = onOpenDraft)
+        is AddMessage.SystemNote -> SystemNoteRow(text = message.text, tone = message.tone)
+    }
+}
+
+@Composable
+private fun SystemNoteRow(text: String, tone: NoteTone) {
+    val colors = LocalTreasureColors.current
+    val accent = when (tone) {
+        NoteTone.Working -> colors.sub
+        NoteTone.Success -> Color(0xFF3E8E45)
+        NoteTone.Warning -> Color(0xFFD89B23)
+        NoteTone.Error -> Color(0xFFC5392E)
+        NoteTone.Info -> colors.sub
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            color = accent,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = Cormorant,
+                fontStyle = FontStyle.Italic,
+            ),
+        )
     }
 }
 

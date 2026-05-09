@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -47,7 +48,19 @@ sealed interface AddMessage {
     data class UserPhoto(val uri: Uri, val caption: String = "1 张照片") : AddMessage
     data class UserVoice(val text: String, val duration: String = "0:04") : AddMessage
     data class DraftCta(val draft: ItemDraft, val fieldCount: Int) : AddMessage
+
+    /**
+     * 系统状态行 — 比如 "✓ 已抓取京东 · 1.2KB"、"⚠ 防爬挡住"。Cycle 0022
+     * 加：用户报 URL fetch 没生效，但其实早静默执行了，没法定位是 fetch
+     * 失败还是 AI 没用。把状态显式喷出来给用户看。
+     *
+     * 故意不持久化（不入 Room）也不喂回 AI 的 priorTurns —— 这是给人看的
+     * 即时诊断，不是对话内容。重开历史时它就消失了，没问题。
+     */
+    data class SystemNote(val text: String, val tone: NoteTone = NoteTone.Info) : AddMessage
 }
+
+enum class NoteTone { Info, Working, Success, Warning, Error }
 
 data class FakeConversation(
     val id: String,
@@ -105,8 +118,40 @@ class AddViewModel(
         )
 
     init {
-        // 启动时新开一段对话，旧对话仍可从历史抽屉里翻出来。
-        newConversation()
+        // Cycle 0022：默认续上最近一段对话，没有才新建。之前每次 VM 创建都
+        // newConversation() 会在 history 抽屉里留一堆 "New entry · HH:MM" 空
+        // 壳，用户反馈 "每次都创建一个新纪录很费解"。续上最后那条对话才是
+        // 自然的入口。
+        viewModelScope.launch {
+            val recent = conversations.observeRecent(limit = 1).first()
+            val latest = recent.firstOrNull()
+            if (latest == null) {
+                newConversation()
+            } else {
+                resumeConversation(latest)
+            }
+        }
+    }
+
+    private suspend fun resumeConversation(c: AddConversation) {
+        val msgs = conversations.loadMessages(c.id).map(::toUiMessage)
+        val draft = msgs.lastOrNull { it is AddMessage.DraftCta }
+            ?.let { (it as AddMessage.DraftCta).draft }
+        val effectiveMessages = if (msgs.isEmpty()) {
+            // 历史里有这段对话但消息全空（理论上不会发生，新建时会 persist
+            // opener；防御一下）— 给用户看一句问候，让 UI 不至于空白。
+            listOf(AddMessage.Assistant(GREETING))
+        } else {
+            msgs
+        }
+        val key = getApplication<TreasureApp>().settingsStore.hasKey()
+        _state.value = AddUiState(
+            conversationId = c.id,
+            messages = effectiveMessages,
+            conversationTitle = c.title,
+            draft = draft,
+            aiAvailable = key,
+        )
     }
 
     fun refreshAiAvailability() {
@@ -205,21 +250,71 @@ class AddViewModel(
         val url = com.treasure.core.web.firstUrlIn(trimmed)
         if (url != null) {
             _state.update { it.copy(busy = true) }
+            // Cycle 0022：用户报 fetch 没起效，其实早跑过了只是默不作声。把
+            // "正在抓取" / 结果都喷成 SystemNote 给用户看，定位是 fetch 失
+            // 败还是 AI 不识。
+            val host = runCatching { java.net.URI(url).host.orEmpty() }
+                .getOrDefault("")
+                .ifBlank { "网页" }
+            appendTransientNote(AddMessage.SystemNote("正在抓取 $host …", NoteTone.Working))
             viewModelScope.launch {
                 val app = getApplication<TreasureApp>()
-                val augmented = when (val result = app.pageFetcher.fetchText(url)) {
-                    is com.treasure.core.web.FetchResult.Success ->
-                        buildPromptWithPage(trimmed, result.text)
+                val (augmented, note) = when (val result = app.pageFetcher.fetchText(url)) {
+                    is com.treasure.core.web.FetchResult.Success -> {
+                        val len = result.text.length
+                        val sizeHint = if (len < 1000) "${len} 字"
+                        else "${(len + 500) / 1000}K 字"
+                        Pair(
+                            buildPromptWithPage(trimmed, result.text),
+                            AddMessage.SystemNote("✓ 已抓取 $host · $sizeHint", NoteTone.Success),
+                        )
+                    }
                     is com.treasure.core.web.FetchResult.Blocked ->
-                        buildPromptFetchBlocked(trimmed, result.host, result.reason)
+                        Pair(
+                            buildPromptFetchBlocked(trimmed, result.host, result.reason),
+                            AddMessage.SystemNote(
+                                "⚠ ${result.host} 防爬挡住 · ${result.reason}",
+                                NoteTone.Warning,
+                            ),
+                        )
                     is com.treasure.core.web.FetchResult.Failed ->
-                        buildPromptFetchFailed(trimmed, result.host, result.message)
+                        Pair(
+                            buildPromptFetchFailed(trimmed, result.host, result.message),
+                            AddMessage.SystemNote(
+                                "⚠ ${result.host.ifBlank { "网页" }} 抓取失败 · ${result.message.take(60)}",
+                                NoteTone.Error,
+                            ),
+                        )
                 }
+                replaceLastWorkingNote(note)
                 // runExtract 会重新 set busy=true 并在结束时 set false。
                 runExtract(text = augmented, imageUri = null)
             }
         } else {
             runExtract(text = trimmed, imageUri = null)
+        }
+    }
+
+    /** SystemNote 不入 Room；只塞进 UI state。 */
+    private fun appendTransientNote(note: AddMessage.SystemNote) {
+        _state.update { it.copy(messages = it.messages + note) }
+    }
+
+    /** 把最后一条 Working 状态的 SystemNote 替成结果，避免堆一行 "正在抓取"
+     *  + 一行 "✓ 抓到"。 */
+    private fun replaceLastWorkingNote(replacement: AddMessage.SystemNote) {
+        _state.update { state ->
+            val lastIdx = state.messages.indexOfLast {
+                it is AddMessage.SystemNote && it.tone == NoteTone.Working
+            }
+            if (lastIdx < 0) {
+                state.copy(messages = state.messages + replacement)
+            } else {
+                val newList = state.messages.toMutableList().also {
+                    it[lastIdx] = replacement
+                }
+                state.copy(messages = newList)
+            }
         }
     }
 
@@ -283,7 +378,8 @@ class AddViewModel(
     private suspend fun persist(msg: AddMessage) {
         val convoId = _state.value.conversationId.ifBlank { return }
         val now = System.currentTimeMillis()
-        val domain = toDomainMessage(msg, now)
+        // SystemNote 是给用户看的状态行，不存 Room、不喂 AI。
+        val domain = toDomainMessage(msg, now) ?: return
         conversations.appendMessage(convoId, domain)
         conversations.upsert(
             AddConversation(
@@ -454,7 +550,7 @@ class AddViewModel(
         }
     }
 
-    private fun toDomainMessage(msg: AddMessage, now: Long): AddConversationMessage {
+    private fun toDomainMessage(msg: AddMessage, now: Long): AddConversationMessage? {
         val id = UUID.randomUUID().toString()
         return when (msg) {
             is AddMessage.Assistant -> AddConversationMessage.Assistant(id, msg.text, now)
@@ -462,6 +558,7 @@ class AddViewModel(
             is AddMessage.UserPhoto -> AddConversationMessage.UserPhoto(id, msg.uri.toString(), now)
             is AddMessage.UserVoice -> AddConversationMessage.UserVoice(id, msg.text, msg.duration, now)
             is AddMessage.DraftCta -> AddConversationMessage.DraftCta(id, msg.draft, msg.fieldCount, now)
+            is AddMessage.SystemNote -> null
         }
     }
 
@@ -484,6 +581,7 @@ class AddViewModel(
                     AiRole.ASSISTANT,
                     "已经替用户写出一份草稿，包含 ${msg.fieldCount} 个字段。",
                 )
+                is AddMessage.SystemNote -> null
             }
         }
         .takeLast(20) // 控制 token 上限

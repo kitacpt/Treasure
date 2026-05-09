@@ -112,3 +112,50 @@ enum class AiProviderPreset(
         }
     }
 }
+
+/**
+ * Cycle 0022：根据 model 名启发式判定是否支持图片输入（多模态 / vision）。
+ * 用户经常自定义 model 字段，没法靠 preset 一刀切；这里靠模型命名约定。
+ *
+ * 已知支持 vision 的：
+ *  - Anthropic：claude-3*、claude-sonnet-*、claude-opus-* 全系都吃图
+ *  - OpenAI：gpt-4o*、gpt-4-turbo*、gpt-4-vision*、o4*（o4 是多模态）；
+ *    o1 / o3 推理系列**不**吃图（仍是 text-only reasoning）
+ *  - 名称含 "vision" / "vl" / "-v"（GLM-4V / Qwen-VL）的几乎都是多模态
+ *
+ * 不支持的：
+ *  - moonshot-v1-8k / 32k / 128k（Kimi 文本模型；moonshot-v1-vision 才支持）
+ *  - deepseek-chat / deepseek-coder / deepseek-reasoner 全系
+ *  - 任何 reasoner / thinking-only
+ *
+ * 拿不准就 false — UI 只会少显示一个 "🖼" 图标，不会误导用户上传图片
+ * 然后被 provider 报错。
+ */
+fun modelSupportsVision(model: String): Boolean {
+    val m = model.trim().lowercase()
+    if (m.isEmpty()) return false
+
+    // 显式带 vision / vl 关键词
+    if (m.contains("vision")) return true
+    // -vl- / -vl<digit> / glm-4v / qwen2-vl 之类
+    if (Regex("\\bvl\\b").containsMatchIn(m)) return true
+    if (Regex("(^|[-_/])vl[-_]?").containsMatchIn(m)) return true
+    if (Regex("glm-?\\dv\\b").containsMatchIn(m)) return true
+
+    // Anthropic Claude 全系 3+ 都是多模态
+    if (m.startsWith("claude-3") ||
+        m.startsWith("claude-sonnet") ||
+        m.startsWith("claude-opus") ||
+        m.startsWith("claude-haiku")) return true
+
+    // OpenAI：4o / 4-turbo / 4-vision；o1 / o3 是 reasoning text-only，
+    // o4-mini 已经多模态；为了避免和 "1o" / "3o" 之类自定义混淆，要求是
+    // 模型名开头。
+    if (m.startsWith("gpt-4o")) return true
+    if (m.startsWith("gpt-4-turbo")) return true
+    if (m.startsWith("gpt-4-vision")) return true
+    if (m.startsWith("o4")) return true
+
+    // Qwen / 通义千问的 VL 系列已被上面的 vl 分支覆盖
+    return false
+}

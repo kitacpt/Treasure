@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.treasure.data.AiProviderPreset
+import com.treasure.data.modelSupportsVision
 import com.treasure.theme.LocalTreasureColors
 import com.treasure.theme.TreasureColors
 
@@ -182,7 +183,7 @@ private fun AiSummaryCard(
                 .background(colors.line),
         )
         Spacer(Modifier.height(14.dp))
-        InfoRow(label = "Model", value = saved.model.ifBlank { "—" })
+        ModelRow(model = saved.model)
         Spacer(Modifier.height(8.dp))
         InfoRow(
             label = "Base URL",
@@ -203,6 +204,68 @@ private fun AiSummaryCard(
                 style = MaterialTheme.typography.labelMedium,
             )
         }
+    }
+}
+
+@Composable
+private fun ModelCapabilityHint(model: String) {
+    val colors = LocalTreasureColors.current
+    val supportsVision = model.isNotBlank() && modelSupportsVision(model)
+    val text = if (supportsVision) {
+        "🖼 多模态 · 录入页可发图给它认"
+    } else {
+        "纯文本模型 · 不支持发图"
+    }
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = text,
+        color = colors.sub,
+        style = MaterialTheme.typography.labelSmall,
+    )
+}
+
+@Composable
+private fun ModelRow(model: String) {
+    val colors = LocalTreasureColors.current
+    val display = model.ifBlank { "—" }
+    val supportsVision = model.isNotBlank() && modelSupportsVision(model)
+    Row(verticalAlignment = Alignment.Top) {
+        Text(
+            text = "Model",
+            color = colors.sub,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.width(72.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = display,
+                color = colors.ink,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (supportsVision) {
+                Spacer(Modifier.height(6.dp))
+                VisionChip()
+            }
+        }
+    }
+}
+
+@Composable
+private fun VisionChip() {
+    val colors = LocalTreasureColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .border(0.5.dp, colors.line, RoundedCornerShape(999.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text = "🖼 多模态",
+            color = colors.sub,
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
 }
 
@@ -486,6 +549,8 @@ private fun EditorSheet(
             value = draft.model,
             onValueChange = onSetModel,
         )
+        // Cycle 0022：根据当前 model 名给个能力提示。多模态 → 可发图。
+        ModelCapabilityHint(model = draft.model.ifBlank { draft.preset.defaultModel })
 
         Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {

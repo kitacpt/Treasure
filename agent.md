@@ -4,10 +4,10 @@
 
 ## 当前状态 · 2026-05-09
 
-**cycle 0001 → 0021 全部落地。**
+**cycle 0001 → 0022 全部落地。**
 
-- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.21.0 候选，13 MB，debug 签名）
-- GitHub：<https://github.com/kitacpt/Treasure>（main 分支；最后 push 是 cycle 0020 的 `393b1ca`）
+- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.22.0 候选，13 MB，debug 签名）
+- GitHub：<https://github.com/kitacpt/Treasure>（main 分支）
 - Schema：v8（cycle 0016 加 avatar_photo_path）
 - 测试设备：vivo X200 Pro mini（Android 15）
 
@@ -136,6 +136,7 @@ treasure/
 | 0019 | Grid 选择持久化（修 "全部 → Detail → 返回成酒水"）· AI 闲聊不报错（ChatOnlyResponseException）· 状态灯改 setter invalidate（save 信任绿灯）· 全屏 viewer 单指能翻页（transformable 替代 detectTransformGestures）· 接收 ACTION_SEND/VIEW 分享 · AddPreview 接 Edit 页样式 | done |
 | 0020 | 影集放大单指真能翻页（手写 awaitEachGesture）· 上下 64dp 黑边不遮控件 · 分享 URL 真去 fetch 页面（PageFetcher + 移动 UA + HTML strip + og 抽取）喂 AI | done |
 | 0021 | 对话框 SelectionContainer 复制粘贴 · PageFetcher 三态返回（Success / Blocked / Failed）+ 拼多多/JD/淘宝壳页启发式识别 · prompt 里明确告诉 AI "客户端拉过被挡了，别回 '无法访问外部链接'" | done |
+| 0022 | Record 默认续上次会话（不再每次新建）· fetch 状态对用户可见（SystemNote "正在抓取" / "✓ 已抓取" / "⚠ 防爬挡住"）· PageFetcher 加 charset 探测（GBK 老站点不再乱码）· AI 配置页显示模型多模态能力（启发式判 model 名）· 流式输出明确不做 | done |
 
 详见 [`openspec/`](openspec/) 各 cycle 的 proposal / spec / notes。
 
@@ -150,16 +151,17 @@ treasure/
 5. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) — 录入页 v2 设计稿
 6. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 7. [`docs/adr/`](docs/adr/) — 6 份决策记录
-8. [`openspec/`](openspec/) — cycle 0001-0021 提案 / 规格 / 笔记
+8. [`openspec/`](openspec/) — cycle 0001-0022 提案 / 规格 / 笔记
 
-## 下一刀候选（cycle 0022）
+## 下一刀候选（cycle 0023）
 
-1. **云端 STT (OpenAI Whisper) 兜底 + 麦克风按钮回归** — cycle 0017 暂去掉的麦克风
-2. **多轮 refine 的图片 vision context**
-3. **AI 生成博物馆插画**
-4. **PageFetcher headless 渲染**：被 detectBlock 拦下的拼多多 / 重 SPA 页面 fall back 到本地 WebView 真渲染一次拿 DOM
-5. **Settings preset 校准** — Xiaomi MiLM 没公开端点
-6. **MigrationTest CI**
+1. **PageFetcher headless 渲染**：被 detectBlock 拦下的拼多多 / 重 SPA 页面 fall back 到本地 WebView 真渲染一次拿 DOM（cycle 0022 已经能识别但拿不到内容）
+2. **流式输出**（如果 forced tool-use 也能拆 SSE delta；目前明确推迟）
+3. **云端 STT (OpenAI Whisper) 兜底 + 麦克风按钮回归** — cycle 0017 暂去掉的麦克风
+4. **多轮 refine 的图片 vision context**
+5. **AI 生成博物馆插画**
+6. **Settings preset 校准** — Xiaomi MiLM 没公开端点
+7. **MigrationTest CI**
 
 ## 给下一个 agent 的备忘
 
@@ -184,6 +186,7 @@ treasure/
 
 | 日期 | 摘要 |
 |---|---|
+| 2026-05-09 | cycle 0022：Record 默认续上次会话（init 改 observeRecent(1).first()）· fetch 状态可见（AddMessage.SystemNote 5 tone，"正在抓取" → "✓ 已抓取/⚠ 防爬"）· PageFetcher charset 探测（meta charset/http-equiv，GBK 老站点不再乱码）· AI 配置页 model 多模态能力 chip + 编辑抽屉一行小字（启发式 modelSupportsVision）· 流式不做 |
 | 2026-05-09 | cycle 0021：对话框复制粘贴（SelectionContainer）· PageFetcher 三态（Success / Blocked / Failed）+ 拼多多 / JD / 淘宝壳页识别 + prompt 引导 AI 不要回 "无法访问外部链接" |
 | 2026-05-09 | cycle 0020：全屏看图单指真能翻页（手写 awaitEachGesture）· 64dp 黑边不遮控件 · 分享 URL 真去 fetch 页面给 AI 当 context（PageFetcher + 移动 UA + HTML strip） |
 | 2026-05-09 | cycle 0019：Grid 选择持久化 · AI 闲聊回复不再报错 · 状态灯改 setter invalidate（保存信任绿灯）· 全屏 viewer 用 transformable 让单指翻页能用 · 京东/淘宝分享 ACTION_SEND 落到录入 · AddPreview 改 Edit 页样式 |

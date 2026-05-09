@@ -70,9 +70,7 @@ class PageFetcher(httpClient: OkHttpClient? = null) {
                         if (n <= 0) break
                         read += n
                     }
-                    val charset = body.contentType()?.charset()
-                        ?: Charsets.UTF_8
-                    String(buf, 0, read, charset)
+                    decodeWithBestCharset(buf, read, body.contentType()?.charset())
                 }
                 val stripped = stripHtml(raw).take(maxTextChars)
                 val blockedReason = detectBlock(stripped, host)
@@ -163,6 +161,44 @@ internal fun stripHtml(html: String): String {
     }
     return parts.joinToString("\n\n")
 }
+
+/**
+ * Cycle 0022：京东 / 淘宝 / 当当 等老站点常用 GBK / GB2312，body charset
+ * 上游 Content-Type 里也不一定带，硬当 UTF-8 解会出来一堆 ?。流程：
+ * 1) 用 Content-Type charset，没有就先 ASCII / Latin-1 看头部 ~2KB
+ * 2) 在头部里 grep `<meta charset="X">` 或老式 `<meta http-equiv="Content-Type" content="text/html; charset=X">`
+ * 3) 命中就用那个 charset 重解；找不到就用 UTF-8 — 现代站点默认。
+ */
+internal fun decodeWithBestCharset(
+    buf: ByteArray,
+    length: Int,
+    headerCharset: java.nio.charset.Charset?,
+): String {
+    if (headerCharset != null) {
+        return String(buf, 0, length, headerCharset)
+    }
+    // 用 ISO-8859-1 解头部不会丢字节 — 1 byte 一个 char，meta 标签里的
+    // charset 名都是 ASCII 子集，找完再做正式解码。
+    val probe = String(buf, 0, minOf(length, 4096), Charsets.ISO_8859_1)
+    val metaCharset = META_CHARSET_REGEX.find(probe)?.groupValues?.getOrNull(1)
+        ?: META_HTTP_EQUIV_REGEX.find(probe)?.groupValues?.getOrNull(1)
+    if (metaCharset != null) {
+        runCatching { java.nio.charset.Charset.forName(metaCharset.trim()) }
+            .getOrNull()
+            ?.let { return String(buf, 0, length, it) }
+    }
+    return String(buf, 0, length, Charsets.UTF_8)
+}
+
+private val META_CHARSET_REGEX = Regex(
+    "<meta[^>]+charset\\s*=\\s*[\"']?([\\w\\-]+)",
+    RegexOption.IGNORE_CASE,
+)
+
+private val META_HTTP_EQUIV_REGEX = Regex(
+    "<meta[^>]+http-equiv\\s*=\\s*[\"']?content-type[\"']?[^>]+charset\\s*=\\s*[\"']?([\\w\\-]+)",
+    RegexOption.IGNORE_CASE,
+)
 
 private val URL_REGEX = Regex(
     "(https?://[\\w.\\-]+(?:/[\\w./?=&%#\\-+~]*)?)",
