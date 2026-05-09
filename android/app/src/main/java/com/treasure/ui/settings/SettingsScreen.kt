@@ -207,28 +207,23 @@ private fun AiSummaryCard(
     }
 }
 
+/**
+ * Cycle 0022/0023：编辑抽屉里 model 输入下面的能力提示。两种状态都显示，
+ * 用户改 model 名实时切换。文案精简到只有 "多模态" / "纯文本"，没有备注。
+ */
 @Composable
 private fun ModelCapabilityHint(model: String) {
-    val colors = LocalTreasureColors.current
     val supportsVision = model.isNotBlank() && modelSupportsVision(model)
-    val text = if (supportsVision) {
-        "🖼 多模态 · 录入页可发图给它认"
-    } else {
-        "纯文本模型 · 不支持发图"
-    }
-    Spacer(Modifier.height(6.dp))
-    Text(
-        text = text,
-        color = colors.sub,
-        style = MaterialTheme.typography.labelSmall,
-    )
+    Spacer(Modifier.height(8.dp))
+    VisionChip(supportsVision = supportsVision)
 }
 
 @Composable
 private fun ModelRow(model: String) {
     val colors = LocalTreasureColors.current
     val display = model.ifBlank { "—" }
-    val supportsVision = model.isNotBlank() && modelSupportsVision(model)
+    val showChip = model.isNotBlank()
+    val supportsVision = showChip && modelSupportsVision(model)
     Row(verticalAlignment = Alignment.Top) {
         Text(
             text = "Model",
@@ -243,31 +238,58 @@ private fun ModelRow(model: String) {
                 color = colors.ink,
                 style = MaterialTheme.typography.bodyMedium,
             )
-            if (supportsVision) {
-                Spacer(Modifier.height(6.dp))
-                VisionChip()
+            if (showChip) {
+                Spacer(Modifier.height(8.dp))
+                VisionChip(supportsVision = supportsVision)
             }
         }
     }
 }
 
+/**
+ * 双状态 pill：vision-capable 走 terra（与品牌色一致 + 显眼）；纯文本走
+ * 浅灰 outline。两种文案都只有 2-3 个汉字，没有冗余备注。
+ */
 @Composable
-private fun VisionChip() {
+private fun VisionChip(supportsVision: Boolean) {
     val colors = LocalTreasureColors.current
+    val (label, fg, bg, border) = if (supportsVision) {
+        VisionChipStyle(
+            label = "🖼 多模态",
+            fg = colors.terra,
+            bg = colors.terra.copy(alpha = 0.10f),
+            border = colors.terra.copy(alpha = 0.55f),
+        )
+    } else {
+        VisionChipStyle(
+            label = "纯文本",
+            fg = colors.sub,
+            bg = androidx.compose.ui.graphics.Color.Transparent,
+            border = colors.line,
+        )
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
-            .border(0.5.dp, colors.line, RoundedCornerShape(999.dp))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .background(bg)
+            .border(0.5.dp, border, RoundedCornerShape(999.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         Text(
-            text = "🖼 多模态",
-            color = colors.sub,
+            text = label,
+            color = fg,
             style = MaterialTheme.typography.labelSmall,
         )
     }
 }
+
+private data class VisionChipStyle(
+    val label: String,
+    val fg: androidx.compose.ui.graphics.Color,
+    val bg: androidx.compose.ui.graphics.Color,
+    val border: androidx.compose.ui.graphics.Color,
+)
 
 @Composable
 private fun InfoRow(label: String, value: String, mono: Boolean = false) {

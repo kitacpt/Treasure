@@ -471,14 +471,46 @@ class AddViewModel(
         _state.value = _state.value.copy(draft = applyFieldEdit(current, field, value))
     }
 
-    /** Persist the current draft as a real Item; returns id via callback. */
-    fun commitDraft(onSaved: (String) -> Unit) {
+    /** Cycle 0023：草稿页改成像 Edit 页一样直接编辑 specs。AI 填的每条都
+     *  直接显示，用户改 label / value / 删除 / 加新行都走这几个。 */
+    fun updateDraftSpec(idx: Int, spec: HeroSpec) {
+        val current = _state.value.draft ?: return
+        if (idx < 0 || idx >= current.specs.size) return
+        val newSpecs = current.specs.toMutableList().also { it[idx] = spec }
+        _state.value = _state.value.copy(draft = current.copy(specs = newSpecs))
+    }
+
+    fun addDraftSpec() {
+        val current = _state.value.draft ?: return
+        _state.value = _state.value.copy(
+            draft = current.copy(specs = current.specs + HeroSpec("", "")),
+        )
+    }
+
+    fun removeDraftSpec(idx: Int) {
+        val current = _state.value.draft ?: return
+        if (idx < 0 || idx >= current.specs.size) return
+        _state.value = _state.value.copy(
+            draft = current.copy(specs = current.specs.toMutableList().also { it.removeAt(idx) }),
+        )
+    }
+
+    /**
+     * Persist the current draft as a real Item; returns id via callback.
+     * Cycle 0023：[status] 由用户在草稿页选（默认 OWNED）；不再写死。
+     */
+    fun commitDraft(
+        status: ItemStatus = ItemStatus.OWNED,
+        onSaved: (String) -> Unit,
+    ) {
         val draft = _state.value.draft ?: return
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             val category = Category.fromId(draft.category ?: Category.TECH.id)
             val template = CategoryTemplates.forCategory(category)
             val id = makeId(category, draft.brand, draft.model, now)
+            // 还是优先看 AI 填没填 "入手日期" spec；没填就今天。手动改的也会
+            // 体现在 spec 列表里，于是这里能拿到。
             val acquired = readPurchaseField(draft, "入手日期").ifBlank { LocalDate.now().toString() }
             val item = Item(
                 id = id,
@@ -488,7 +520,7 @@ class AddViewModel(
                 nickname = draft.nickname.trim(),
                 acquired = acquired,
                 parted = null,
-                status = ItemStatus.OWNED,
+                status = status,
                 palette = template.palette,
                 oneLiner = draft.oneLiner.trim(),
                 heroVector = template.heroVector,
@@ -628,54 +660,16 @@ private fun formatDate(epochMillis: Long): String {
 }
 
 /**
- * The 9 preview fields the prototype enumerates. Map cleanly onto our
- * domain — first-class fields where they exist, [HeroSpec] entries
- * (looked up by label) for "purchase context" extras.
+ * Cycle 0023：草稿页改成 Edit 页同款排版，PreviewField 缩到只剩 5 个一级
+ * 字段（其余 specs 都让 AI 自由发挥，AddPreview 直接渲染 draft.specs）。
  */
 enum class PreviewField(val label: String) {
     Category("品类"),
     Brand("品牌"),
     Model("型号"),
     Nickname("昵称"),
-    Color("颜色"),
-    AcquiredDate("入手日期"),
-    AcquiredPrice("入手价格"),
-    AcquiredChannel("入手渠道"),
     OneLiner("一句话"),
 }
-
-enum class Confidence { High, Medium, Low }
-
-data class PreviewRow(val field: PreviewField, val value: String, val confidence: Confidence)
-
-/** Pull a stable list of preview rows out of an [ItemDraft]. */
-fun previewRowsFor(draft: ItemDraft): List<PreviewRow> {
-    fun confOf(value: String): Confidence =
-        if (value.isBlank()) Confidence.Low
-        else if (value.length <= 2) Confidence.Medium
-        else Confidence.High
-    val color    = readPurchaseField(draft, "颜色")
-    val date     = readPurchaseField(draft, "入手日期")
-    val price    = readPurchaseField(draft, "入手价格")
-    val channel  = readPurchaseField(draft, "入手渠道")
-    val categoryDisplay = draft.category?.let {
-        runCatching { Category.fromId(it).nameZh }.getOrNull()
-    }.orEmpty()
-    return listOf(
-        PreviewRow(PreviewField.Category,        categoryDisplay,    confOf(categoryDisplay)),
-        PreviewRow(PreviewField.Brand,           draft.brand,        confOf(draft.brand)),
-        PreviewRow(PreviewField.Model,           draft.model,        confOf(draft.model)),
-        PreviewRow(PreviewField.Nickname,        draft.nickname,     if (draft.nickname.isBlank()) Confidence.Low else Confidence.Medium),
-        PreviewRow(PreviewField.Color,           color,              confOf(color)),
-        PreviewRow(PreviewField.AcquiredDate,    date,               confOf(date)),
-        PreviewRow(PreviewField.AcquiredPrice,   price,              confOf(price)),
-        PreviewRow(PreviewField.AcquiredChannel, channel,            confOf(channel)),
-        PreviewRow(PreviewField.OneLiner,        draft.oneLiner,     confOf(draft.oneLiner)),
-    )
-}
-
-private fun readPurchaseField(draft: ItemDraft, label: String): String =
-    draft.specs.firstOrNull { it.label == label }?.value.orEmpty()
 
 private fun applyFieldEdit(draft: ItemDraft, field: PreviewField, value: String): ItemDraft = when (field) {
     PreviewField.Category -> {
@@ -687,17 +681,17 @@ private fun applyFieldEdit(draft: ItemDraft, field: PreviewField, value: String)
     PreviewField.Model    -> draft.copy(model = value)
     PreviewField.Nickname -> draft.copy(nickname = value)
     PreviewField.OneLiner -> draft.copy(oneLiner = value)
-    PreviewField.Color, PreviewField.AcquiredDate, PreviewField.AcquiredPrice, PreviewField.AcquiredChannel -> {
-        val newSpecs = draft.specs.toMutableList()
-        val idx = newSpecs.indexOfFirst { it.label == field.label }
-        if (idx >= 0) newSpecs[idx] = newSpecs[idx].copy(value = value)
-        else newSpecs.add(HeroSpec(field.label, value))
-        draft.copy(specs = newSpecs)
-    }
 }
 
-private fun fieldCount(draft: ItemDraft): Int =
-    previewRowsFor(draft).count { it.value.isNotBlank() }
+private fun readPurchaseField(draft: ItemDraft, label: String): String =
+    draft.specs.firstOrNull { it.label == label }?.value.orEmpty()
+
+private fun fieldCount(draft: ItemDraft): Int {
+    val first = listOf(draft.brand, draft.model, draft.nickname, draft.oneLiner, draft.category.orEmpty())
+        .count { it.isNotBlank() }
+    val specs = draft.specs.count { it.label.isNotBlank() && it.value.isNotBlank() }
+    return first + specs
+}
 
 private fun makeId(category: Category, brand: String, model: String, now: Long): String {
     val slug = "$brand-$model"

@@ -18,12 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,33 +29,47 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.treasure.core.ai.ItemDraft
 import com.treasure.core.domain.Category
-import com.treasure.core.domain.Item
+import com.treasure.core.domain.HeroSpec
 import com.treasure.core.domain.ItemStatus
 import com.treasure.theme.LocalTreasureColors
 import com.treasure.ui.components.EditPageHeader
 import com.treasure.ui.components.HeroAvatarPicker
+import com.treasure.ui.components.InlineDropdown
 import com.treasure.ui.components.SectionDivider
+import com.treasure.ui.edit.AddRowButton
+import com.treasure.ui.edit.Chip
+import com.treasure.ui.edit.DeleteIcon
+import com.treasure.ui.edit.FieldLabel
+import com.treasure.ui.edit.InlineField
+import com.treasure.ui.edit.LabeledField
 
 /**
- * Cycle 0019：草稿页样式贴齐 Edit / 手动录入页 — EditPageHeader + 头像选择器
- * + SectionDivider + LabeledField。Header 左边 [取消] 右边 [确认收入图鉴]，
- * 下面分两段：基础（品牌/型号/昵称/一句话）+ 其他信息（颜色/购入/价格/渠道）。
- * 点任一行进入 inline edit；置信度小圆点跟在字段标签前面。
+ * Cycle 0023：草稿页全面镜像 Edit 页。AI 把任何字段填上来都直接显示，没有
+ * 再写死的"颜色 / 入手日期 / 入手价格 / 入手渠道" 4 行模板。
+ *
+ * 排版：
+ *   - 头：取消 / Refine · 品类 / 确认收入
+ *   - HeroAvatarPicker（read-only — 录入时还没照片，只展示模板插画）
+ *   - 基础: brand · model · nickname · oneLiner（LabeledField）
+ *   - 标签: status · category（同 Edit）
+ *   - 参数: 渲染 draft.specs 全部行，可改 label / value / 删 / 加（不做拖动
+ *           重排，留给 Edit 页用户细调，草稿页讲究快进快出）
+ *
+ * status 是这里的本地 state（AI 不填），其它字段都走 vm 的 update*。
  */
 @Composable
 fun AddPreview(
     draft: ItemDraft?,
     onBack: () -> Unit,
     onUpdateField: (PreviewField, String) -> Unit,
-    onConfirm: () -> Unit,
+    onUpdateSpec: (Int, HeroSpec) -> Unit,
+    onAddSpec: () -> Unit,
+    onRemoveSpec: (Int) -> Unit,
+    onConfirm: (ItemStatus) -> Unit,
 ) {
     val colors = LocalTreasureColors.current
     if (draft == null) {
@@ -80,22 +89,14 @@ fun AddPreview(
         }
         return
     }
-    val rows = previewRowsFor(draft)
-    val basicFields = setOf(
-        PreviewField.Brand, PreviewField.Model, PreviewField.Nickname, PreviewField.OneLiner,
-    )
-    val otherFields = setOf(
-        PreviewField.Color, PreviewField.AcquiredDate, PreviewField.AcquiredPrice, PreviewField.AcquiredChannel,
-    )
-    val basicRows = rows.filter { it.field in basicFields }
-    val otherRows = rows.filter { it.field in otherFields }
-    var editing by remember { mutableStateOf<PreviewField?>(null) }
 
-    val template = remember(draft.category) {
-        CategoryTemplates.forCategory(
-            Category.entries.firstOrNull { it.id == draft.category } ?: Category.TECH,
-        )
+    val category = remember(draft.category) {
+        draft.category?.let { id ->
+            Category.entries.firstOrNull { it.id == id }
+        } ?: Category.TECH
     }
+    val template = remember(category) { CategoryTemplates.forCategory(category) }
+    var status by remember { mutableStateOf(ItemStatus.OWNED) }
 
     Box(
         modifier = Modifier
@@ -111,7 +112,7 @@ fun AddPreview(
             item {
                 EditPageHeader(
                     title = "Refine",
-                    subtitle = template.category.nameZh,
+                    subtitle = category.nameZh,
                     leading = {
                         Text(
                             text = "取消",
@@ -129,7 +130,7 @@ fun AddPreview(
                             color = colors.terra,
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier
-                                .clickable(onClick = onConfirm)
+                                .clickable { onConfirm(status) }
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                         )
                     },
@@ -140,179 +141,138 @@ fun AddPreview(
                 HeroAvatarPicker(
                     category = template.category,
                     palette = template.palette,
-                    options = remember(template.category) { heroVectorOptionsFor(template.category) },
+                    options = remember(category) { heroVectorOptionsFor(category) },
                     selected = template.heroVector,
-                    onSelect = { /* read-only in preview */ },
+                    onSelect = { /* read-only — 草稿页不让换插画 */ },
                 )
                 Spacer(Modifier.height(8.dp))
             }
-            item {
-                ConfidenceLegend(modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp))
-            }
+
             item { SectionDivider("基础") }
             item {
                 Column(
                     modifier = Modifier.padding(horizontal = 22.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    basicRows.forEach { row ->
-                        DraftFieldRow(
-                            row = row,
-                            isEditing = editing == row.field,
-                            onTap = { editing = row.field },
-                            onCommit = { value ->
-                                onUpdateField(row.field, value)
-                                editing = null
-                            },
-                            onCancel = { editing = null },
+                    LabeledField(
+                        label = "品牌",
+                        value = draft.brand,
+                        onValueChange = { onUpdateField(PreviewField.Brand, it) },
+                        hint = "如 Yonex / Sony / Gaggia",
+                    )
+                    LabeledField(
+                        label = "型号",
+                        value = draft.model,
+                        onValueChange = { onUpdateField(PreviewField.Model, it) },
+                        hint = "如 Astrox 99 Pro",
+                    )
+                    LabeledField(
+                        label = "昵称",
+                        value = draft.nickname,
+                        onValueChange = { onUpdateField(PreviewField.Nickname, it) },
+                        hint = "可留空",
+                    )
+                    LabeledField(
+                        label = "简介",
+                        value = draft.oneLiner,
+                        onValueChange = { onUpdateField(PreviewField.OneLiner, it) },
+                        hint = "一句话介绍",
+                    )
+                }
+            }
+
+            item { SectionDivider("标签") }
+            item {
+                Column(
+                    modifier = Modifier.padding(horizontal = 22.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        FieldLabel("状态")
+                        Spacer(Modifier.width(LABEL_GAP))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Chip("Owned",  status == ItemStatus.OWNED)  { status = ItemStatus.OWNED }
+                            Chip("Parted", status == ItemStatus.PARTED) { status = ItemStatus.PARTED }
+                            Chip("Rented", status == ItemStatus.RENTED) { status = ItemStatus.RENTED }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        FieldLabel("品类")
+                        Spacer(Modifier.width(LABEL_GAP))
+                        InlineDropdown(
+                            options = Category.entries,
+                            selected = category,
+                            label = { it.nameZh },
+                            onSelect = { onUpdateField(PreviewField.Category, it.nameZh) },
                         )
                     }
                 }
             }
-            item { SectionDivider("其他信息") }
+
+            item { SectionDivider("参数 · AI 填的字段") }
             item {
-                Column(
-                    modifier = Modifier.padding(horizontal = 22.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    otherRows.forEach { row ->
-                        DraftFieldRow(
-                            row = row,
-                            isEditing = editing == row.field,
-                            onTap = { editing = row.field },
-                            onCommit = { value ->
-                                onUpdateField(row.field, value)
-                                editing = null
-                            },
-                            onCancel = { editing = null },
-                        )
-                    }
-                }
+                DraftSpecs(
+                    specs = draft.specs,
+                    onChange = onUpdateSpec,
+                    onDelete = onRemoveSpec,
+                    onAdd = onAddSpec,
+                )
             }
             item { Spacer(Modifier.height(40.dp)) }
         }
     }
 }
 
-@Composable
-private fun ConfidenceLegend(modifier: Modifier = Modifier) {
-    val colors = LocalTreasureColors.current
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        LegendItem(label = "确定", confidence = Confidence.High)
-        LegendItem(label = "可能", confidence = Confidence.Medium)
-        LegendItem(label = "需补充", confidence = Confidence.Low)
-    }
-}
+private val LABEL_GAP = 12.dp
 
+/**
+ * 比 Edit 页的 ReorderableSpecs 简化：草稿页不做拖动重排（AI 已经按重要性
+ * 排好了，用户要细调可以在 Detail / Edit 页继续）。只支持 inline 改 label /
+ * value、删除单行、加新行。
+ */
 @Composable
-private fun LegendItem(label: String, confidence: Confidence) {
-    val colors = LocalTreasureColors.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        ConfidenceDot(confidence = confidence)
-        Spacer(Modifier.size(6.dp))
-        Text(
-            text = label,
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-        )
-    }
-}
-
-@Composable
-private fun ConfidenceDot(confidence: Confidence) {
-    val colors = LocalTreasureColors.current
-    val color = when (confidence) {
-        Confidence.High -> colors.ink
-        Confidence.Medium -> colors.terra
-        Confidence.Low -> colors.sub.copy(alpha = 0.45f)
-    }
-    Box(
-        modifier = Modifier
-            .size(5.dp)
-            .clip(CircleShape)
-            .background(color),
-    )
-}
-
-@Composable
-private fun DraftFieldRow(
-    row: PreviewRow,
-    isEditing: Boolean,
-    onTap: () -> Unit,
-    onCommit: (String) -> Unit,
-    onCancel: () -> Unit,
+private fun DraftSpecs(
+    specs: List<HeroSpec>,
+    onChange: (Int, HeroSpec) -> Unit,
+    onDelete: (Int) -> Unit,
+    onAdd: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
-    // text state 提到 row 级别，让 "确认" 按钮和 keyboard Done 都能拿到。
-    var text by remember(row.field, isEditing) { mutableStateOf(row.value) }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = !isEditing, onClick = onTap),
-    ) {
-        ConfidenceDot(confidence = row.confidence)
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = row.field.label,
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.width(56.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                if (isEditing) {
-                    BasicTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        singleLine = true,
-                        cursorBrush = SolidColor(colors.terra),
-                        textStyle = LocalTextStyle.current.copy(
-                            color = colors.ink,
-                            fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
-                            fontSize = MaterialTheme.typography.bodyLarge.fontSize,
-                        ),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Text,
-                            imeAction = ImeAction.Done,
-                        ),
-                        keyboardActions = KeyboardActions(onDone = { onCommit(text) }),
-                        modifier = Modifier.fillMaxWidth(),
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
+        if (specs.isEmpty()) {
+            Text(
+                text = "AI 没填参数 · 点下面 + 自己加",
+                color = colors.sub.copy(alpha = 0.6f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontStyle = FontStyle.Italic,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        } else {
+            specs.forEachIndexed { idx, spec ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    InlineField(
+                        placeholder = "label",
+                        value = spec.label,
+                        onValueChange = { onChange(idx, HeroSpec(it, spec.value)) },
+                        modifier = Modifier.weight(1f),
                     )
-                } else {
-                    Text(
-                        text = row.value.ifBlank { "（点击补充）" },
-                        color = if (row.value.isBlank()) colors.sub.copy(alpha = 0.6f) else colors.ink,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontStyle = if (row.value.isBlank()) FontStyle.Italic else FontStyle.Normal,
+                    InlineField(
+                        placeholder = "value",
+                        value = spec.value,
+                        onValueChange = { onChange(idx, HeroSpec(spec.label, it)) },
+                        modifier = Modifier.weight(1.4f),
                     )
+                    DeleteIcon { onDelete(idx) }
                 }
             }
-            Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
         }
-        if (isEditing) {
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "确认",
-                color = colors.terra,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier
-                    .clickable { onCommit(text) }
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-            )
-            Text(
-                text = "取消",
-                color = colors.sub,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier
-                    .clickable(onClick = onCancel)
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-            )
-        }
+        Spacer(Modifier.height(8.dp))
+        AddRowButton(label = "+ 加一行参数", onClick = onAdd)
     }
 }

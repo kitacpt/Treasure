@@ -16,19 +16,19 @@
 4. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
 5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 6. [`docs/adr/`](docs/adr/) —— 6 份决策记录
-7. [`openspec/`](openspec/) —— cycle 0001-0022 的 proposal / spec / notes
+7. [`openspec/`](openspec/) —— cycle 0001-0023 的 proposal / spec / notes
 
 ## 当前状态（2026-05-09）
 
-**cycle 0001 → 0022 全部落地**。13 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
+**cycle 0001 → 0023 全部落地**。13 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
 
 - 6 个品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画
 - 主屏 4 tab 横滑切换：门厅 / 图鉴 / 录入 / 设置（HorizontalPager）；Detail / Edit 是 push 上来的覆盖屏
 - Detail 抽屉（历史 / 参数 / 影集）+ 明信片翻面；影集点缩略图 → 全屏 viewer（横滑翻页 / 双指缩放 / 长按图加注 / 长按已有标注改或删，cycle 0012）
 - Detail 右上点 → Edit 单页表单，与手动录入共用 EditPageHeader + SectionDivider；状态 / 品类 / 历史类型用统一的 `InlineDropdown`，不再换行
 - Edit 实拍：📷 拍照（FileProvider + 直调系统相机）+ + 多选照片（最多 9 张）
-- Add (RECORD) chat-first：对话已落 Room（add_conversations / add_messages）；切回历史抽屉里点旧对话能 reload；**cycle 0022 起进入 Record tab 默认续上次对话**（不再每次新建空壳）；发 URL 时聊天里实时显示 "正在抓取 jd.com…" → "✓ 已抓取 jd.com · 1.2K 字" / "⚠ 防爬挡住"
-- AI：多轮 — `extractItemDraft` 现在带 `priorTurns`，把当前对话最后 20 条文字作为上下文喂回模型；Anthropic / OpenAI / Kimi · Moonshot / DeepSeek / 通义千问 / 智谱 GLM / Xiaomi MiLM / 自定义 共 8 个 preset，BYO key 存 EncryptedSharedPreferences；Settings 抽屉 "高阶" 段可调 temperature 和 thinking（cycle 0014）；cycle 0022 起 Settings 摘要卡 / 编辑抽屉根据 model 名启发式显示「🖼 多模态」能力提示
+- Add (RECORD) chat-first：对话已落 Room（add_conversations / add_messages）；切回历史抽屉里点旧对话能 reload；**cycle 0022 起进入 Record tab 默认续上次对话**（不再每次新建空壳）；发 URL 时聊天里实时显示 "正在抓取 jd.com…" → "✓ 已抓取 jd.com · 1.2K 字" / "⚠ 防爬挡住"；**cycle 0023 起聊天里发的图片单击可全屏预览**（复用影集那边的 FullscreenPhotoViewer，多图可横滑）
+- AI：多轮 — `extractItemDraft` 现在带 `priorTurns`，把当前对话最后 20 条文字作为上下文喂回模型；Anthropic / OpenAI / Kimi · Moonshot / DeepSeek / 通义千问 / 智谱 GLM / Xiaomi MiLM / 自定义 共 8 个 preset，BYO key 存 EncryptedSharedPreferences；Settings 抽屉 "高阶" 段可调 temperature 和 thinking（cycle 0014）；cycle 0022 起 Settings 摘要卡 / 编辑抽屉根据 model 名启发式显示「🖼 多模态 / 纯文本」 pill；cycle 0023 起 prompt 放开 hero spec 模板（AI 按物品挑最重要的 4 条），草稿页全面镜像 Edit 页 — AI 填什么字段就显什么，不再固定 9 行
 - 手动录入：4 品类模板，顶部居中 124dp 大插画 + 56dp 横滚选项；italic tagline + 每个字段单位 / 示例 hint
 - Settings：单张摘要卡 + 连通 pill + 底部抽屉编辑
 - 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`；相机直拍中转 `filesDir/captures/`；callout 数据 `Map<path, List<{x, y, text}>>` 跟 item 一起入库

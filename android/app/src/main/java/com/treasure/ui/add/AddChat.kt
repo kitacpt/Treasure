@@ -84,6 +84,7 @@ fun AddChat(
     onSendPhoto: (android.net.Uri) -> Unit,
     onOpenDraft: () -> Unit,
     onGoSettings: () -> Unit,
+    onPreviewPhoto: (android.net.Uri) -> Unit,
 ) {
     val colors = LocalTreasureColors.current
     val context = LocalContext.current
@@ -177,7 +178,11 @@ fun AddChat(
                 ) {
                     items(state.messages.size) { idx ->
                         val message = state.messages[idx]
-                        MessageRow(message = message, onOpenDraft = onOpenDraft)
+                        MessageRow(
+                            message = message,
+                            onOpenDraft = onOpenDraft,
+                            onPreviewPhoto = onPreviewPhoto,
+                        )
                     }
                     if (state.busy) item { TypingIndicator() }
                 }
@@ -673,11 +678,18 @@ private fun NewChatRow(onClick: () -> Unit) {
 // ─── messages ─────────────────────────────────────────────────────────
 
 @Composable
-private fun MessageRow(message: AddMessage, onOpenDraft: () -> Unit) {
+private fun MessageRow(
+    message: AddMessage,
+    onOpenDraft: () -> Unit,
+    onPreviewPhoto: (android.net.Uri) -> Unit,
+) {
     when (message) {
         is AddMessage.Assistant -> AssistantBubble(text = message.text)
         is AddMessage.User -> UserTextBubble(text = message.text)
-        is AddMessage.UserPhoto -> UserPhotoBubble(uri = message.uri)
+        is AddMessage.UserPhoto -> UserPhotoBubble(
+            uri = message.uri,
+            onClick = { onPreviewPhoto(message.uri) },
+        )
         is AddMessage.UserVoice -> UserVoiceBubble(text = message.text, duration = message.duration)
         is AddMessage.DraftCta -> DraftCtaCard(message = message, onOpen = onOpenDraft)
         is AddMessage.SystemNote -> SystemNoteRow(text = message.text, tone = message.tone)
@@ -756,7 +768,7 @@ private fun UserTextBubble(text: String) {
 }
 
 @Composable
-private fun UserPhotoBubble(uri: android.net.Uri) {
+private fun UserPhotoBubble(uri: android.net.Uri, onClick: () -> Unit) {
     val colors = LocalTreasureColors.current
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Box(
@@ -764,7 +776,8 @@ private fun UserPhotoBubble(uri: android.net.Uri) {
                 .size(120.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(colors.card)
-                .border(0.5.dp, colors.line),
+                .border(0.5.dp, colors.line)
+                .clickable(onClick = onClick),
         ) {
             AsyncImage(
                 model = uri,

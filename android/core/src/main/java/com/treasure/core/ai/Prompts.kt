@@ -16,16 +16,21 @@ Brand + model: actual product names. Don't make them up — if you can't tell, l
 Nickname: optional, short Chinese pet name (e.g. "黑刃" for a black racket); leave empty unless the user gave one.
 oneLiner: one short Chinese line, like "进攻型 4U · 拉26磅" or "APS-C 旗舰 · 4020 万像素".
 
-Specs: provide 4 to 8 entries total in this order:
-  - The first 4 are "hero" specs displayed on the card, and MUST follow the category-specific labels:
-      badminton: [重量 (g), 平衡点 (mm), 中杆硬度, 穿线磅数]
-      photo:     [画幅, 像素, ISO 范围, 连拍]
-      cars:      [动力, 马力 (PS), 0-100 (s), 驱动]
-      tech:      [芯片, 内存, 存储, 屏幕]
-      coffee:    [品类, 产地 / 烘焙度, 研磨度, 用法]
-      wine:      [酒种, 酒精度 / 容量, 产地 / 年份, 酒款]
-  - After those four, append any further specs the description supports (型号 / 配色 / 购入价 / …).
-Use empty string for hero values you can't tell. Never invent specs you don't see evidence for.
+Specs: 4 to 10 entries total. Fill what is genuinely informative for THIS specific item — pick whatever
+attributes matter, in whatever order makes sense, using natural Chinese labels and units.
+  - The first 4 are "hero" specs (displayed on the card). Choose the most important attributes for THIS
+    item — they don't need to follow a fixed per-category template. Examples of good hero picks (NOT
+    a required list — adapt to the item):
+      badminton racket: 重量 / 平衡点 / 中杆硬度 / 穿线磅数
+      camera body:      画幅 / 像素 / 连拍 / ISO 范围
+      coffee bean:      产地 / 烘焙度 / 处理法 / 风味
+      wine:             酒种 / 容量 · 酒精度 / 产地 · 年份 / 酒款
+      headphones:       驱动单元 / 阻抗 / 蓝牙版本 / 主动降噪
+  - After hero, append tail specs the description supports — purchase info (入手日期 / 入手价格 / 入手渠道 / 颜色)
+    or any further attributes the user mentioned. The user expects whatever you fill to show up as-is in
+    the draft preview, so choose labels you'd want them to see.
+Leave the value as an empty string for any spec you can't determine. Never invent specs you have no
+evidence for.
 """
 
 /**

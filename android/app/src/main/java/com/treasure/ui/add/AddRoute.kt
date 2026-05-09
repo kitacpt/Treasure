@@ -37,6 +37,10 @@ import com.treasure.theme.LocalTreasureColors
 
 private enum class AddMode { Chat, Preview }
 
+/** Cycle 0023：聊天页里的图片点开后用全屏 viewer 看；只针对 chat 里发出的
+ *  那些 UserPhoto，不走 callout 编辑（那是影集才有的功能）。 */
+private data class ChatPhotoPreview(val photos: List<String>, val initialIndex: Int)
+
 /**
  * Outer Add page — chat-first per the cycle 0007 design (see
  * `prototype/add-page-v2/HANDOFF.md`). Manual-entry stays in CategoryForm
@@ -55,6 +59,7 @@ fun AddRoute(
     var historyOpen by remember { mutableStateOf(false) }
     var manualPickerOpen by remember { mutableStateOf(false) }
     var manualSession by remember { mutableStateOf<CategoryTemplate?>(null) }
+    var photoPreview by remember { mutableStateOf<ChatPhotoPreview?>(null) }
 
     // Re-read AI key state when this screen is recomposed (user might have
     // come back from Settings).
@@ -94,13 +99,23 @@ fun AddRoute(
                     onSendPhoto = vm::sendPhoto,
                     onOpenDraft = { mode = AddMode.Preview },
                     onGoSettings = onGoSettings,
+                    onPreviewPhoto = { tapped ->
+                        val all = state.messages
+                            .filterIsInstance<AddMessage.UserPhoto>()
+                            .map { it.uri.toString() }
+                        val idx = all.indexOf(tapped.toString()).coerceAtLeast(0)
+                        photoPreview = ChatPhotoPreview(all, idx)
+                    },
                 )
                 AddMode.Preview -> AddPreview(
                     draft = state.draft,
                     onBack = { mode = AddMode.Chat },
                     onUpdateField = vm::updateDraftField,
-                    onConfirm = {
-                        vm.commitDraft { id ->
+                    onUpdateSpec = vm::updateDraftSpec,
+                    onAddSpec = vm::addDraftSpec,
+                    onRemoveSpec = vm::removeDraftSpec,
+                    onConfirm = { status ->
+                        vm.commitDraft(status = status) { id ->
                             vm.newConversation()
                             mode = AddMode.Chat
                             onSaved(id)
@@ -137,6 +152,19 @@ fun AddRoute(
                     },
                 )
             }
+        }
+
+        // Cycle 0023：聊天里的图片点开 → 全屏 viewer。复用影集那边的
+        // [FullscreenPhotoViewer]，但 callout 这里没存（chat 图就是临时 hint
+        // 给 AI 用），所以传空 map + no-op 写回。多张图自动可横滑。
+        photoPreview?.let { p ->
+            com.treasure.ui.photo.FullscreenPhotoViewer(
+                photos = p.photos,
+                initialIndex = p.initialIndex,
+                callouts = emptyMap(),
+                onSetCallouts = { _, _ -> /* chat 图不存 callout */ },
+                onClose = { photoPreview = null },
+            )
         }
     }
 }
