@@ -16,11 +16,11 @@
 4. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
 5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 6. [`docs/adr/`](docs/adr/) —— 6 份决策记录
-7. [`openspec/`](openspec/) —— cycle 0001-0020 的 proposal / spec / notes
+7. [`openspec/`](openspec/) —— cycle 0001-0021 的 proposal / spec / notes
 
 ## 当前状态（2026-05-09）
 
-**cycle 0001 → 0020 全部落地**。13 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
+**cycle 0001 → 0021 全部落地**。13 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
 
 - 6 个品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画
 - 主屏 4 tab 横滑切换：门厅 / 图鉴 / 录入 / 设置（HorizontalPager）；Detail / Edit 是 push 上来的覆盖屏

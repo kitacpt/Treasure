@@ -7,21 +7,36 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 /**
- * 把京东 / 淘宝 / 浏览器分享过来的 URL 真去拉一下页面，剥掉脚本样式后给
- * AI 当上下文。AI 不会真访问 web，所以我们先拉文本喂回去。
+ * 抓取结果：success / blocked（防爬 / 登录墙）/ network 错误。
+ * Cycle 0021 加：让 ViewModel 能区分三种情况，给 AI 不同的 prompt 提示。
+ */
+sealed class FetchResult {
+    data class Success(val text: String) : FetchResult()
+    /** HTTP 状态成功但页面是登录 / 验证码页 / 内容稀薄。 */
+    data class Blocked(val host: String, val reason: String) : FetchResult()
+    /** 网络 / HTTP 错误。 */
+    data class Failed(val host: String, val message: String) : FetchResult()
+}
+
+/**
+ * 把京东 / 淘宝 / 拼多多 / 浏览器分享过来的 URL 真去拉一下页面，剥掉脚本
+ * 样式后给 AI 当上下文。AI 不会真访问 web，所以我们先拉文本喂回去。
  *
  * 设备直连 — [ADR-0004](docs/adr/0004-byo-ai-key.md) 规定 AI 不走代理；
  * 这里 fetch 也是设备直连商家站点。失败就回退到只用分享文本。
  *
  * 不试图理解 JD / 淘宝的具体 DOM；不同商家页结构差太大，加上做反爬识别。
  * 简单走 OkHttp + 移动 UA + 取头部 N KB + 全文 strip tag 给 AI 看摘要。
+ *
+ * Cycle 0021：返回 [FetchResult] 区分 success / blocked / failed，让上层
+ * 能告诉 AI 实际情况，避免 AI 拿到没内容时回 "我无法访问外部链接"。
  */
 class PageFetcher(httpClient: OkHttpClient? = null) {
 
     private val client: OkHttpClient = httpClient ?: defaultHttpClient()
 
     /**
-     * 抓 [url] 的页面文字。返回 null = 抓不到（错误已吞，不影响主流程）。
+     * 抓 [url] 的页面文字，返回结构化结果。
      * @param maxBytes 最多读多少字节的 raw body，避免大页面把 prompt 塞爆
      * @param maxTextChars 抽完文本后再截到这个字符数喂 AI
      */
@@ -29,8 +44,9 @@ class PageFetcher(httpClient: OkHttpClient? = null) {
         url: String,
         maxBytes: Int = 96 * 1024,
         maxTextChars: Int = 4_000,
-    ): String? = withContext(Dispatchers.IO) {
-        runCatching {
+    ): FetchResult = withContext(Dispatchers.IO) {
+        val host = runCatching { java.net.URI(url).host.orEmpty() }.getOrDefault("")
+        try {
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", MOBILE_UA)
@@ -41,8 +57,11 @@ class PageFetcher(httpClient: OkHttpClient? = null) {
                 .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
                 .build()
             client.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext null
-                val body = resp.body ?: return@withContext null
+                if (!resp.isSuccessful) {
+                    return@withContext FetchResult.Failed(host, "HTTP ${resp.code}")
+                }
+                val body = resp.body
+                    ?: return@withContext FetchResult.Failed(host, "empty body")
                 val raw = body.byteStream().use { input ->
                     val buf = ByteArray(maxBytes)
                     var read = 0
@@ -55,9 +74,17 @@ class PageFetcher(httpClient: OkHttpClient? = null) {
                         ?: Charsets.UTF_8
                     String(buf, 0, read, charset)
                 }
-                stripHtml(raw).take(maxTextChars)
+                val stripped = stripHtml(raw).take(maxTextChars)
+                val blockedReason = detectBlock(stripped, host)
+                if (blockedReason != null) {
+                    FetchResult.Blocked(host, blockedReason)
+                } else {
+                    FetchResult.Success(stripped)
+                }
             }
-        }.getOrNull()
+        } catch (t: Throwable) {
+            FetchResult.Failed(host, t.javaClass.simpleName + ": " + (t.message ?: ""))
+        }
     }
 
     companion object {
@@ -145,3 +172,44 @@ private val URL_REGEX = Regex(
 /** Returns first http(s) URL inside a free-form string, or null. */
 fun firstUrlIn(text: String): String? =
     URL_REGEX.find(text)?.value
+
+/**
+ * 启发式判 "拉到的页面其实是登录 / 验证码 / 反爬墙"。
+ *
+ * 拼多多的分享链接（mobile.yangkeduo.com / yangkeduo.com / pinduoduo.com）
+ * 直接 fetch 经常拿到 "请打开拼多多 App" / "活动正在加载" 之类的占位页；
+ * 京东 item 页可能要登录拿价格；淘宝直接被风控挡。这些页面 strip 后字数
+ * 少 + 含特定关键词，能识别出来。
+ */
+internal fun detectBlock(text: String, host: String): String? {
+    val len = text.length
+
+    // 长度极短直接当被屏蔽（一般正常商品页 strip 后至少几百字）
+    if (len < 200) return "page too short ($len chars) — likely empty / blocked"
+
+    // 关键词命中：登录墙 / captcha / 拼多多打开 App 提示
+    val lower = text.lowercase()
+    val keywords = listOf(
+        "请登录" to "login wall",
+        "请先登录" to "login wall",
+        "需要登录" to "login wall",
+        "captcha" to "captcha",
+        "verify you are human" to "captcha",
+        "robot check" to "captcha",
+        "访问受限" to "rate limited",
+        "frequent access" to "rate limited",
+        "打开拼多多" to "pinduoduo app gate",
+        "打开淘宝" to "taobao app gate",
+        "打开京东" to "jd app gate",
+        "请使用" to "app required",
+        "在 app 内打开" to "app required",
+        "活动已结束" to "event ended",
+    )
+    for ((kw, reason) in keywords) {
+        // 关键词命中 + 总长不超过 1000 字 → 八成是壳页
+        if (lower.contains(kw) && len < 1000) {
+            return "$reason ($host)"
+        }
+    }
+    return null
+}

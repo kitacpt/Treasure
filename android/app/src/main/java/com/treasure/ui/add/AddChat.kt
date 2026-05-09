@@ -156,24 +156,31 @@ fun AddChat(
             val bottomImeInset = WindowInsets.ime
                 .asPaddingValues().calculateBottomPadding()
             val effectiveBottom = maxOf(bottomNavInset, bottomImeInset)
-            LazyColumn(
-                state = listState,
+            // Cycle 0021：包一层 SelectionContainer 让用户能长按 → 复制 / 选择
+            // 任意一段文字（助手 / 用户 / 语音转写 / 草稿副标都行）。
+            // Composer 那边的 BasicTextField 自带 paste，无需多动。
+            androidx.compose.foundation.text.selection.SelectionContainer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                contentPadding = PaddingValues(
-                    start = 22.dp,
-                    end = 22.dp,
-                    top = 18.dp,
-                    bottom = 18.dp + effectiveBottom + 160.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(state.messages.size) { idx ->
-                    val message = state.messages[idx]
-                    MessageRow(message = message, onOpenDraft = onOpenDraft)
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(
+                        start = 22.dp,
+                        end = 22.dp,
+                        top = 18.dp,
+                        bottom = 18.dp + effectiveBottom + 160.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(state.messages.size) { idx ->
+                        val message = state.messages[idx]
+                        MessageRow(message = message, onOpenDraft = onOpenDraft)
+                    }
+                    if (state.busy) item { TypingIndicator() }
                 }
-                if (state.busy) item { TypingIndicator() }
             }
         }
 

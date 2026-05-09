@@ -193,37 +193,72 @@ class AddViewModel(
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _state.value.busy) return
         appendMessage(AddMessage.User(trimmed))
-        // Cycle 0020：如果文本里带 http(s) URL（多半是京东 / 淘宝分享过来），
-        // 先把页面拉一下，给 AI 当 context；拉失败就只用原文。fetch 期间把
-        // busy 拉起来，typing indicator 自然出现，不再 append 临时占位消息。
+        // Cycle 0020-0021：如果文本里带 http(s) URL（多半是京东 / 淘宝 / 拼
+        // 多多分享过来），先把页面拉一下，给 AI 当 context；fetch 期间把 busy
+        // 拉起来，typing indicator 自然出现。
+        //
+        // PageFetcher 返回三种结果：
+        //   - Success：[页面摘要] 拼进 prompt
+        //   - Blocked：拼多多 / 京东 等 app gate 或登录墙，明确告诉 AI 拉
+        //     不到、别说自己 "无法访问外部 URL"，要它仅基于分享文字判断
+        //   - Failed：网络 / HTTP 错误，同上
         val url = com.treasure.core.web.firstUrlIn(trimmed)
         if (url != null) {
             _state.update { it.copy(busy = true) }
             viewModelScope.launch {
                 val app = getApplication<TreasureApp>()
-                val fetched = app.pageFetcher.fetchText(url)
-                val augmented = if (!fetched.isNullOrBlank()) {
-                    """
-                    用户在外部 app 分享了一条商品链接，原文：
-                    $trimmed
-
-                    [页面摘要]
-                    $fetched
-
-                    请基于摘要识别这件商品（品牌 / 型号 / 关键参数），不要把
-                    URL 本身写进任何字段。
-                    """.trimIndent()
-                } else {
-                    trimmed
+                val augmented = when (val result = app.pageFetcher.fetchText(url)) {
+                    is com.treasure.core.web.FetchResult.Success ->
+                        buildPromptWithPage(trimmed, result.text)
+                    is com.treasure.core.web.FetchResult.Blocked ->
+                        buildPromptFetchBlocked(trimmed, result.host, result.reason)
+                    is com.treasure.core.web.FetchResult.Failed ->
+                        buildPromptFetchFailed(trimmed, result.host, result.message)
                 }
-                // runExtract 会重新 set busy=true 并在结束时 set false，所以
-                // 这里不必手动还原。
+                // runExtract 会重新 set busy=true 并在结束时 set false。
                 runExtract(text = augmented, imageUri = null)
             }
         } else {
             runExtract(text = trimmed, imageUri = null)
         }
     }
+
+    private fun buildPromptWithPage(userText: String, pageSummary: String) = """
+        用户在外部 app 分享了一条商品链接，原文：
+        $userText
+
+        [页面摘要]
+        $pageSummary
+
+        请基于摘要识别这件商品（品牌 / 型号 / 关键参数），不要把 URL 本身
+        写进任何字段。
+    """.trimIndent()
+
+    private fun buildPromptFetchBlocked(userText: String, host: String, reason: String) = """
+        用户在外部 app 分享了一条商品链接，原文：
+        $userText
+
+        [系统提示] 客户端已经替你尝试拉取过这个 $host 页面，但被网站防爬挡
+        住了 ($reason)。你**没有**实时访问外部 URL 的能力，但你有 Treasure
+        客户端帮你抓的页面文字 — 这次没抓到。
+
+        请：
+        1. **不要**回复 "我无法访问外部链接" — 这是误导。客户端尝试过，是
+           网站这边的限制，跟你的能力无关。
+        2. 仅基于用户分享的原文里的关键词（商品名 / 价格 / 描述）判断商品。
+        3. 如果信息不足，直接调用 fill_item_draft 把能填的字段填上、空字段
+           留空，让用户在草稿里手动补。
+    """.trimIndent()
+
+    private fun buildPromptFetchFailed(userText: String, host: String, message: String) = """
+        用户在外部 app 分享了一条商品链接，原文：
+        $userText
+
+        [系统提示] 客户端尝试拉取 $host 页面失败：$message。你**没有**实时
+        访问外部 URL 的能力，请仅基于用户分享文字判断；如果信息不足，调用
+        fill_item_draft 把能填的填上，空的留空。**不要**回 "无法访问外部
+        链接"。
+    """.trimIndent()
 
     fun sendPhoto(uri: Uri) {
         if (_state.value.busy) return
