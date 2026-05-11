@@ -18,10 +18,16 @@ interface AiClient {
      *
      * 多轮：[priorTurns] 按时间顺序传入；最早在前。
      */
+    /**
+     * @param baseline 上一次用户已"采用"的草稿。Cycle 0024：AI 不从零开
+     *  始 propose，而是基于这份基线给出"下一版" — 给 AI 一种"修订"语境，
+     *  避免每轮都生成完全不同的字段集。
+     */
     suspend fun extractItemDraft(
         text: String,
         imageJpegBytes: ByteArray? = null,
         priorTurns: List<AiTurn> = emptyList(),
+        baseline: ItemDraft? = null,
     ): Result<ItemDraft>
 }
 

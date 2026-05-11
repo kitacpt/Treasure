@@ -34,6 +34,32 @@ evidence for.
 """
 
 /**
+ * Cycle 0024：会话 = 草稿。如果上一次用户已"采用"过一份草稿（[baseline]
+ * 非空），把它的 JSON 拼到 system prompt 末尾，告诉模型"这是当前已确认
+ * 状态，请基于它给下一版"。这样多轮对话不会每次都生成完全不同的字段，
+ * 而是 incremental refine — 用户加一句"颜色是红色"，AI 应只在 specs 里
+ * 加一行颜色，其它字段保持原样。
+ *
+ * [baseline] = null（首轮）→ 与之前完全相同的 system prompt。
+ */
+internal fun buildSystemWithBaseline(
+    baseline: ItemDraft?,
+    json: kotlinx.serialization.json.Json,
+): String {
+    if (baseline == null) return SYSTEM_PROMPT
+    val baselineJson = json.encodeToString(ItemDraft.serializer(), baseline)
+    return SYSTEM_PROMPT + "\n\n" + """
+        [CURRENT CONFIRMED DRAFT — the user has accepted this as the
+        baseline for this conversation. Your job is to give the *next
+        version* of this draft, not start from scratch. Keep fields you
+        don't have evidence to change. Only add / refine / overwrite the
+        parts the user's new message actually addresses.]
+
+        $baselineJson
+    """.trimIndent()
+}
+
+/**
  * JSON schema fragment for the fill_item_draft tool. Kept identical
  * across providers (Anthropic / OpenAI both accept this shape).
  */

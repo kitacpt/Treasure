@@ -10,6 +10,14 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+/**
+ * Cycle 0024：DraftCta 不再是"AI 给了一份草稿、点击展开看"的固定卡片；
+ * 它现在显式有三种状态（Pending / Accepted / Rejected），表示一次 AI 提案
+ * 的命运。Accepted 同时会 append 一条 DraftConfirmed 快照入库 — 那是会话
+ * 当前"已确认"的草稿基线，AI 下次跑时拿这个当 baseline 而不是从零开始。
+ */
+enum class DraftCtaStatus { Pending, Accepted, Rejected }
+
 /** 录入页对话的领域级 message —— 对应 UI 层 AddMessage。 */
 sealed interface AddConversationMessage {
     val id: String
@@ -19,7 +27,20 @@ sealed interface AddConversationMessage {
     data class User(override val id: String, val text: String, override val createdAt: Long) : AddConversationMessage
     data class UserPhoto(override val id: String, val uri: String, override val createdAt: Long) : AddConversationMessage
     data class UserVoice(override val id: String, val text: String, val duration: String, override val createdAt: Long) : AddConversationMessage
-    data class DraftCta(override val id: String, val draft: ItemDraft, val fieldCount: Int, override val createdAt: Long) : AddConversationMessage
+    data class DraftCta(
+        override val id: String,
+        val draft: ItemDraft,
+        val fieldCount: Int,
+        val status: DraftCtaStatus,
+        override val createdAt: Long,
+    ) : AddConversationMessage
+    /** Cycle 0024：用户 "采用" 后写下的快照，等价于"这一刻起，会话草稿是这样"。 */
+    data class DraftConfirmed(
+        override val id: String,
+        val draft: ItemDraft,
+        val fieldCount: Int,
+        override val createdAt: Long,
+    ) : AddConversationMessage
 }
 
 data class AddConversation(
@@ -98,10 +119,23 @@ private fun ConversationMessageEntity.toDomain(json: Json): AddConversationMessa
         id, text.orEmpty(), voiceDuration.orEmpty().ifBlank { "0:04" }, createdAt,
     )
     "draft_cta" -> {
+        // Cycle 0024：DraftCta 的 status 复用 text 列存（"pending" / "accepted" /
+        // "rejected"），免去 schema 迁移。老数据 text=null → 当 Pending。
         val draft = draftJson?.let {
             runCatching { json.decodeFromString(ItemDraft.serializer(), it) }.getOrNull()
         } ?: ItemDraft()
-        AddConversationMessage.DraftCta(id, draft, fieldCount ?: 0, createdAt)
+        val status = when (text?.lowercase()) {
+            "accepted" -> DraftCtaStatus.Accepted
+            "rejected" -> DraftCtaStatus.Rejected
+            else -> DraftCtaStatus.Pending
+        }
+        AddConversationMessage.DraftCta(id, draft, fieldCount ?: 0, status, createdAt)
+    }
+    "draft_confirmed" -> {
+        val draft = draftJson?.let {
+            runCatching { json.decodeFromString(ItemDraft.serializer(), it) }.getOrNull()
+        } ?: ItemDraft()
+        AddConversationMessage.DraftConfirmed(id, draft, fieldCount ?: 0, createdAt)
     }
     else -> AddConversationMessage.Assistant(id, text.orEmpty(), createdAt)
 }
@@ -132,6 +166,13 @@ private fun AddConversationMessage.toEntity(
     )
     is AddConversationMessage.DraftCta -> ConversationMessageEntity(
         id = id, conversationId = conversationId, role = "draft_cta",
+        text = status.name.lowercase(), // pending / accepted / rejected
+        photoUri = null, voiceDuration = null,
+        draftJson = json.encodeToString(draft),
+        fieldCount = fieldCount, createdAt = createdAt,
+    )
+    is AddConversationMessage.DraftConfirmed -> ConversationMessageEntity(
+        id = id, conversationId = conversationId, role = "draft_confirmed",
         text = null, photoUri = null, voiceDuration = null,
         draftJson = json.encodeToString(draft),
         fieldCount = fieldCount, createdAt = createdAt,

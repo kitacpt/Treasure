@@ -4,9 +4,9 @@
 
 ## 当前状态 · 2026-05-09
 
-**cycle 0001 → 0023 全部落地。**
+**cycle 0001 → 0024 全部落地。**
 
-- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.23.0 候选，13 MB，debug 签名）
+- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.24.0 候选，14 MB，debug 签名）
 - GitHub：<https://github.com/kitacpt/Treasure>（main 分支）
 - Schema：v8（cycle 0016 加 avatar_photo_path）
 - 测试设备：vivo X200 Pro mini（Android 15）
@@ -138,6 +138,7 @@ treasure/
 | 0021 | 对话框 SelectionContainer 复制粘贴 · PageFetcher 三态返回（Success / Blocked / Failed）+ 拼多多/JD/淘宝壳页启发式识别 · prompt 里明确告诉 AI "客户端拉过被挡了，别回 '无法访问外部链接'" | done |
 | 0022 | Record 默认续上次会话（不再每次新建）· fetch 状态对用户可见（SystemNote "正在抓取" / "✓ 已抓取" / "⚠ 防爬挡住"）· PageFetcher 加 charset 探测（GBK 老站点不再乱码）· AI 配置页显示模型多模态能力（启发式判 model 名）· 流式输出明确不做 | done |
 | 0023 | 草稿页全面镜像 Edit（基础/标签/参数 三段，AI 填啥就显啥，状态 chip 自选）· 放开 prompt 的 hero spec 模板（AI 按物品挑最重要的 4 条）· 聊天图单击复用 FullscreenPhotoViewer 全屏预览 · Vision pill 双状态（terra "🖼 多模态" / 灰 "纯文本"）+ 删除备注文案 + 摘要卡总是显示 | done |
+| 0024 | 会话 = 草稿 大重构（AddUiState.confirmedDraft + proposedDraft、Prompts.buildSystemWithBaseline、DraftCta 三态 Pending/Accepted/Rejected + [采用]/[不要] 按钮、新 DraftConfirmed 行；手动按钮改成进 Refine 编辑 confirmedDraft，CategoryForm 退役）· App 图标改 3D 俯视戒指（透视椭圆 + 内孔上偏 + 前侧壁渐变带）· Grid chip 点击不再自动置首（只在目标离屏时才 animateScrollToItem） | done |
 
 详见 [`openspec/`](openspec/) 各 cycle 的 proposal / spec / notes。
 
@@ -152,18 +153,20 @@ treasure/
 5. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) — 录入页 v2 设计稿
 6. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 7. [`docs/adr/`](docs/adr/) — 6 份决策记录
-8. [`openspec/`](openspec/) — cycle 0001-0023 提案 / 规格 / 笔记
+8. [`openspec/`](openspec/) — cycle 0001-0024 提案 / 规格 / 笔记
 
-## 下一刀候选（cycle 0024）
+## 下一刀候选（cycle 0025）
 
-1. **PageFetcher headless 渲染**：被 detectBlock 拦下的拼多多 / 重 SPA 页面 fall back 到本地 WebView 真渲染一次拿 DOM
-2. **草稿页拖动重排 specs**：当前 cycle 0023 不做（懒得在两处复制 ReorderableSpecs），抽到 components/ 后两边共用
-3. **流式输出**（如果 forced tool-use 也能拆 SSE delta；目前明确推迟）
-4. **云端 STT (OpenAI Whisper) 兜底 + 麦克风按钮回归** — cycle 0017 暂去掉的麦克风
-5. **多轮 refine 的图片 vision context**
-6. **AI 生成博物馆插画**
-7. **Settings preset 校准** — Xiaomi MiLM 没公开端点
-8. **MigrationTest CI**
+1. **死代码清理**：CategoryForm.kt / ManualCategoryPicker / AddViewModel.saveManual 都在 cycle 0024 没人 mount 了，删
+2. **撤销采用**：用户采用 AI 提案后想反悔，目前没法回到上一版 confirmedDraft
+3. **PageFetcher headless 渲染**：被 detectBlock 拦下的拼多多 / 重 SPA 页面 fall back 到本地 WebView 真渲染一次拿 DOM
+4. **草稿页拖动重排 specs**：抽到 components/ 后 Edit / Refine 两边共用
+5. **流式输出**（如果 forced tool-use 也能拆 SSE delta；目前明确推迟）
+6. **云端 STT (OpenAI Whisper) 兜底 + 麦克风按钮回归** — cycle 0017 暂去掉的麦克风
+7. **多轮 refine 的图片 vision context**
+8. **AI 生成博物馆插画**
+9. **Settings preset 校准** — Xiaomi MiLM 没公开端点
+10. **MigrationTest CI**
 
 ## 给下一个 agent 的备忘
 
@@ -188,6 +191,7 @@ treasure/
 
 | 日期 | 摘要 |
 |---|---|
+| 2026-05-11 | cycle 0024：会话 = 草稿 大重构 — AddUiState 拆 confirmedDraft + proposedDraft；AI 调用把 confirmedDraft 当 baseline 拼到 system prompt（buildSystemWithBaseline）让 AI 给"下一版"而不是从零；DraftCta 三态（Pending/Accepted/Rejected）+ 右下 [采用]/[不要] 按钮；采用 → append DraftConfirmed 行入 Room + state 升格；supersede 旧 pending 为 Rejected；"手动"按钮改成进 Refine 编辑 confirmedDraft，CategoryForm + ManualCategoryPicker 退役（暂留死代码）；持久化复用 text 列 + 新 draft_confirmed role 不动 schema · 应用图标改 3D 俯视戒指（外圈 24×14 椭圆 + 内孔上偏 4dp + 前侧壁渐变带） · Grid chip 点击不再自动置首（target 在 visibleItemsInfo 不滚） |
 | 2026-05-09 | cycle 0023：草稿页全面镜像 Edit（基础 LabeledField × 4 / 标签 status chip + 品类 dropdown / 参数 DraftSpecs 直接渲染 draft.specs 全部行）· 放开 SYSTEM_PROMPT 的 hero spec 模板（AI 按物品挑最重要的，不再是固定 6 品类 4-tuple）· 聊天图单击复用 FullscreenPhotoViewer 全屏预览（多张可横滑，无 callout）· Vision pill 双状态 + 摘要卡总是显示（terra "🖼 多模态" / 灰 "纯文本"，删除"可发图给它认"备注） |
 | 2026-05-09 | cycle 0022：Record 默认续上次会话（init 改 observeRecent(1).first()）· fetch 状态可见（AddMessage.SystemNote 5 tone，"正在抓取" → "✓ 已抓取/⚠ 防爬"）· PageFetcher charset 探测（meta charset/http-equiv，GBK 老站点不再乱码）· AI 配置页 model 多模态能力 chip + 编辑抽屉一行小字（启发式 modelSupportsVision）· 流式不做 |
 | 2026-05-09 | cycle 0021：对话框复制粘贴（SelectionContainer）· PageFetcher 三态（Success / Blocked / Failed）+ 拼多多 / JD / 淘宝壳页识别 + prompt 引导 AI 不要回 "无法访问外部链接" |

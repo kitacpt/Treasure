@@ -44,9 +44,10 @@ class AnthropicClient(
         text: String,
         imageJpegBytes: ByteArray?,
         priorTurns: List<AiTurn>,
+        baseline: ItemDraft?,
     ): Result<ItemDraft> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = buildPayload(text, imageJpegBytes, priorTurns)
+            val payload = buildPayload(text, imageJpegBytes, priorTurns, baseline)
             val response = client.newCall(
                 Request.Builder()
                     .url("$baseUrl/v1/messages")
@@ -71,12 +72,13 @@ class AnthropicClient(
         text: String,
         image: ByteArray?,
         priorTurns: List<AiTurn>,
+        baseline: ItemDraft?,
     ): String {
         val toolSchema = json.parseToJsonElement(EXTRACT_TOOL_PARAMETERS).jsonObject
         val payload = buildJsonObject {
             put("model", model)
             put("max_tokens", if (thinkingEnabled) 4096 else 1024)
-            put("system", SYSTEM_PROMPT)
+            put("system", buildSystemWithBaseline(baseline, json))
             temperature?.let { put("temperature", it) }
             if (thinkingEnabled) {
                 putJsonObject("thinking") {

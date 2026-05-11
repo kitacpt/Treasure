@@ -20,6 +20,7 @@ import com.treasure.core.domain.ItemStatus
 import com.treasure.core.repo.AddConversation
 import com.treasure.core.repo.AddConversationMessage
 import com.treasure.core.repo.AddConversationRepository
+import com.treasure.core.repo.DraftCtaStatus
 import com.treasure.core.repo.ItemRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,7 +48,21 @@ sealed interface AddMessage {
     data class User(val text: String) : AddMessage
     data class UserPhoto(val uri: Uri, val caption: String = "1 张照片") : AddMessage
     data class UserVoice(val text: String, val duration: String = "0:04") : AddMessage
-    data class DraftCta(val draft: ItemDraft, val fieldCount: Int) : AddMessage
+
+    /**
+     * Cycle 0024：一次 AI 提案。[id] 是数据库 row id；UI 上根据它 mutate
+     * status（采用 / 不要）时知道更新哪条。[status] 决定卡片的呈现：
+     * Pending 给两个按钮；Accepted / Rejected 灰掉只显示历史。
+     */
+    data class DraftCta(
+        val id: String,
+        val draft: ItemDraft,
+        val fieldCount: Int,
+        val status: DraftCtaStatus,
+    ) : AddMessage
+
+    /** Cycle 0024：用户已"采用"某次 AI 提案后留下的草稿快照行。 */
+    data class DraftConfirmed(val draft: ItemDraft, val fieldCount: Int) : AddMessage
 
     /**
      * 系统状态行 — 比如 "✓ 已抓取京东 · 1.2KB"、"⚠ 防爬挡住"。Cycle 0022
@@ -71,15 +86,28 @@ data class FakeConversation(
     val current: Boolean = false,
 )
 
+/**
+ * Cycle 0024：一个会话 = 一个草稿。
+ *   - [confirmedDraft]：用户已"采用"的最新版本，所有 AI 提案和"确认收入"
+ *     都基于它做下一步。null 表示这段对话还没生成过任何被接受的草稿。
+ *   - [proposedDraft]：AI 最新的提案，未被采用。用户点 [采用] 时它升格
+ *     为 confirmedDraft；点 [不要] 时丢弃。同时 [pendingCtaId] 指向触发
+ *     这次提案的 DraftCta，决定它什么时候置灰。
+ */
 data class AddUiState(
     val conversationId: String = "",
     val messages: List<AddMessage> = emptyList(),
     val conversationTitle: String = DEFAULT_TITLE,
-    val draft: ItemDraft? = null,
+    val confirmedDraft: ItemDraft? = null,
+    val proposedDraft: ItemDraft? = null,
+    val pendingCtaId: String? = null,
     val busy: Boolean = false,
     val errorMessage: String? = null,
     val aiAvailable: Boolean = false,
-)
+) {
+    /** 在 Refine 页打开时实际编辑的草稿。优先 confirmed；都没有就给空白。 */
+    val refineDraft: ItemDraft get() = confirmedDraft ?: ItemDraft()
+}
 
 private const val DEFAULT_TITLE = "New entry"
 
@@ -135,22 +163,49 @@ class AddViewModel(
 
     private suspend fun resumeConversation(c: AddConversation) {
         val msgs = conversations.loadMessages(c.id).map(::toUiMessage)
-        val draft = msgs.lastOrNull { it is AddMessage.DraftCta }
-            ?.let { (it as AddMessage.DraftCta).draft }
         val effectiveMessages = if (msgs.isEmpty()) {
-            // 历史里有这段对话但消息全空（理论上不会发生，新建时会 persist
-            // opener；防御一下）— 给用户看一句问候，让 UI 不至于空白。
             listOf(AddMessage.Assistant(GREETING))
         } else {
             msgs
         }
+        val drafts = deriveDraftsFromMessages(effectiveMessages)
         val key = getApplication<TreasureApp>().settingsStore.hasKey()
         _state.value = AddUiState(
             conversationId = c.id,
             messages = effectiveMessages,
             conversationTitle = c.title,
-            draft = draft,
+            confirmedDraft = drafts.confirmed,
+            proposedDraft = drafts.proposed,
+            pendingCtaId = drafts.pendingCtaId,
             aiAvailable = key,
+        )
+    }
+
+    /**
+     * 从消息流里推导出会话当前的 confirmed / proposed 状态。规则：
+     *   - 最近一条 DraftConfirmed = confirmedDraft（用户接受过的最新版）
+     *   - 在它之后 / 没有 DraftConfirmed 时整个历史里，最新一条 Pending 状态
+     *     的 DraftCta = proposedDraft（待用户处理的 AI 提案）
+     */
+    private data class DerivedDrafts(
+        val confirmed: ItemDraft?,
+        val proposed: ItemDraft?,
+        val pendingCtaId: String?,
+    )
+
+    private fun deriveDraftsFromMessages(msgs: List<AddMessage>): DerivedDrafts {
+        var confirmed: ItemDraft? = null
+        msgs.forEach { m ->
+            if (m is AddMessage.DraftConfirmed) confirmed = m.draft
+        }
+        // pending = 最后一条 status=Pending 的 DraftCta（用户没采用 / 没拒绝）
+        val pendingCta = msgs.lastOrNull {
+            it is AddMessage.DraftCta && it.status == DraftCtaStatus.Pending
+        } as AddMessage.DraftCta?
+        return DerivedDrafts(
+            confirmed = confirmed,
+            proposed = pendingCta?.draft,
+            pendingCtaId = pendingCta?.id,
         )
     }
 
@@ -208,27 +263,26 @@ class AddViewModel(
 
     /**
      * 切到 history 抽屉里点的某段对话，从 Room 把它的消息全 reload。
-     * `storedTitle` 来自 history row（已含 HH:MM 后缀），用作回退；如果消息里
-     * 已经有 AI 生成的草稿，标题以草稿的 "Brand Model" 为准。
+     * `storedTitle` 来自 history row，用作回退标题；如果消息里有 AI 草稿，
+     * 以"品牌 型号"做标题更可读。
      */
     fun openConversation(id: String, storedTitle: String) {
         if (id == _state.value.conversationId) return
         viewModelScope.launch {
             val msgs = conversations.loadMessages(id).map(::toUiMessage)
-            val draftTitle = msgs.firstNotNullOfOrNull {
-                if (it is AddMessage.DraftCta) {
-                    listOf(it.draft.brand, it.draft.model)
-                        .filter { s -> s.isNotBlank() }
-                        .joinToString(" ").ifBlank { null }
-                } else null
+            val drafts = deriveDraftsFromMessages(msgs)
+            val titleFromDraft = (drafts.confirmed ?: drafts.proposed)?.let { d ->
+                listOf(d.brand, d.model).filter { it.isNotBlank() }
+                    .joinToString(" ").ifBlank { null }
             }
             _state.update {
                 it.copy(
                     conversationId = id,
                     messages = msgs,
-                    conversationTitle = draftTitle ?: storedTitle,
-                    draft = msgs.lastOrNull { it is AddMessage.DraftCta }
-                        ?.let { (it as AddMessage.DraftCta).draft },
+                    conversationTitle = titleFromDraft ?: storedTitle,
+                    confirmedDraft = drafts.confirmed,
+                    proposedDraft = drafts.proposed,
+                    pendingCtaId = drafts.pendingCtaId,
                 )
             }
         }
@@ -405,6 +459,8 @@ class AddViewModel(
         }
         _state.update { it.copy(busy = true) }
         val priorTurns = buildPriorTurns(_state.value.messages)
+        // Cycle 0024：baseline = 当前已确认的草稿；AI 在此基础上 propose 下一版
+        val baseline = _state.value.confirmedDraft
         viewModelScope.launch {
             val bytes = imageUri?.let { uri ->
                 runCatching {
@@ -419,30 +475,53 @@ class AddViewModel(
                 text = text,
                 imageJpegBytes = bytes,
                 priorTurns = priorTurns,
+                baseline = baseline,
             )
                 .onSuccess { draft ->
                     val title = listOf(draft.brand, draft.model)
                         .filter { it.isNotBlank() }
                         .joinToString(" ")
                         .ifBlank { _state.value.conversationTitle }
-                    val assistantText = if (_state.value.draft == null) {
-                        "好。我已经替你写好了一份草稿——要不要先看看？"
+                    val isFirst = _state.value.confirmedDraft == null
+                    val assistantText = if (isFirst) {
+                        "好。我替你写了一版草稿——要不要采用？"
                     } else {
-                        "我把刚才的修改更新到草稿里了，再看一眼？"
+                        "在你已确认的草稿上做了点修改——要不要采用？"
                     }
                     val assistant = AddMessage.Assistant(assistantText)
-                    val cta = AddMessage.DraftCta(draft, fieldCount(draft))
+                    val ctaId = UUID.randomUUID().toString()
+                    val cta = AddMessage.DraftCta(
+                        id = ctaId,
+                        draft = draft,
+                        fieldCount = fieldCount(draft),
+                        status = DraftCtaStatus.Pending,
+                    )
                     _state.update {
+                        // 之前的 pending CTA 如果还在，被新提案 supersede — 标
+                        // 记为 Rejected（用户没采用就来了新的）。
+                        val supersededMessages = it.messages.map { m ->
+                            if (m is AddMessage.DraftCta && m.status == DraftCtaStatus.Pending) {
+                                m.copy(status = DraftCtaStatus.Rejected)
+                            } else m
+                        }
                         it.copy(
-                            messages = it.messages + assistant + cta,
-                            draft = draft,
+                            messages = supersededMessages + assistant + cta,
+                            proposedDraft = draft,
+                            pendingCtaId = ctaId,
                             conversationTitle = title,
                             busy = false,
                         )
                     }
                     viewModelScope.launch {
+                        // 先把被 supersede 的旧 pending CTA 状态 sync 回 Room
+                        val current = _state.value.messages
+                        current.forEach { m ->
+                            if (m is AddMessage.DraftCta && m.status == DraftCtaStatus.Rejected) {
+                                upsertCtaStatus(m)
+                            }
+                        }
                         persist(assistant)
-                        persist(cta)
+                        persistDraftCtaWithId(cta)
                     }
                 }
                 .onFailure { err ->
@@ -465,45 +544,109 @@ class AddViewModel(
         }
     }
 
-    /** Inline edit on the preview screen. Promotes confidence to "high". */
-    fun updateDraftField(field: PreviewField, value: String) {
-        val current = _state.value.draft ?: return
-        _state.value = _state.value.copy(draft = applyFieldEdit(current, field, value))
+    /**
+     * Cycle 0024：用户点 DraftCta 上的 [采用]。把 proposed 升格为 confirmed，
+     * 在 Room 里把那条 cta 状态置 Accepted，并 append 一行 DraftConfirmed
+     * 快照（这样后续 AI 跑能看到正确 baseline）。
+     */
+    fun acceptProposal(ctaId: String) {
+        val current = _state.value
+        val cta = current.messages.firstOrNull {
+            it is AddMessage.DraftCta && it.id == ctaId
+        } as AddMessage.DraftCta? ?: return
+        val confirmedSnapshot = AddMessage.DraftConfirmed(cta.draft, fieldCount(cta.draft))
+        val newMessages = current.messages.map { m ->
+            if (m is AddMessage.DraftCta && m.id == ctaId) {
+                m.copy(status = DraftCtaStatus.Accepted)
+            } else m
+        } + confirmedSnapshot
+        _state.update {
+            it.copy(
+                messages = newMessages,
+                confirmedDraft = cta.draft,
+                proposedDraft = null,
+                pendingCtaId = null,
+            )
+        }
+        viewModelScope.launch {
+            val accepted = newMessages.firstOrNull {
+                it is AddMessage.DraftCta && it.id == ctaId
+            } as AddMessage.DraftCta?
+            accepted?.let { upsertCtaStatus(it) }
+            persist(confirmedSnapshot)
+        }
     }
 
-    /** Cycle 0023：草稿页改成像 Edit 页一样直接编辑 specs。AI 填的每条都
-     *  直接显示，用户改 label / value / 删除 / 加新行都走这几个。 */
+    /** Cycle 0024：用户点 [不要]。clear proposed，不写 DraftConfirmed 快照。 */
+    fun rejectProposal(ctaId: String) {
+        val current = _state.value
+        val newMessages = current.messages.map { m ->
+            if (m is AddMessage.DraftCta && m.id == ctaId) {
+                m.copy(status = DraftCtaStatus.Rejected)
+            } else m
+        }
+        _state.update {
+            it.copy(
+                messages = newMessages,
+                proposedDraft = if (it.pendingCtaId == ctaId) null else it.proposedDraft,
+                pendingCtaId = if (it.pendingCtaId == ctaId) null else it.pendingCtaId,
+            )
+        }
+        viewModelScope.launch {
+            val rejected = newMessages.firstOrNull {
+                it is AddMessage.DraftCta && it.id == ctaId
+            } as AddMessage.DraftCta?
+            rejected?.let { upsertCtaStatus(it) }
+        }
+    }
+
+    /** Cycle 0024：Refine 页 inline edit 直接落到 confirmedDraft；手动操作
+     *  不需要走"提案 / 采用"循环 — 用户改的就是最终态。 */
+    fun updateDraftField(field: PreviewField, value: String) {
+        val current = _state.value.confirmedDraft ?: ItemDraft()
+        _state.value = _state.value.copy(confirmedDraft = applyFieldEdit(current, field, value))
+    }
+
     fun updateDraftSpec(idx: Int, spec: HeroSpec) {
-        val current = _state.value.draft ?: return
+        val current = _state.value.confirmedDraft ?: return
         if (idx < 0 || idx >= current.specs.size) return
         val newSpecs = current.specs.toMutableList().also { it[idx] = spec }
-        _state.value = _state.value.copy(draft = current.copy(specs = newSpecs))
+        _state.value = _state.value.copy(confirmedDraft = current.copy(specs = newSpecs))
     }
 
     fun addDraftSpec() {
-        val current = _state.value.draft ?: return
+        val current = _state.value.confirmedDraft ?: ItemDraft()
         _state.value = _state.value.copy(
-            draft = current.copy(specs = current.specs + HeroSpec("", "")),
+            confirmedDraft = current.copy(specs = current.specs + HeroSpec("", "")),
         )
     }
 
     fun removeDraftSpec(idx: Int) {
-        val current = _state.value.draft ?: return
+        val current = _state.value.confirmedDraft ?: return
         if (idx < 0 || idx >= current.specs.size) return
         _state.value = _state.value.copy(
-            draft = current.copy(specs = current.specs.toMutableList().also { it.removeAt(idx) }),
+            confirmedDraft = current.copy(specs = current.specs.toMutableList().also { it.removeAt(idx) }),
         )
+    }
+
+    /** 进入手动 Refine 模式时调用：如果没有 confirmedDraft，建一个空草稿
+     *  来让 UI 有东西可编。 */
+    fun ensureDraftForManual() {
+        if (_state.value.confirmedDraft == null) {
+            _state.value = _state.value.copy(confirmedDraft = ItemDraft())
+        }
     }
 
     /**
      * Persist the current draft as a real Item; returns id via callback.
      * Cycle 0023：[status] 由用户在草稿页选（默认 OWNED）；不再写死。
+     * Cycle 0024：草稿是 [AddUiState.confirmedDraft]（用户已采用的最新版）。
      */
     fun commitDraft(
         status: ItemStatus = ItemStatus.OWNED,
         onSaved: (String) -> Unit,
     ) {
-        val draft = _state.value.draft ?: return
+        val draft = _state.value.confirmedDraft ?: return
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             val category = Category.fromId(draft.category ?: Category.TECH.id)
@@ -589,7 +732,16 @@ class AddViewModel(
             is AddMessage.User -> AddConversationMessage.User(id, msg.text, now)
             is AddMessage.UserPhoto -> AddConversationMessage.UserPhoto(id, msg.uri.toString(), now)
             is AddMessage.UserVoice -> AddConversationMessage.UserVoice(id, msg.text, msg.duration, now)
-            is AddMessage.DraftCta -> AddConversationMessage.DraftCta(id, msg.draft, msg.fieldCount, now)
+            is AddMessage.DraftCta -> AddConversationMessage.DraftCta(
+                id = msg.id, // 保留 UI 已分配的 id，让后续 status 更新能找到同一行
+                draft = msg.draft,
+                fieldCount = msg.fieldCount,
+                status = msg.status,
+                createdAt = now,
+            )
+            is AddMessage.DraftConfirmed -> AddConversationMessage.DraftConfirmed(
+                id = id, draft = msg.draft, fieldCount = msg.fieldCount, createdAt = now,
+            )
             is AddMessage.SystemNote -> null
         }
     }
@@ -599,7 +751,56 @@ class AddViewModel(
         is AddConversationMessage.User -> AddMessage.User(domain.text)
         is AddConversationMessage.UserPhoto -> AddMessage.UserPhoto(Uri.parse(domain.uri))
         is AddConversationMessage.UserVoice -> AddMessage.UserVoice(domain.text, domain.duration)
-        is AddConversationMessage.DraftCta -> AddMessage.DraftCta(domain.draft, domain.fieldCount)
+        is AddConversationMessage.DraftCta -> AddMessage.DraftCta(
+            id = domain.id,
+            draft = domain.draft,
+            fieldCount = domain.fieldCount,
+            status = domain.status,
+        )
+        is AddConversationMessage.DraftConfirmed -> AddMessage.DraftConfirmed(
+            draft = domain.draft, fieldCount = domain.fieldCount,
+        )
+    }
+
+    /** 把已有 UI 行的 DraftCta 状态 sync 回 Room（upsert by id）。 */
+    private suspend fun upsertCtaStatus(cta: AddMessage.DraftCta) {
+        val convoId = _state.value.conversationId.ifBlank { return }
+        val now = System.currentTimeMillis()
+        conversations.appendMessage(
+            convoId,
+            AddConversationMessage.DraftCta(
+                id = cta.id,
+                draft = cta.draft,
+                fieldCount = cta.fieldCount,
+                status = cta.status,
+                createdAt = now,
+            ),
+        )
+    }
+
+    /** 新建一条 DraftCta，使用 UI 提前生成的 id（让 [acceptProposal] /
+     *  [rejectProposal] 后续能找到同一行做状态更新）。 */
+    private suspend fun persistDraftCtaWithId(cta: AddMessage.DraftCta) {
+        val convoId = _state.value.conversationId.ifBlank { return }
+        val now = System.currentTimeMillis()
+        conversations.appendMessage(
+            convoId,
+            AddConversationMessage.DraftCta(
+                id = cta.id,
+                draft = cta.draft,
+                fieldCount = cta.fieldCount,
+                status = cta.status,
+                createdAt = now,
+            ),
+        )
+        conversations.upsert(
+            AddConversation(
+                id = convoId,
+                title = _state.value.conversationTitle,
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
     }
 
     private fun buildPriorTurns(messages: List<AddMessage>): List<AiTurn> = messages
@@ -611,8 +812,13 @@ class AddViewModel(
                 is AddMessage.UserPhoto -> null // 图片单独走 image block，不放到上下文里
                 is AddMessage.DraftCta -> AiTurn(
                     AiRole.ASSISTANT,
-                    "已经替用户写出一份草稿，包含 ${msg.fieldCount} 个字段。",
+                    when (msg.status) {
+                        DraftCtaStatus.Pending -> "已经替用户写出一份草稿（含 ${msg.fieldCount} 个字段），等用户采用。"
+                        DraftCtaStatus.Accepted -> "替用户写的草稿（${msg.fieldCount} 字段）已被采用。"
+                        DraftCtaStatus.Rejected -> "替用户写的草稿（${msg.fieldCount} 字段）被用户拒绝了；下次注意。"
+                    },
                 )
+                is AddMessage.DraftConfirmed -> null // baseline 已经在 system prompt 里
                 is AddMessage.SystemNote -> null
             }
         }

@@ -85,6 +85,8 @@ fun AddChat(
     onOpenDraft: () -> Unit,
     onGoSettings: () -> Unit,
     onPreviewPhoto: (android.net.Uri) -> Unit,
+    onAcceptProposal: (String) -> Unit,
+    onRejectProposal: (String) -> Unit,
 ) {
     val colors = LocalTreasureColors.current
     val context = LocalContext.current
@@ -182,6 +184,8 @@ fun AddChat(
                             message = message,
                             onOpenDraft = onOpenDraft,
                             onPreviewPhoto = onPreviewPhoto,
+                            onAcceptProposal = onAcceptProposal,
+                            onRejectProposal = onRejectProposal,
                         )
                     }
                     if (state.busy) item { TypingIndicator() }
@@ -682,6 +686,8 @@ private fun MessageRow(
     message: AddMessage,
     onOpenDraft: () -> Unit,
     onPreviewPhoto: (android.net.Uri) -> Unit,
+    onAcceptProposal: (String) -> Unit,
+    onRejectProposal: (String) -> Unit,
 ) {
     when (message) {
         is AddMessage.Assistant -> AssistantBubble(text = message.text)
@@ -691,8 +697,33 @@ private fun MessageRow(
             onClick = { onPreviewPhoto(message.uri) },
         )
         is AddMessage.UserVoice -> UserVoiceBubble(text = message.text, duration = message.duration)
-        is AddMessage.DraftCta -> DraftCtaCard(message = message, onOpen = onOpenDraft)
+        is AddMessage.DraftCta -> DraftCtaCard(
+            message = message,
+            onOpen = onOpenDraft,
+            onAccept = { onAcceptProposal(message.id) },
+            onReject = { onRejectProposal(message.id) },
+        )
+        is AddMessage.DraftConfirmed -> DraftConfirmedRow(text = "✓ 已采用 · ${message.fieldCount} 个字段")
         is AddMessage.SystemNote -> SystemNoteRow(text = message.text, tone = message.tone)
+    }
+}
+
+@Composable
+private fun DraftConfirmedRow(text: String) {
+    val colors = LocalTreasureColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            color = colors.terra,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = Cormorant,
+                fontStyle = FontStyle.Italic,
+            ),
+        )
     }
 }
 
@@ -828,7 +859,12 @@ private fun UserVoiceBubble(text: String, duration: String) {
 }
 
 @Composable
-private fun DraftCtaCard(message: AddMessage.DraftCta, onOpen: () -> Unit) {
+private fun DraftCtaCard(
+    message: AddMessage.DraftCta,
+    onOpen: () -> Unit,
+    onAccept: () -> Unit,
+    onReject: () -> Unit,
+) {
     val colors = LocalTreasureColors.current
     val template = remember(message.draft) {
         com.treasure.core.domain.Category.entries
@@ -856,50 +892,100 @@ private fun DraftCtaCard(message: AddMessage.DraftCta, onOpen: () -> Unit) {
             updatedAt = 0L,
         )
     }
-    Row(
+    val isPending = message.status == com.treasure.core.repo.DraftCtaStatus.Pending
+    val isRejected = message.status == com.treasure.core.repo.DraftCtaStatus.Rejected
+    val cardAlpha = if (isPending) 1f else 0.55f
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(2.dp))
-            .background(colors.card)
-            .border(0.5.dp, colors.line)
-            .clickable(onClick = onOpen)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(colors.card.copy(alpha = cardAlpha))
+            .border(0.5.dp, colors.line),
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .size(48.dp)
-                .background(colors.paper)
-                .border(0.5.dp, colors.line)
-                .padding(5.dp),
+                .fillMaxWidth()
+                .clickable(onClick = onOpen)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            HeroIllustration(item = previewItem, modifier = Modifier.fillMaxSize())
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(colors.paper)
+                    .border(0.5.dp, colors.line)
+                    .padding(5.dp),
+            ) {
+                HeroIllustration(item = previewItem, modifier = Modifier.fillMaxSize())
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                val tag = when (message.status) {
+                    com.treasure.core.repo.DraftCtaStatus.Pending -> "AI 提案 · ${message.fieldCount} 字段"
+                    com.treasure.core.repo.DraftCtaStatus.Accepted -> "已采用 · ${message.fieldCount} 字段"
+                    com.treasure.core.repo.DraftCtaStatus.Rejected -> "已拒绝 · ${message.fieldCount} 字段"
+                }
+                Text(
+                    text = tag,
+                    color = colors.sub,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Spacer(Modifier.height(2.dp))
+                val title = listOf(message.draft.brand, message.draft.model)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ")
+                    .ifBlank { "草稿" }
+                Text(
+                    text = if (isRejected) "✗ $title" else title,
+                    color = colors.ink,
+                    style = MaterialTheme.typography.titleMedium,
+                    textDecoration = if (isRejected) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                )
+                if (message.draft.oneLiner.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = message.draft.oneLiner,
+                        color = colors.sub,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontStyle = FontStyle.Italic,
+                    )
+                }
+            }
+            if (isPending) {
+                Text(text = "→", color = colors.ink, style = MaterialTheme.typography.bodyLarge)
+            }
         }
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "DRAFT · ${message.fieldCount} FIELDS",
-                color = colors.sub,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = "草稿已就绪",
-                color = colors.ink,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = "轻点过目，确认后收入图鉴",
-                color = colors.sub,
-                style = MaterialTheme.typography.displayMedium,
-            )
+        if (isPending) {
+            // 采用 / 不要 按钮：右下角，与 cycle 0021 起的 footer 一致风格
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "不要",
+                    color = colors.sub,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(onClick = onReject)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = "采用",
+                    color = colors.terra,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(colors.terra.copy(alpha = 0.12f))
+                        .clickable(onClick = onAccept)
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
         }
-        Text(
-            text = "→",
-            color = colors.ink,
-            style = MaterialTheme.typography.bodyLarge,
-        )
     }
 }
 

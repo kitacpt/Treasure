@@ -136,11 +136,18 @@ private fun CategoryChips(
 ) {
     // 头号 chip = "全部"（null 过滤），后面跟 6 个品类。LazyRow 让我们能 animate
     // 滚到选中那个，从门厅过来时不必再手动拖。
+    //
+    // Cycle 0024：之前 LaunchedEffect 每次 selectedIndex 变都 animateScrollToItem，
+    // 用户点一下 chip 就把这个 chip 拽到行首，破坏了从门厅过来时建立的"位置感"。
+    // 改成只在目标 chip "其实看不到"（不在 visibleItemsInfo 里）时才滚 — 用户
+    // 自己点的 chip 一定可见，所以不会动；门厅跳过来时如果目标在屏幕外才滚。
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val selectedIndex: Int = if (state.currentCategory == null) 0
         else 1 + Category.entries.indexOf(state.currentCategory).coerceAtLeast(0)
     androidx.compose.runtime.LaunchedEffect(selectedIndex) {
-        listState.animateScrollToItem(selectedIndex)
+        val visible = listState.layoutInfo.visibleItemsInfo
+        val isVisible = visible.any { it.index == selectedIndex }
+        if (!isVisible) listState.animateScrollToItem(selectedIndex)
     }
     androidx.compose.foundation.lazy.LazyRow(
         state = listState,
