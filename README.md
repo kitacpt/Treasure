@@ -16,11 +16,11 @@
 4. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
 5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 6. [`docs/adr/`](docs/adr/) —— 6 份决策记录
-7. [`openspec/`](openspec/) —— cycle 0001-0029 的 proposal / spec / notes
+7. [`openspec/`](openspec/) —— cycle 0001-0030 的 proposal / spec / notes
 
 ## 当前状态（2026-05-09）
 
-**cycle 0001 → 0029 全部落地**。14 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
+**cycle 0001 → 0030 全部落地**。14 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
 
 - 6 个内建品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画；**cycle 0026 起在图鉴页右上小红点入口可以管理分类显示/隐藏 + 自定义新分类**（Schema v9 加 `category_prefs` 表，含 Migration 种子）；**cycle 0027 起自定义分类真正能装物品** —`Item.category` 由 enum 改 String id，AI prompt 喂动态 categoryHints，删自定义分类时把物品 rehome 到电子产品兜底；**cycle 0028 起 Manager 改长按拖动**（同段拖动改排序 / 跨分割线 toggle 隐藏），编辑页顶部插画必填，Portal doorway 永远用分类的"基础图"
 - 主屏 4 tab 横滑切换：门厅 / 图鉴 / 录入 / 设置（HorizontalPager）；Detail / Edit 是 push 上来的覆盖屏
@@ -32,7 +32,7 @@
 - 手动录入：4 品类模板，顶部居中 124dp 大插画 + 56dp 横滚选项；italic tagline + 每个字段单位 / 示例 hint
 - Settings：单张摘要卡 + 连通 pill + 底部抽屉编辑
 - 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`；相机直拍中转 `filesDir/captures/`；callout 数据 `Map<path, List<{x, y, text}>>` 跟 item 一起入库
-- Schema **v9**（Room；cycle 0026 加 `category_prefs` 表 + Migration 种子 6 内建分类）；从 cycle 0010 起 `exportSchema = true`，Migration 写在 `core/room/Migrations.kt`，schema JSON 在 `core/schemas/`，不再 destructive — 见 [ADR-0006](docs/adr/0006-schema-migrations.md)
+- Schema **v10**（Room；cycle 0030 加 `hero_photo_path` 列；cycle 0026 加 `category_prefs` 表 + Migration 种子 6 内建分类）；从 cycle 0010 起 `exportSchema = true`，Migration 写在 `core/room/Migrations.kt`，schema JSON 在 `core/schemas/`，不再 destructive — 见 [ADR-0006](docs/adr/0006-schema-migrations.md)
 - 16 个博物馆线描插画（含 cycle 0011 加的 espresso machine / coffee grinder / coffee bean / wine bottle / cocktail glass）+ 平面圆环 app 图标（cycle 0026 回到 cycle 0013 那版：23px 圆 + gold gradient + rune/tick 装饰，3D 几版尝试作废）
 - 8 条种子数据（首启写入），edge-to-edge，控制岛在 Detail / Edit 屏自然隐藏
 

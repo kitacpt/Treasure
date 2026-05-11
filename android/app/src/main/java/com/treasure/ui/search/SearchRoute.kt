@@ -67,12 +67,19 @@ fun SearchRoute(
     val app = androidx.compose.ui.platform.LocalContext.current
         .applicationContext as TreasureApp
     val items by app.repository.items.collectAsState(initial = emptyList())
+    // Cycle 0030：搜索结果也要过 visible categories — 隐藏分类下的物品不该
+    // 被搜出来（用户反馈 "全部页和搜索页还是能看到隐藏分类的物品"）。
+    val categories by app.categoryRepository.observeAll()
+        .collectAsState(initial = emptyList())
+    val visibleIds = remember(categories) {
+        categories.filter { !it.hidden }.map { it.id }.toSet()
+    }
 
     var query by remember { mutableStateOf("") }
     val q = query.trim()
-    val results = remember(q, items) {
+    val results = remember(q, items, visibleIds) {
         if (q.isBlank()) emptyList()
-        else items.filter { it.matches(q) }
+        else items.filter { it.category in visibleIds && it.matches(q) }
     }
 
     val focus = remember { FocusRequester() }

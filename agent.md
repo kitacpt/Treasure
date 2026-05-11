@@ -4,11 +4,11 @@
 
 ## 当前状态 · 2026-05-09
 
-**cycle 0001 → 0029 全部落地。**
+**cycle 0001 → 0030 全部落地。**
 
-- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.29.0 候选，14 MB，debug 签名）
+- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.30.0 候选，14 MB，debug 签名）
 - GitHub：<https://github.com/kitacpt/Treasure>（main 分支）
-- Schema：v9（cycle 0026 加 category_prefs 表 + 种子 6 内建分类）
+- Schema：v10（cycle 0030 加 `hero_photo_path` 列；cycle 0026 加 `category_prefs` 表 + 种子 6 内建分类）
 - 测试设备：vivo X200 Pro mini（Android 15）
 
 ## 端到端能跑通的功能
@@ -144,6 +144,7 @@ treasure/
 | 0027 | 自定义分类能装物品 — `Item.category` 从 `Category` enum 改 `String`（无 schema migration，列本来就是 TEXT，cycle 0027 只改 domain 强转）· AI prompt 加动态 categoryHints（内建+未隐藏自定义都喂给 AI）· tool schema 去 enum 改 description · `AddPreview` / `EditScreen` 的品类 InlineDropdown 改读 categoryRepo 仓库 · HeroAvatarPicker 接 String id · 新 `heroVectorOptionsForId` 自定义分类回 HeroVector.entries 全集 · 删自定义分类时 `reassignItemsToTech` 兜底，物品不丢 | done |
 | 0028 | 隐藏真生效（Grid/Portal "全部"/total/latest 都过 visibleItems）· Portal LATEST ENTRY 标签居中两边加 ✦ + 全空状态 + "去分类管理 →" 链接 · Portal doorway 永远用 `info.heroVector`（"基础图" 不跟物品） · Manager 重写：删副标题 + 删 [隐藏/显示] pill + 删 [完成]、"编辑"→小红点、左侧三横纹握把长按拖动 + 跨分割线 toggle hidden · Editor 顶部 112dp Avatar + 插画必填 + 内建锁定 · Category enum 加 `defaultHeroVector`，repo override 内建 heroVector（修 cycle 0026 种子的 'GENERIC' bug） | done |
 | 0029 | BackHandler：非 Portal tab 返回回 Portal（之前各处直接退出应用）· Manager 抽屉只剩 List（删 inline Editor + 删底部 italic 提示）· CategoryEditor 拆全屏路由 `category/{new\|edit/{id}}`，复用 EditPageHeader + BackArrow 与物品 Edit 页同款 · 图鉴右上工具栏从 [小红点] 变 [🔍][小红点] · 新 SearchRoute：BackArrow + 圆角搜索框（自动 focus 弹 IME）+ 实时过滤 brand/model/nickname + 命中段 terra 高亮 + 2 列 grid 结果 | done |
+| 0030 | Manager 拖动重写（divider 当 row-height 块占一个 visualSlot，"拖到最底"能跨过分割线了；新 computeShift / commitDrag 纯函数）· Schema v10 加 `hero_photo_path` 列 · CategoryEditor 插画改 PickVisualMedia 相册 picker（自定义新建必填、内建可覆盖默认插画）；AvatarHero 优先 AsyncImage 显示 photo；删 HeroVectorRow + heroLabel · Search 加 visibleIds 过滤 · GridViewModel：当前 chip 分类被隐藏后 effectiveSelectedId fallback null · Portal GrandTitle 还原 cycle 0023 大字 displayLarge + 英文 tagline + 底部 Ornament 补回（cycle 0026 重写时改坏了，本次还原） | done |
 
 详见 [`openspec/`](openspec/) 各 cycle 的 proposal / spec / notes。
 
@@ -158,9 +159,9 @@ treasure/
 5. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) — 录入页 v2 设计稿
 6. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 7. [`docs/adr/`](docs/adr/) — 6 份决策记录
-8. [`openspec/`](openspec/) — cycle 0001-0029 提案 / 规格 / 笔记
+8. [`openspec/`](openspec/) — cycle 0001-0030 提案 / 规格 / 笔记
 
-## 下一刀候选（cycle 0030）
+## 下一刀候选（cycle 0031）
 
 1. **死代码清理**：CategoryForm.kt / ManualCategoryPicker / AddViewModel.saveManual 自 cycle 0024 起没人调
 2. **撤销采用**：用户采用 AI 提案后想反悔，目前没法回到上一版 confirmedDraft
@@ -198,6 +199,7 @@ treasure/
 
 | 日期 | 摘要 |
 |---|---|
+| 2026-05-11 | cycle 0030：分类管理拖动重写（divider 当 row-height 块，能拖到最底部跨进 hidden 段；computeShift / commitDrag 纯函数）· Schema v10 加 `hero_photo_path` 列 · 分类编辑插画改 PickVisualMedia 相册 picker（自定义新建必填，内建可覆盖默认线描）· AvatarHero 优先 AsyncImage · Search 补 visibleIds 过滤 · Grid 当前 chip 分类被隐藏后 effectiveSelectedId 回退 null · Portal GrandTitle 还原 cycle 0023 displayLarge + 英文 tagline + 底部 Ornament 补回（cycle 0026 改错了） |
 | 2026-05-11 | cycle 0029：BackHandler 修非 Portal tab 返回退应用问题（改为先回 Portal）· 分类编辑器拆全屏路由 `category/{new\|edit/{id}}`，复用 EditPageHeader + BackArrow 跟物品 Edit 同款 · Manager 抽屉只剩 List + 删底部 italic 提示 · 图鉴右上加搜索 icon · 新 SearchRoute（auto-focus 搜索框 + 实时过滤 brand/model/nickname + 命中段 terra 高亮） |
 | 2026-05-11 | cycle 0028：隐藏分类真生效（Grid/Portal 全部 chip + total + latest 全过 visibleItems）· Portal LATEST ENTRY 居中两边加 ✦ + 全空时显示"去分类管理 →"链接 · Portal doorway 永远用 info.heroVector（基础图不跟物品）· Manager 重写：删副标题 / [隐藏 显示] pill / [完成]，编辑入口改小红点，左侧三横纹握把长按拖动 + 跨分割线 toggle hidden 实时生效 · Editor 顶部 112dp Avatar + 插画必填 + 内建锁定 name+插画 · Category enum 加 defaultHeroVector，repo override 内建（修 cycle 0026 种子的 GENERIC bug） |
 | 2026-05-11 | cycle 0027：自定义分类能装物品 — `Item.category` 从 `Category` enum 改 String（无 schema migration，列本来就是 TEXT，cycle 0027 只改 domain 强转）· AI prompt 加动态 categoryHints + tool schema 去 enum 改 description · AddPreview / EditScreen InlineDropdown 改读 categoryRepo · HeroAvatarPicker 接 categoryId: String · heroVectorOptionsForId 自定义分类返回 HeroVector.entries 全集 · 删自定义分类时 reassignItemsToTech 兜底（item 不丢） |

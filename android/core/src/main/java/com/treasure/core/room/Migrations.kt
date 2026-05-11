@@ -114,7 +114,17 @@ internal object Migrations {
         }
     }
 
+    /**
+     * Cycle 0030：category_prefs 加 hero_photo_path 列。用户在分类编辑页从
+     * 相册挑一张图当分类代表图（取代 cycle 0026 的 hero_vector enum 选择）。
+     */
+    val MIGRATION_9_10 = object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `category_prefs` ADD COLUMN `hero_photo_path` TEXT")
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
-        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
     )
 }

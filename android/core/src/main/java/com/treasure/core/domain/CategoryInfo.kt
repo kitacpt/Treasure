@@ -16,4 +16,7 @@ data class CategoryInfo(
     val hidden: Boolean,
     val sortOrder: Int,
     val isBuiltIn: Boolean,
+    /** Cycle 0030：用户从相册挑的分类代表图（绝对路径）。非 null 时 Portal
+     *  doorway / Manager 头像优先用它；null 时 fall back 到 [heroVector] 线描。 */
+    val heroPhotoPath: String? = null,
 )

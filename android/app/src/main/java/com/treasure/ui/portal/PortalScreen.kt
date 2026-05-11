@@ -107,6 +107,10 @@ fun PortalScreen(
                     EmptyLatestHint(onOpenCategoryManager = onOpenCategoryManager)
                 }
             }
+            // Cycle 0030：底部 Ornament 是 cycle 0001 起的视觉收尾；cycle 0026
+            // 重写 Portal 时不小心丢了，这里补回。
+            item { Spacer(Modifier.height(28.dp)) }
+            item { Ornament(modifier = Modifier.padding(horizontal = 24.dp)) }
         }
     }
 }
@@ -170,17 +174,22 @@ private fun EmptyLatestHint(onOpenCategoryManager: () -> Unit) {
 @Composable
 private fun GrandTitle() {
     val colors = LocalTreasureColors.current
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(
             text = "Treasure",
             color = colors.ink,
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.displayLarge,
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(10.dp))
         Text(
-            text = "私人博物馆 · 图鉴",
+            text = "a private cabinet of things owned, used, & remembered",
             color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.displayMedium,
             textAlign = TextAlign.Center,
         )
     }
@@ -284,6 +293,8 @@ private fun stubItemFor(info: CategoryInfo): Item {
         specs = emptyList(),
         history = emptyList(),
         photos = emptyList(),
+        // Cycle 0030：HeroAvatar 优先用 avatarPhotoPath，分类有代表图就走它。
+        avatarPhotoPath = info.heroPhotoPath,
         createdAt = 0L, updatedAt = 0L,
     )
 }

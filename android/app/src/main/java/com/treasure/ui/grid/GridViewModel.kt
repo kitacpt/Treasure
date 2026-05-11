@@ -56,10 +56,15 @@ class GridViewModel(
         // 后全部还会算它的数 + 全部 chip 还显示这些物品"。"全部" 只算可见分
         // 类下的 items。
         val visibleItems = items.filter { it.category in visibleIds }
-        val filteredItems = if (selectedId == null) visibleItems
-        else items.filter { it.category == selectedId }
+        // Cycle 0030：用户隐藏的恰好是当前 chip 选中那个分类时，把 selected
+        // 折回 null（全部）— 否则 chip 行没那个 chip 了但 items 还在显示，
+        // 看起来像 bug "全部页还能看到隐藏分类的物品"。
+        val effectiveSelectedId = if (selectedId != null && selectedId !in visibleIds) null
+                                  else selectedId
+        val filteredItems = if (effectiveSelectedId == null) visibleItems
+        else items.filter { it.category == effectiveSelectedId }
         GridUiState(
-            currentCategoryId = selectedId,
+            currentCategoryId = effectiveSelectedId,
             itemsInCategory = filteredItems,
             countByCategoryId = items.groupBy { it.category }
                 .mapValues { it.value.size },

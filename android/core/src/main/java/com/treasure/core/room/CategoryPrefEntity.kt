@@ -26,4 +26,8 @@ internal data class CategoryPrefEntity(
     val hidden: Int,
     val sort_order: Int,
     val created_at: Long,
+    /** Cycle 0030：用户从相册挑的分类代表图，复用 item.avatarPhotoPath 路径
+     *  规则（`filesDir/category-photos/<id>/<uuid>.jpg`）。null 时 Portal
+     *  doorway 用 hero_vector 的线描兜底。 */
+    val hero_photo_path: String? = null,
 )

@@ -44,4 +44,8 @@ internal interface CategoryPrefDao {
     /** Cycle 0027：删自定义分类时把里面的物品挪到 tech 兜底，避免出现孤儿 id。 */
     @Query("UPDATE items SET category = 'tech' WHERE category = :id")
     suspend fun reassignItemsToTech(id: String)
+
+    /** Cycle 0030：设/清分类代表图。传 null 清掉。 */
+    @Query("UPDATE category_prefs SET hero_photo_path = :path WHERE id = :id")
+    suspend fun setHeroPhotoPath(id: String, path: String?)
 }

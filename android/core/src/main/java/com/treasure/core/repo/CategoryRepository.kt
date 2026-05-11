@@ -29,6 +29,9 @@ interface CategoryRepository {
     suspend fun deleteCustom(id: String)
     suspend fun addCustom(nameZh: String, nameEn: String, heroVector: HeroVector): String
     suspend fun reorder(orderedIds: List<String>)
+
+    /** Cycle 0030：设置 / 清除分类代表图。传 null 清除。 */
+    suspend fun setHeroPhotoPath(id: String, path: String?)
 }
 
 class RoomCategoryRepository internal constructor(
@@ -94,6 +97,10 @@ class RoomCategoryRepository internal constructor(
         orderedIds.forEachIndexed { idx, id -> dao.setSortOrder(id, idx) }
     }
 
+    override suspend fun setHeroPhotoPath(id: String, path: String?) {
+        dao.setHeroPhotoPath(id, path)
+    }
+
     companion object {
         fun create(context: Context): CategoryRepository =
             RoomCategoryRepository(TreasureDatabase.get(context))
@@ -118,5 +125,6 @@ private fun CategoryPrefEntity.toDomain(): CategoryInfo {
         hidden = hidden != 0,
         sortOrder = sort_order,
         isBuiltIn = built_in != 0,
+        heroPhotoPath = hero_photo_path,
     )
 }

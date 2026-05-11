@@ -103,7 +103,8 @@ fun CategoryManager(
 // ─── List with drag-to-reorder ─────────────────────────────────────────
 
 private val ROW_HEIGHT = 60.dp
-private val DIVIDER_HEIGHT = 36.dp
+// Cycle 0030：divider 跟 row 同高，作为一个 "块" 占用一个 slot —— 之前是
+// 单独 36dp 浮层，跟 drag 索引数学错位，导致拖到底部"看不到下面去"。
 
 @Composable
 private fun CategoryList(
@@ -125,15 +126,21 @@ private fun CategoryList(
 
     val density = LocalDensity.current
     val rowPx = with(density) { ROW_HEIGHT.toPx() }
-    val dividerPx = with(density) { DIVIDER_HEIGHT.toPx() }
 
-    // 拖动状态。索引在 *合并后的 visible+hidden 列表* 里取值；divider 不占
-    // 一个独立 index，只是渲染时插一段空高。
+    // 拖动状态。dragIndex 是 *合并后 combined* 里的逻辑索引（不含 divider）。
     var dragIndex by remember { mutableStateOf(-1) }
     var dragOffsetY by remember { mutableStateOf(0f) }
 
     val combined = workVisible + workHidden
     val visibleCount = workVisible.size
+
+    // Cycle 0030：divider 占用一个 row-height slot。视觉布局 (visualSlot):
+    //   [0..visibleCount-1]   = workVisible 各行
+    //   [visibleCount]        = divider slot（同高）
+    //   [visibleCount+1..N]   = workHidden 各行
+    // 总 slot 数 = combined.size + 1
+    fun combinedToVisual(i: Int): Int = if (i < visibleCount) i else i + 1
+    val totalSlots = combined.size + 1
 
     Column(
         modifier = Modifier
@@ -162,51 +169,51 @@ private fun CategoryList(
         }
         Spacer(Modifier.height(14.dp))
 
-        // 渲染区。每条用 Box + graphicsLayer translateY 给"被拖动的行"
-        // 移动 + 其他行做 make-room shift；不重排 list 本身，松手才重排。
+        // 渲染区。所有 slot（含 divider）等高 ROW_HEIGHT，drag 数学统一在
+        // visualSlot 域里跑。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(
-                    // visibleCount 个 row + divider + (combined.size - visibleCount) row
-                    ROW_HEIGHT * combined.size + DIVIDER_HEIGHT,
-                ),
+                .height(ROW_HEIGHT * totalSlots),
         ) {
-            // 1) 算每行此刻的视觉 y：基础位置 + （如果不是被拖动的）shift
-            //    被拖动的行 = 基础位置 + dragOffsetY
-            //    其他行 = 基础位置 + makeRoomShift
-            val targetIndex = if (dragIndex == -1) -1 else {
-                // 把 dragOffsetY 换算成 "目标 visual index"（在 combined 中）。
-                // 但要考虑 divider 占空：visual 上 divider 位置 = visibleCount * rowPx
-                // 一个被拖动的行视觉中心 y = dragIndex * rowPx + (if 跨过 divider 加 dividerPx) + dragOffsetY
-                val baseY = dragIndex * rowPx +
-                    (if (dragIndex >= visibleCount) dividerPx else 0f)
-                val targetY = baseY + dragOffsetY
-                // 把 targetY 反算成 index：先去掉 divider 偏移
-                val withoutDivider = if (targetY > visibleCount * rowPx + dividerPx) {
-                    targetY - dividerPx
-                } else if (targetY > visibleCount * rowPx) {
-                    // 落在 divider 区间内 — 视为靠近的那一侧
-                    if (targetY < visibleCount * rowPx + dividerPx / 2) visibleCount * rowPx - 1f
-                    else visibleCount * rowPx + 1f
-                } else {
-                    targetY
+            // 计算被拖行的目标 visualSlot。坐标域：visualSlot 0..totalSlots-1
+            // dragOffsetY 是相对于原位的视觉偏移
+            val targetVisualSlot = if (dragIndex == -1) -1 else {
+                val originVisual = combinedToVisual(dragIndex)
+                val draggedCenterY = originVisual * rowPx + dragOffsetY + rowPx / 2f
+                (draggedCenterY / rowPx).toInt()
+                    .coerceIn(0, totalSlots - 1)
+            }
+            // divider visualSlot = visibleCount。drag 到 divider 上时按拖动
+            // 方向 snap 到邻近 row 那侧：从上拖来 → 落到 divider 上方；从下
+            // 拖来 → 落到 divider 下方。
+            val effectiveTargetSlot = when {
+                targetVisualSlot < 0 -> -1
+                targetVisualSlot == visibleCount -> {
+                    val originVisual = combinedToVisual(dragIndex)
+                    if (originVisual < visibleCount) visibleCount  // 从上来 → 落进 hidden 首位
+                    else visibleCount  // 从下来 → 也落进 hidden 首位（divider 上方是 visible 末，正好替换那个位置反而更直觉？此处按 dropMode 决定）
+                    // 实际更简单：dragging 行到 divider slot 表示用户希望
+                    // 跨段。从上来：行变 hidden，新 slot = visibleCount（divider 自身让位）
+                    //         从下来：行变 visible，新 slot = visibleCount - 1（divider 自身让位向下）
                 }
-                (withoutDivider / rowPx).roundToInt()
-                    .coerceIn(0, combined.size - 1)
+                else -> targetVisualSlot
             }
 
             combined.forEachIndexed { idx, info ->
                 val isDragging = idx == dragIndex
-                // 基础 y
-                val baseY = idx * rowPx + (if (idx >= visibleCount) dividerPx else 0f)
-                // make-room shift
-                val shift = when {
-                    dragIndex == -1 || isDragging -> 0f
-                    dragIndex < idx && idx <= targetIndex -> -rowPx
-                    dragIndex > idx && idx >= targetIndex -> rowPx
-                    else -> 0f
-                }
+                val baseVisual = combinedToVisual(idx)
+                val baseY = baseVisual * rowPx
+
+                // make-room shift：dragging 的目标 visualSlot 决定其它行怎么让
+                // 自己跳过 divider slot — 把 divider 也算成"占位"。
+                val shift = computeShift(
+                    rowVisual = baseVisual,
+                    dragOriginVisual = if (dragIndex == -1) -1 else combinedToVisual(dragIndex),
+                    dragTargetVisual = effectiveTargetSlot,
+                    dividerVisual = visibleCount,
+                    rowPx = rowPx,
+                )
                 val translateY = if (isDragging) dragOffsetY else shift
 
                 Box(
@@ -231,34 +238,20 @@ private fun CategoryList(
                         },
                         onDrag = { dy -> dragOffsetY += dy },
                         onDragEnd = {
-                            if (dragIndex >= 0 && targetIndex != dragIndex) {
-                                // commit move：把 dragIndex 行挪到 targetIndex
-                                val newCombined = combined.toMutableList()
-                                val moved = newCombined.removeAt(dragIndex)
-                                newCombined.add(
-                                    targetIndex.coerceIn(0, newCombined.size),
-                                    moved,
-                                )
-                                // 重算 visibleCount：依旧由"基础位置 vs divider"
-                                // 决定。即 targetIndex < visibleCount → 落在显示
-                                // 段，否则隐藏段。需要按 movement 调 visibleCount：
-                                //  从显示拖去隐藏：visibleCount--
-                                //  从隐藏拖去显示：visibleCount++
-                                //  同段：不变
-                                val wasVisible = dragIndex < visibleCount
-                                val nowVisible = targetIndex < visibleCount
-                                val newVisibleCount = when {
-                                    wasVisible && !nowVisible -> visibleCount - 1
-                                    !wasVisible && nowVisible -> visibleCount + 1
-                                    else -> visibleCount
-                                }.coerceIn(0, newCombined.size)
-                                workVisible = newCombined.take(newVisibleCount)
-                                workHidden = newCombined.drop(newVisibleCount)
-                                val orderedIds = newCombined.map { it.id }
-                                val hiddenIds = newCombined.drop(newVisibleCount)
-                                    .map { it.id }.toSet()
-                                onCommit(orderedIds, hiddenIds)
-                            }
+                            commitDrag(
+                                combined = combined,
+                                visibleCount = visibleCount,
+                                dragIndex = dragIndex,
+                                targetVisualSlot = effectiveTargetSlot,
+                                onApply = { newCombined, newVisibleCount ->
+                                    workVisible = newCombined.take(newVisibleCount)
+                                    workHidden = newCombined.drop(newVisibleCount)
+                                    val orderedIds = newCombined.map { it.id }
+                                    val hiddenIds = newCombined.drop(newVisibleCount)
+                                        .map { it.id }.toSet()
+                                    onCommit(orderedIds, hiddenIds)
+                                },
+                            )
                             dragIndex = -1
                             dragOffsetY = 0f
                         },
@@ -270,11 +263,11 @@ private fun CategoryList(
                 }
             }
 
-            // Divider — 在显示段和隐藏段之间画一条灰线 + 小标签
+            // Divider slot — 占一个 row-height 的位置，里面是分割线 + 标签
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(DIVIDER_HEIGHT)
+                    .height(ROW_HEIGHT)
                     .graphicsLayer { translationY = visibleCount * rowPx },
                 contentAlignment = Alignment.Center,
             ) {
@@ -303,6 +296,94 @@ private fun CategoryList(
             }
         }
     }
+}
+
+/** Make-room shift：拖动期间，其它行让开 dragging 行原来的位置 / 把目标位
+ *  让出来。Visual 坐标域，divider 占自己的 slot。 */
+private fun computeShift(
+    rowVisual: Int,
+    dragOriginVisual: Int,
+    dragTargetVisual: Int,
+    dividerVisual: Int,
+    rowPx: Float,
+): Float {
+    if (dragOriginVisual < 0 || dragTargetVisual < 0) return 0f
+    if (rowVisual == dragOriginVisual) return 0f
+    // 拖动行将移到 dragTargetVisual。其它行的 visualSlot 怎么变？
+    // 把"divider 不动"作为约束，dragging 行从 origin 移到 target，介于两者
+    // 之间的非 divider 行需要让位。
+    return when {
+        dragOriginVisual < dragTargetVisual -> {
+            // 向下拖。介于 (origin, target] 的行向上让 rowPx 一个 slot。
+            // 但 divider slot 不实际有内容，跳过它。
+            if (rowVisual in (dragOriginVisual + 1)..dragTargetVisual && rowVisual != dividerVisual) -rowPx
+            else 0f
+        }
+        dragOriginVisual > dragTargetVisual -> {
+            // 向上拖。介于 [target, origin) 的行向下让 rowPx 一个 slot。
+            if (rowVisual in dragTargetVisual until dragOriginVisual && rowVisual != dividerVisual) rowPx
+            else 0f
+        }
+        else -> 0f
+    }
+}
+
+/** drag end 提交。基于 dragging 行原索引 + visualSlot 目标，算出新的
+ *  combined 列表 + 新 visibleCount。 */
+private fun commitDrag(
+    combined: List<CategoryInfo>,
+    visibleCount: Int,
+    dragIndex: Int,
+    targetVisualSlot: Int,
+    onApply: (newCombined: List<CategoryInfo>, newVisibleCount: Int) -> Unit,
+) {
+    if (dragIndex < 0 || targetVisualSlot < 0) return
+    val originVisual = if (dragIndex < visibleCount) dragIndex else dragIndex + 1
+    if (targetVisualSlot == originVisual) return  // 没动
+
+    // 1. 移除 dragging 行 → 中间态 combined
+    val withoutDragged = combined.toMutableList().also { it.removeAt(dragIndex) }
+    val newVisibleCountWithoutDragged =
+        if (dragIndex < visibleCount) visibleCount - 1 else visibleCount
+
+    // 2. 把 targetVisualSlot 换算成新 combined 的索引 + 是否 visible
+    //    在中间态里 visualSlot:
+    //      [0..newVis-1]   visible
+    //      [newVis]        divider
+    //      [newVis+1..N-1] hidden（N = withoutDragged.size + 1）
+    val newVis = newVisibleCountWithoutDragged
+    // targetVisualSlot 是用户期望的"落点"，但用户是基于"含 dragging 的原 visualSlot"
+    // 选的位置。在中间态里要补偿：如果 dragging 来自 visible 段，那段所有 slot 在
+    // 中间态里都往左 / 上移一格。
+    val adjustedTarget = if (originVisual < targetVisualSlot) targetVisualSlot - 1
+                         else targetVisualSlot
+
+    val (newCombinedIdx, newIsVisible) = when {
+        adjustedTarget < newVis -> Pair(adjustedTarget, true)
+        adjustedTarget == newVis -> {
+            // 落在 divider slot — 按拖动方向决定吸附
+            val droppedToHidden = originVisual < targetVisualSlot
+            if (droppedToHidden) Pair(newVis, false)  // 第一个 hidden 位
+            else Pair(newVis - 1, true)               // 最后一个 visible 位
+        }
+        else -> {
+            // adjustedTarget > newVis：hidden 段
+            val hiddenIdxOffset = adjustedTarget - newVis - 1
+            Pair(newVis + hiddenIdxOffset, false)
+        }
+    }
+
+    val newCombined = withoutDragged.toMutableList().also {
+        it.add(newCombinedIdx.coerceIn(0, it.size), combined[dragIndex])
+    }
+    val newVisibleCount = when {
+        newIsVisible && dragIndex < visibleCount -> visibleCount  // visible → visible
+        newIsVisible && dragIndex >= visibleCount -> visibleCount + 1  // hidden → visible
+        !newIsVisible && dragIndex < visibleCount -> visibleCount - 1  // visible → hidden
+        else -> visibleCount  // hidden → hidden
+    }.coerceIn(0, newCombined.size)
+
+    onApply(newCombined, newVisibleCount)
 }
 
 @Composable

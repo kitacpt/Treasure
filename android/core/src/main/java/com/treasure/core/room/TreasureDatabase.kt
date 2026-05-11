@@ -22,7 +22,7 @@ import androidx.room.RoomDatabase
         ConversationMessageEntity::class,
         CategoryPrefEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 internal abstract class TreasureDatabase : RoomDatabase() {
