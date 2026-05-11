@@ -97,6 +97,8 @@ fun AddPreview(
     }
     val template = remember(category) { CategoryTemplates.forCategory(category) }
     var status by remember { mutableStateOf(ItemStatus.OWNED) }
+    // Cycle 0025：确认收入加二次确认，避免误触把还没整理好的草稿落到图鉴里
+    var confirming by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -130,7 +132,7 @@ fun AddPreview(
                             color = colors.terra,
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier
-                                .clickable { onConfirm(status) }
+                                .clickable { confirming = true }
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                         )
                     },
@@ -220,6 +222,37 @@ fun AddPreview(
             }
             item { Spacer(Modifier.height(40.dp)) }
         }
+    }
+
+    if (confirming) {
+        val title = listOf(draft.brand, draft.model)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .ifBlank { "这件 ${category.nameZh}" }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { androidx.compose.material3.Text("收入 $title？") },
+            text = {
+                androidx.compose.material3.Text(
+                    text = "确认后会作为一件 ${category.nameZh} 入图鉴，再改就要从图鉴里点进去编辑。",
+                    color = colors.sub,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirming = false
+                    onConfirm(status)
+                }) { androidx.compose.material3.Text("收入", color = colors.terra) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirming = false }) {
+                    androidx.compose.material3.Text("取消")
+                }
+            },
+            containerColor = colors.paper,
+            titleContentColor = colors.ink,
+            textContentColor = colors.sub,
+        )
     }
 }
 

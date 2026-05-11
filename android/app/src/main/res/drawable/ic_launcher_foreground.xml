@@ -6,105 +6,75 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <!--
-      Cycle 0024: 戒指改成 "从上方稍微倾斜俯视" 的立体视角。三个透视手法
-      让平面图鉴变 3D：
-        1. 整圈的外轮廓 / 内孔都从圆变成椭圆（rx > ry）
-        2. 内孔（hole）相对外圈往上偏一点儿 — 模拟透视：背面的内壁离我们
-           远，看起来更高；前面的内壁离我们近，看起来更低
-        3. 外圈下半侧（朝我们的那一面）露出一条窄的"侧壁"渐变带，给"厚度"
-      光源在左上角：左上为高光，右下为阴影；内孔顶部（看见的是远端内壁）
-      偏暗，底部（近端内壁朝天反光）偏亮。
+      Cycle 0024 第一版做得有点像"几个圈叠在一起"，不像一枚戒指。
+      Cycle 0025 重做：
+        1. 椭圆压得更扁 — ry/rx ≈ 0.36（之前是 0.58），强烈俯视感
+        2. 用更明显的圆环 (annulus)，不再有任何"额外切片" — 主体就一个
+           evenOdd 椭圆环，简洁
+        3. 内孔上偏 5 — 比之前的 4 大一点儿，让"前面厚 / 后面薄" 的透视
+           特征更明显
+        4. 渐变改纯垂直（顶亮底暗），更直接读出"上方有光从天而降照在
+           凸面金属戒指上"
+        5. 装饰物只留 4 条 — 外圈左上高光、外圈右下暗弧、内孔顶半暗
+           （远端内壁）、内孔底半亮（近端内壁反顶光）。没有 rune，
+           launcher 那么小看不清反而像污点
     -->
 
-    <!-- 桌面上的投影：扁椭圆软阴影 -->
+    <!-- 桌面投影：长椭圆软影，符合俯视角度 -->
     <path
-        android:fillColor="#26000000"
-        android:pathData="M54,84 m-26,0 a26,4.5 0 1,0 52,0 a26,4.5 0 1,0 -52,0" />
+        android:fillColor="#28000000"
+        android:pathData="M54,80 m-28,0 a28,3.5 0 1,0 56,0 a28,3.5 0 1,0 -56,0" />
 
-    <!-- 戒指主体：外椭圆 - 内椭圆（偏上）= 环形截面，金色渐变。
-         右上 → 左下 渐变方向意味着光从左上来。-->
+    <!-- 戒指主体：外椭圆 28×10、内孔椭圆 13×4 上偏 5，evenOdd 切出环。
+         金色 5-stop 顶亮底暗渐变模拟光源从上方照在金属凸面。 -->
     <path
         android:fillType="evenOdd"
-        android:pathData="M30,55 a24,14 0 1,0 48,0 a24,14 0 1,0 -48,0 Z M41,51 a13,6 0 1,1 26,0 a13,7 0 1,1 -26,0 Z">
+        android:pathData="M26,55 a28,10 0 1,0 56,0 a28,10 0 1,0 -56,0 Z M41,50 a13,4 0 1,1 26,0 a13,4 0 1,1 -26,0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="linear"
-                android:startX="34"
-                android:startY="36"
-                android:endX="74"
-                android:endY="72">
-                <item android:offset="0.00" android:color="#FFF7E29A" />
-                <item android:offset="0.22" android:color="#FFE2B86A" />
-                <item android:offset="0.52" android:color="#FFAC7F3A" />
-                <item android:offset="0.82" android:color="#FF5C3F12" />
-                <item android:offset="1.00" android:color="#FF2A1A06" />
+                android:startX="54"
+                android:startY="45"
+                android:endX="54"
+                android:endY="65">
+                <item android:offset="0.00" android:color="#FFFAE9A8" />
+                <item android:offset="0.20" android:color="#FFE6BC68" />
+                <item android:offset="0.55" android:color="#FFB07E36" />
+                <item android:offset="0.85" android:color="#FF563911" />
+                <item android:offset="1.00" android:color="#FF22150A" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- 前侧壁：戒指朝我们这一侧的"厚度"。一条夹在外圈底缘和略低的椭圆
-         之间的窄月牙，渐变更暗一点，让"侧面" vs "顶面" 在亮度上分得开。-->
+    <!-- 外圈左上高光弧：金属凸面顶端最亮的一片，跨度大约 130° -->
     <path
-        android:pathData="M30,55 a24,14 0 0,0 48,0 a24,16.5 0 0,1 -48,0 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="linear"
-                android:startX="30"
-                android:startY="58"
-                android:endX="78"
-                android:endY="72">
-                <item android:offset="0.00" android:color="#FF8C6028" />
-                <item android:offset="0.55" android:color="#FF4B2F0F" />
-                <item android:offset="1.00" android:color="#FF1F1304" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- 外圈左上高光：金属反光在凸面顶端 -->
-    <path
-        android:strokeColor="#FFFBEFC2"
-        android:strokeWidth="0.9"
+        android:strokeColor="#FFFCEEC0"
+        android:strokeWidth="1.1"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M32,51 a22,13 0 0,1 22,-13" />
+        android:pathData="M28,53 a26,9 0 0,1 26,-9" />
 
-    <!-- 外圈右下暗边：从顶面转到侧面的暗折线 -->
+    <!-- 外圈右下暗弧：转到金属凸面背光面时颜色压到几近全黑 -->
     <path
-        android:strokeColor="#FF130906"
-        android:strokeWidth="0.9"
+        android:strokeColor="#FF110804"
+        android:strokeWidth="1.1"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M76,57 a22,13 0 0,1 -22,13" />
+        android:pathData="M80,57 a26,9 0 0,1 -26,9" />
 
-    <!-- 内孔顶半：背面内壁，被外圈挡住天光，画成暗线 -->
+    <!-- 内孔顶半：背面内壁，被外圈遮天 → 暗 -->
     <path
-        android:strokeColor="#FF1B0F04"
+        android:strokeColor="#FF180D04"
+        android:strokeWidth="0.85"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M42,49.5 a12,3.5 0 0,1 24,0" />
+
+    <!-- 内孔底半：近端内壁朝天反顶光 → 亮金线 -->
+    <path
+        android:strokeColor="#FFF6DE92"
         android:strokeWidth="0.7"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M41.5,50 a12.5,5.5 0 0,1 25,0" />
-
-    <!-- 内孔底半：前面内壁，反射顶光，亮金线 -->
-    <path
-        android:strokeColor="#FFF2D680"
-        android:strokeWidth="0.55"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000"
-        android:pathData="M42,53 a12,5.5 0 0,0 24,0" />
-
-    <!-- 顶面雕刻：纸色"runes" 弧线沿椭圆顶面绕一段，呼应博物馆基调。
-         前后各两段，对称分布。-->
-    <path
-        android:strokeColor="#FFF4F1EA"
-        android:strokeWidth="0.7"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000"
-        android:pathData="M44,44 l1.5,-1 l0,2 l2,-1.5 l0,2 l2,-1.5 l0,2 l2,-1.5 l0,2 l2,-1.5 l0,2 l2,-1.5 l0,2 l2,-1.5 l0,2 l1.5,-1" />
-
-    <!-- 顶面 - 内孔之间的细金属沟纹（小细节让顶面不至于太平） -->
-    <path
-        android:strokeColor="#3D1B1208"
-        android:strokeWidth="0.22"
-        android:fillColor="#00000000"
-        android:pathData="M37,48 L40,46.5 M68,46.5 L71,48 M37,58.5 L40,60 M68,60 L71,58.5" />
+        android:pathData="M42.5,50.5 a11.5,3.5 0 0,0 23,0" />
 </vector>
