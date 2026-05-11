@@ -6,75 +6,95 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <!--
-      Cycle 0024 第一版做得有点像"几个圈叠在一起"，不像一枚戒指。
-      Cycle 0025 重做：
-        1. 椭圆压得更扁 — ry/rx ≈ 0.36（之前是 0.58），强烈俯视感
-        2. 用更明显的圆环 (annulus)，不再有任何"额外切片" — 主体就一个
-           evenOdd 椭圆环，简洁
-        3. 内孔上偏 5 — 比之前的 4 大一点儿，让"前面厚 / 后面薄" 的透视
-           特征更明显
-        4. 渐变改纯垂直（顶亮底暗），更直接读出"上方有光从天而降照在
-           凸面金属戒指上"
-        5. 装饰物只留 4 条 — 外圈左上高光、外圈右下暗弧、内孔顶半暗
-           （远端内壁）、内孔底半亮（近端内壁反顶光）。没有 rune，
-           launcher 那么小看不清反而像污点
+      Treasure icon — the One Ring read as a museum specimen. Cycle 0013
+      shrinks the band to outer radius 23 / inner 17.5 and removes the
+      three central terra dots, leaving just the gold band itself.
     -->
 
-    <!-- 桌面投影：长椭圆软影，符合俯视角度 -->
+    <!-- Soft cast shadow under the ring -->
     <path
-        android:fillColor="#28000000"
-        android:pathData="M54,80 m-28,0 a28,3.5 0 1,0 56,0 a28,3.5 0 1,0 -56,0" />
+        android:fillColor="#1A1A1815"
+        android:pathData="M54,80 m-19,0 a19,3 0 1,0 38,0 a19,3 0 1,0 -38,0" />
 
-    <!-- 戒指主体：外椭圆 28×10、内孔椭圆 13×4 上偏 5，evenOdd 切出环。
-         金色 5-stop 顶亮底暗渐变模拟光源从上方照在金属凸面。 -->
+    <!-- Ring body: annulus filled with a forged-gold linear gradient.
+         evenOdd fill turns the inner subpath into a hole. -->
     <path
         android:fillType="evenOdd"
-        android:pathData="M26,55 a28,10 0 1,0 56,0 a28,10 0 1,0 -56,0 Z M41,50 a13,4 0 1,1 26,0 a13,4 0 1,1 -26,0 Z">
+        android:pathData="M31,54 a23,23 0 1,0 46,0 a23,23 0 1,0 -46,0 Z M36.5,54 a17.5,17.5 0 1,1 35,0 a17.5,17.5 0 1,1 -35,0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="linear"
-                android:startX="54"
-                android:startY="45"
-                android:endX="54"
-                android:endY="65">
-                <item android:offset="0.00" android:color="#FFFAE9A8" />
-                <item android:offset="0.20" android:color="#FFE6BC68" />
-                <item android:offset="0.55" android:color="#FFB07E36" />
-                <item android:offset="0.85" android:color="#FF563911" />
-                <item android:offset="1.00" android:color="#FF22150A" />
+                android:startX="34"
+                android:startY="32"
+                android:endX="76"
+                android:endY="78">
+                <item android:offset="0.00" android:color="#FFF3DD8D" />
+                <item android:offset="0.20" android:color="#FFD8B05F" />
+                <item android:offset="0.55" android:color="#FFA47836" />
+                <item android:offset="0.85" android:color="#FF5C3F12" />
+                <item android:offset="1.00" android:color="#FF2C1D08" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- 外圈左上高光弧：金属凸面顶端最亮的一片，跨度大约 130° -->
+    <!-- Top-left highlight crescent on the outer rim -->
     <path
-        android:strokeColor="#FFFCEEC0"
-        android:strokeWidth="1.1"
+        android:strokeColor="#FFF6E5B0"
+        android:strokeWidth="0.6"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M28,53 a26,9 0 0,1 26,-9" />
+        android:pathData="M33,50 a22,22 0 0,1 19,-19" />
 
-    <!-- 外圈右下暗弧：转到金属凸面背光面时颜色压到几近全黑 -->
+    <!-- Bottom-right shadow crescent on the outer rim -->
     <path
-        android:strokeColor="#FF110804"
-        android:strokeWidth="1.1"
+        android:strokeColor="#FF1B1106"
+        android:strokeWidth="0.6"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M80,57 a26,9 0 0,1 -26,9" />
+        android:pathData="M75,58 a22,22 0 0,1 -19,19" />
 
-    <!-- 内孔顶半：背面内壁，被外圈遮天 → 暗 -->
+    <!-- Inner-edge bevel: bright on top, dark on bottom -->
     <path
-        android:strokeColor="#FF180D04"
-        android:strokeWidth="0.85"
+        android:strokeColor="#FFF0D78A"
+        android:strokeWidth="0.45"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M42,49.5 a12,3.5 0 0,1 24,0" />
+        android:pathData="M38.5,50 a16.5,16.5 0 0,1 15.5,-13" />
+    <path
+        android:strokeColor="#FF22160A"
+        android:strokeWidth="0.45"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M70,58 a16.5,16.5 0 0,1 -15.5,13" />
 
-    <!-- 内孔底半：近端内壁朝天反顶光 → 亮金线 -->
+    <!-- Engraved top rune (paper-coloured carving on the gold band) -->
     <path
-        android:strokeColor="#FFF6DE92"
-        android:strokeWidth="0.7"
+        android:strokeColor="#FFF4F1EA"
+        android:strokeWidth="0.8"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M42.5,50.5 a11.5,3.5 0 0,0 23,0" />
+        android:pathData="M49,34.5 L51.2,33.2 L51.2,35.8 L54,33 L54,36 L56.8,33.2 L56.8,35.8 L59,34.5" />
+
+    <!-- Bottom rune (mirrors top) -->
+    <path
+        android:strokeColor="#FFF4F1EA"
+        android:strokeWidth="0.8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M49,73.5 L51.2,72.2 L51.2,74.8 L54,72 L54,75 L56.8,72.2 L56.8,74.8 L59,73.5" />
+
+    <!-- Side ticks on the band (left + right) -->
+    <path
+        android:strokeColor="#FFF4F1EA"
+        android:strokeWidth="0.6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M33,52.5 L33,55.5 M75,52.5 L75,55.5" />
+
+    <!-- Tiny ink-engraved hairlines along the band (richness pass) -->
+    <path
+        android:strokeColor="#3A1A1208"
+        android:strokeWidth="0.22"
+        android:fillColor="#00000000"
+        android:pathData="M42,44 L44.5,42.5 M64,42.5 L66,44 M42,64 L44.5,65.5 M64,65.5 L66,64" />
 </vector>

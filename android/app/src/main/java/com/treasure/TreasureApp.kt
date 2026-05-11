@@ -6,8 +6,10 @@ import com.treasure.core.ai.AnthropicClient
 import com.treasure.core.ai.OpenAiClient
 import com.treasure.core.ai.Provider
 import com.treasure.core.repo.AddConversationRepository
+import com.treasure.core.repo.CategoryRepository
 import com.treasure.core.repo.ItemRepository
 import com.treasure.core.repo.RoomAddConversationRepository
+import com.treasure.core.repo.RoomCategoryRepository
 import com.treasure.core.repo.RoomItemRepository
 import com.treasure.data.SettingsStore
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +26,9 @@ class TreasureApp : Application() {
         private set
 
     lateinit var conversationRepository: AddConversationRepository
+        private set
+
+    lateinit var categoryRepository: CategoryRepository
         private set
 
     lateinit var settingsStore: SettingsStore
@@ -46,6 +51,7 @@ class TreasureApp : Application() {
         super.onCreate()
         repository = RoomItemRepository.create(this)
         conversationRepository = RoomAddConversationRepository.create(this)
+        categoryRepository = RoomCategoryRepository.create(this)
         settingsStore = SettingsStore(this)
         appScope.launch { repository.ensureSeeded() }
     }

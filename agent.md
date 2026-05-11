@@ -4,11 +4,11 @@
 
 ## 当前状态 · 2026-05-09
 
-**cycle 0001 → 0025 全部落地。**
+**cycle 0001 → 0026 全部落地。**
 
-- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.25.0 候选，14 MB，debug 签名）
+- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.26.0 候选，14 MB，debug 签名）
 - GitHub：<https://github.com/kitacpt/Treasure>（main 分支）
-- Schema：v8（cycle 0016 加 avatar_photo_path）
+- Schema：v9（cycle 0026 加 category_prefs 表 + 种子 6 内建分类）
 - 测试设备：vivo X200 Pro mini（Android 15）
 
 ## 端到端能跑通的功能
@@ -140,6 +140,7 @@ treasure/
 | 0023 | 草稿页全面镜像 Edit（基础/标签/参数 三段，AI 填啥就显啥，状态 chip 自选）· 放开 prompt 的 hero spec 模板（AI 按物品挑最重要的 4 条）· 聊天图单击复用 FullscreenPhotoViewer 全屏预览 · Vision pill 双状态（terra "🖼 多模态" / 灰 "纯文本"）+ 删除备注文案 + 摘要卡总是显示 | done |
 | 0024 | 会话 = 草稿 大重构（AddUiState.confirmedDraft + proposedDraft、Prompts.buildSystemWithBaseline、DraftCta 三态 Pending/Accepted/Rejected + [采用]/[不要] 按钮、新 DraftConfirmed 行；手动按钮改成进 Refine 编辑 confirmedDraft，CategoryForm 退役）· App 图标改 3D 俯视戒指（透视椭圆 + 内孔上偏 + 前侧壁渐变带）· Grid chip 点击不再自动置首（只在目标离屏时才 animateScrollToItem） | done |
 | 0025 | 戒指图标 v3：椭圆压扁到 ry/rx=0.36 + 删前侧壁带第二 path + 删 rune，回归"单一 evenOdd 圆环 + 顶亮底暗渐变"清晰 ring 观感 · 草稿页 [确认收入] 加 AlertDialog 二次确认（仿 Settings 重置设置同款样式） | done |
+| 0026 | 图标回退到 cycle 0013 平面版（用户说 3D 几版越来越丑）· **分类管理大刀**：schema v9 加 category_prefs 表 + Migration 种子 6 内建；新 CategoryInfo 领域 + CategoryRepository；Grid 右上小红点 → ModalBottomSheet 管理器（显示中 / 已隐藏 + 分割线，每行编辑 + toggle，标题右侧 + 新增）；编辑子页改名 / 换插画 / 显示状态 / 删除（AlertDialog 二次确认，仅自定义）；Portal doorways + Grid chip 按 visibleCategories 渲染。自定义分类暂时不能装物品（cycle 0027 候选） | done |
 
 详见 [`openspec/`](openspec/) 各 cycle 的 proposal / spec / notes。
 
@@ -154,21 +155,22 @@ treasure/
 5. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) — 录入页 v2 设计稿
 6. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 7. [`docs/adr/`](docs/adr/) — 6 份决策记录
-8. [`openspec/`](openspec/) — cycle 0001-0025 提案 / 规格 / 笔记
+8. [`openspec/`](openspec/) — cycle 0001-0026 提案 / 规格 / 笔记
 
-## 下一刀候选（cycle 0026）
+## 下一刀候选（cycle 0027）
 
-1. **死代码清理**：CategoryForm.kt / ManualCategoryPicker / AddViewModel.saveManual 自 cycle 0024 起没人调，删
-2. **撤销采用**：用户采用 AI 提案后想反悔，目前没法回到上一版 confirmedDraft
-3. **戒指图标 PNG fallback**（如果矢量在老 launcher 上还是不像）：mipmap-*dpi/ 备一份 raster
+1. **自定义分类装物品**：`Item.category` 从 enum 改 String + AI prompt enum 列表 dynamic + AddPreview / Edit InlineDropdown 改 CategoryInfo 列表 + 历史 item migration 保护
+2. **死代码清理**：CategoryForm.kt / ManualCategoryPicker / AddViewModel.saveManual 自 cycle 0024 起没人调
+3. **撤销采用**：用户采用 AI 提案后想反悔，目前没法回到上一版 confirmedDraft
 4. **PageFetcher headless 渲染**：被 detectBlock 拦下的拼多多 / 重 SPA 页面 fall back 到本地 WebView 真渲染一次拿 DOM
 5. **草稿页拖动重排 specs**：抽到 components/ 后 Edit / Refine 两边共用
-6. **流式输出**（如果 forced tool-use 也能拆 SSE delta；目前明确推迟）
-7. **云端 STT (OpenAI Whisper) 兜底 + 麦克风按钮回归** — cycle 0017 暂去掉的麦克风
-8. **多轮 refine 的图片 vision context**
-9. **AI 生成博物馆插画**
-10. **Settings preset 校准** — Xiaomi MiLM 没公开端点
-11. **MigrationTest CI**
+6. **manager 抽屉行拖动重排** — 用户没明说但是自然延伸
+7. **流式输出**（如果 forced tool-use 也能拆 SSE delta；目前明确推迟）
+8. **云端 STT (OpenAI Whisper) 兜底 + 麦克风按钮回归** — cycle 0017 暂去掉的麦克风
+9. **多轮 refine 的图片 vision context**
+10. **AI 生成博物馆插画**
+11. **Settings preset 校准** — Xiaomi MiLM 没公开端点
+12. **MigrationTest CI**
 
 ## 给下一个 agent 的备忘
 
@@ -193,6 +195,7 @@ treasure/
 
 | 日期 | 摘要 |
 |---|---|
+| 2026-05-11 | cycle 0026：图标回退 cycle 0013 平面版（3D 几版作废，留在 git 历史）· 分类管理：schema v9 加 category_prefs 表（Migration 种子 6 内建）· 新 CategoryInfo / CategoryRepository · Grid 右上小红点 → ModalBottomSheet 管理器（显示中 / 已隐藏 分割线 + 每行 [隐藏/显示] + [编辑 →]，标题右侧 [+ 新增分类]）· 编辑子页：改名 / 换插画（HeroVector 横滚 picker）/ 显示状态 / 删除（AlertDialog 二次确认，仅自定义）· Portal doorways + Grid chip 按 visibleCategories 渲染（隐藏的不出）· Item.category 仍是 enum，自定义分类暂时空容器（cycle 0027 候选） |
 | 2026-05-11 | cycle 0025：戒指图标 v3（外圈压扁到 28×10，删前侧壁第二 path 和 rune，纯垂直顶亮底暗渐变，回到"单一 evenOdd 圆环 + 凸面金属光照"读法）· 草稿页 [确认收入] 加二次确认 AlertDialog（仿 Settings 重置设置） |
 | 2026-05-11 | cycle 0024：会话 = 草稿 大重构 — AddUiState 拆 confirmedDraft + proposedDraft；AI 调用把 confirmedDraft 当 baseline 拼到 system prompt（buildSystemWithBaseline）让 AI 给"下一版"而不是从零；DraftCta 三态（Pending/Accepted/Rejected）+ 右下 [采用]/[不要] 按钮；采用 → append DraftConfirmed 行入 Room + state 升格；supersede 旧 pending 为 Rejected；"手动"按钮改成进 Refine 编辑 confirmedDraft，CategoryForm + ManualCategoryPicker 退役（暂留死代码）；持久化复用 text 列 + 新 draft_confirmed role 不动 schema · 应用图标改 3D 俯视戒指（外圈 24×14 椭圆 + 内孔上偏 4dp + 前侧壁渐变带） · Grid chip 点击不再自动置首（target 在 visibleItemsInfo 不滚） |
 | 2026-05-09 | cycle 0023：草稿页全面镜像 Edit（基础 LabeledField × 4 / 标签 status chip + 品类 dropdown / 参数 DraftSpecs 直接渲染 draft.specs 全部行）· 放开 SYSTEM_PROMPT 的 hero spec 模板（AI 按物品挑最重要的，不再是固定 6 品类 4-tuple）· 聊天图单击复用 FullscreenPhotoViewer 全屏预览（多张可横滑，无 callout）· Vision pill 双状态 + 摘要卡总是显示（terra "🖼 多模态" / 灰 "纯文本"，删除"可发图给它认"备注） |

@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.treasure.core.domain.Category
+import com.treasure.core.domain.CategoryInfo
 import com.treasure.core.domain.Item
 import com.treasure.theme.LocalTreasureColors
 import com.treasure.illust.HeroIllustration
@@ -37,7 +38,7 @@ import com.treasure.ui.components.Ornament
 
 @Composable
 fun PortalRoute(
-    onEnterCategory: (Category) -> Unit,
+    onEnterCategory: (String) -> Unit,
     onOpenItem: (String) -> Unit,
     vm: PortalViewModel = viewModel(factory = PortalViewModel.Factory),
 ) {
@@ -48,7 +49,7 @@ fun PortalRoute(
 @Composable
 fun PortalScreen(
     state: PortalUiState,
-    onEnterCategory: (Category) -> Unit,
+    onEnterCategory: (String) -> Unit,
     onOpenItem: (String) -> Unit,
 ) {
     val colors = LocalTreasureColors.current
@@ -85,10 +86,8 @@ fun PortalScreen(
                     centered = false,
                 )
             }
-            item { Spacer(Modifier.height(10.dp)) }
+            item { Spacer(Modifier.height(12.dp)) }
             item { state.latestOverall?.let { LatestEntryCard(it, onOpenItem) } }
-            item { Spacer(Modifier.height(28.dp)) }
-            item { Ornament(modifier = Modifier.padding(horizontal = 24.dp)) }
         }
     }
 }
@@ -96,22 +95,17 @@ fun PortalScreen(
 @Composable
 private fun GrandTitle() {
     val colors = LocalTreasureColors.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = "Treasure",
             color = colors.ink,
-            style = MaterialTheme.typography.displayLarge,
+            style = MaterialTheme.typography.titleLarge,
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
-            text = "a private cabinet of things owned, used, & remembered",
+            text = "私人博物馆 · 图鉴",
             color = colors.sub,
-            style = MaterialTheme.typography.displayMedium,
+            style = MaterialTheme.typography.labelSmall,
             textAlign = TextAlign.Center,
         )
     }
@@ -126,7 +120,7 @@ private fun Tally(state: PortalUiState) {
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
         TallyItem(state.totalItems, "items")
-        TallyItem(state.roomsCount, "rooms")
+        TallyItem(state.visibleCategories.size, "rooms")
     }
 }
 
@@ -163,9 +157,9 @@ private fun SectionLabel(text: String, modifier: Modifier = Modifier, centered: 
 @Composable
 private fun DoorwaysGrid(
     state: PortalUiState,
-    onEnterCategory: (Category) -> Unit,
+    onEnterCategory: (String) -> Unit,
 ) {
-    val cats = Category.entries
+    val cats = state.visibleCategories
     val romans = listOf("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X")
     Column(
         modifier = Modifier
@@ -178,12 +172,12 @@ private fun DoorwaysGrid(
                 pair.forEachIndexed { colIdx, c ->
                     val romanIdx = rowIdx * 2 + colIdx
                     DoorwayCard(
-                        category = c,
+                        info = c,
                         roman = romans.getOrNull(romanIdx) ?: "",
-                        count = state.countByCategory[c] ?: 0,
-                        latest = state.latestByCategory[c],
+                        count = state.countByCategoryId[c.id] ?: 0,
+                        latest = state.latestByCategoryId[c.id],
                         modifier = Modifier.weight(1f),
-                        onClick = { onEnterCategory(c) },
+                        onClick = { onEnterCategory(c.id) },
                     )
                 }
                 if (pair.size == 1) {
@@ -195,21 +189,24 @@ private fun DoorwaysGrid(
 }
 
 /**
- * 当某品类还没有任何物品时，给 doorway 用品类模板里的默认 hero vector +
- * palette 合成一个 stub Item，让 [HeroIllustration] 能画出该品类的代表插画
- * （比如 Coffee 默认 espresso machine、Wine 默认 wine bottle），而不是兜底
- * 的 generic 占位图。
+ * 当某品类还没有任何物品时，给 doorway 用 CategoryInfo 自身的 hero vector
+ * 合成一个 stub Item，让 [HeroIllustration] 能画出该品类的代表插画。
+ *
+ * Item.category 字段必须是 [Category] enum，但对于用户自定义分类我们没有
+ * 对应 enum。这里塞 Category.TECH 仅作占位 — HeroAvatar / HeroIllustration
+ * 只读 item.heroVector + item.palette，所以 category 字段不影响渲染。
  */
-private fun stubItemFor(category: Category): Item {
-    val tpl = com.treasure.ui.add.CategoryTemplates.forCategory(category)
+private fun stubItemFor(info: CategoryInfo): Item {
+    val builtIn = Category.entries.firstOrNull { it.id == info.id }
+    val tpl = builtIn?.let { com.treasure.ui.add.CategoryTemplates.forCategory(it) }
     return Item(
-        id = "stub-${category.id}",
-        category = category,
+        id = "stub-${info.id}",
+        category = builtIn ?: Category.TECH,
         brand = "", model = "", nickname = "", acquired = "", parted = null,
         status = com.treasure.core.domain.ItemStatus.OWNED,
-        palette = tpl.palette,
+        palette = tpl?.palette ?: listOf("#0e0e0e", "#a47836", "#e8e2d4", "#5a5a5a"),
         oneLiner = "",
-        heroVector = tpl.heroVector,
+        heroVector = info.heroVector,
         specs = emptyList(),
         history = emptyList(),
         photos = emptyList(),
@@ -219,7 +216,7 @@ private fun stubItemFor(category: Category): Item {
 
 @Composable
 private fun DoorwayCard(
-    category: Category,
+    info: CategoryInfo,
     roman: String,
     count: Int,
     latest: Item?,
@@ -251,8 +248,7 @@ private fun DoorwayCard(
                 .aspectRatio(1.6f),
             contentAlignment = Alignment.Center,
         ) {
-            // 没有任何物品时用品类模板默认 vector 兜底
-            val displayItem = latest ?: remember(category) { stubItemFor(category) }
+            val displayItem = latest ?: remember(info.id, info.heroVector) { stubItemFor(info) }
             HeroAvatar(item = displayItem, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.height(10.dp))
@@ -264,13 +260,13 @@ private fun DoorwayCard(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = category.nameZh,
+            text = info.nameZh,
             color = colors.ink,
             style = MaterialTheme.typography.titleMedium,
         )
         Spacer(Modifier.height(2.dp))
         Text(
-            text = "$count pcs · ${category.nameEn}",
+            text = "$count pcs · ${info.nameEn.ifBlank { "—" }}",
             color = colors.sub,
             fontSize = 10.sp,
             style = MaterialTheme.typography.bodyMedium,

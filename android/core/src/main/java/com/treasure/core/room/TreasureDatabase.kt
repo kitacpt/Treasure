@@ -20,13 +20,15 @@ import androidx.room.RoomDatabase
         ItemEntity::class,
         ConversationEntity::class,
         ConversationMessageEntity::class,
+        CategoryPrefEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 internal abstract class TreasureDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
     abstract fun conversationDao(): ConversationDao
+    abstract fun categoryPrefDao(): CategoryPrefDao
 
     companion object {
         @Volatile private var instance: TreasureDatabase? = null

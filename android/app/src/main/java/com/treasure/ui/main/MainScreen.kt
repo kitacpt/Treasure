@@ -69,8 +69,8 @@ fun MainScreen(onOpenDetail: (String) -> Unit) {
         ) { page ->
             when (page) {
                 PAGE_PORTAL -> PortalRoute(
-                    onEnterCategory = { cat ->
-                        gridCategoryId = cat.id
+                    onEnterCategory = { id ->
+                        gridCategoryId = id
                         scope.launch { pagerState.animateScrollToPage(PAGE_GRID) }
                     },
                     onOpenItem = onOpenDetail,
