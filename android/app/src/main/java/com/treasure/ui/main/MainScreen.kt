@@ -41,7 +41,12 @@ private const val PAGE_COUNT = 4
  * 同一个 pagerState。
  */
 @Composable
-fun MainScreen(onOpenDetail: (String) -> Unit) {
+fun MainScreen(
+    onOpenDetail: (String) -> Unit,
+    onOpenSearch: () -> Unit,
+    onAddCategory: () -> Unit,
+    onEditCategory: (String) -> Unit,
+) {
     val pagerState = rememberPagerState(pageCount = { PAGE_COUNT })
     val scope = rememberCoroutineScope()
     var gridCategoryId by rememberSaveable { mutableStateOf(Category.PHOTO.id) }
@@ -49,6 +54,20 @@ fun MainScreen(onOpenDetail: (String) -> Unit) {
     // 打开，也能从 Portal 空态引导打开（"去分类管理 →"）。
     var categoryManagerOpen by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf(false)
+    }
+
+    // Cycle 0029：BackHandler — 非 Portal tab 时返回回首页，Portal 才走默认
+    // （= 退出应用）。Manager 抽屉打开时优先收抽屉，与 Compose 系统 back
+    // 双重保险（ModalBottomSheet 自身也会响应 back，但用 androidx 版本经常
+    // 不收 — 显式拦下更稳）。
+    androidx.activity.compose.BackHandler(
+        enabled = categoryManagerOpen || pagerState.currentPage != PAGE_PORTAL,
+    ) {
+        when {
+            categoryManagerOpen -> categoryManagerOpen = false
+            pagerState.currentPage != PAGE_PORTAL ->
+                scope.launch { pagerState.animateScrollToPage(PAGE_PORTAL) }
+        }
     }
 
     // Cycle 0019：监听 shareIntake — 从京东 / 淘宝 / 浏览器分享过来的文字
@@ -92,6 +111,7 @@ fun MainScreen(onOpenDetail: (String) -> Unit) {
                     },
                     onOpenItem = onOpenDetail,
                     onOpenCategoryManager = { categoryManagerOpen = true },
+                    onOpenSearch = onOpenSearch,
                 )
                 PAGE_ADD -> AddRoute(
                     onSaved = onOpenDetail,
@@ -116,10 +136,13 @@ fun MainScreen(onOpenDetail: (String) -> Unit) {
 
         // Cycle 0028：分类管理抽屉提到 MainScreen 顶层 — 入口可以是 Grid 右上
         // 小红点（cycle 0026），也可以是 Portal 空态 "去分类管理" 链接（cycle
-        // 0028）。两边都用同一份抽屉、同一个 VM。
+        // 0028）。两边都用同一份抽屉、同一个 VM。Cycle 0029：抽屉只剩 List，
+        // 编辑 / 新建都跳全屏路由（onAddCategory / onEditCategory）。
         if (categoryManagerOpen) {
             com.treasure.ui.category.CategoryManager(
                 onClose = { categoryManagerOpen = false },
+                onAddCategory = onAddCategory,
+                onEditCategory = { info -> onEditCategory(info.id) },
             )
         }
     }

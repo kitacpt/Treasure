@@ -48,6 +48,7 @@ fun GridRoute(
     onBack: () -> Unit,
     onOpenItem: (String) -> Unit,
     onOpenCategoryManager: () -> Unit,
+    onOpenSearch: () -> Unit,
     vm: GridViewModel = viewModel(factory = GridViewModel.factory(initialCategoryId)),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -72,6 +73,7 @@ fun GridRoute(
         onOpenItem = onOpenItem,
         onBack = onBack,
         onOpenCategoryManager = onOpenCategoryManager,
+        onOpenSearch = onOpenSearch,
     )
 }
 
@@ -82,6 +84,7 @@ fun GridScreen(
     onOpenItem: (String) -> Unit,
     onBack: () -> Unit,
     onOpenCategoryManager: () -> Unit,
+    onOpenSearch: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
 
@@ -120,25 +123,73 @@ fun GridScreen(
             }
         }
 
-        // Cycle 0026：右上小红点入口（分类管理）。统计岛 / Header 之外、状态
-        // 栏之下的右上角。Cycle 0028：抽屉本身提到 MainScreen 顶层管理，这里
-        // 只 fire callback。
-        Box(
+        // 右上工具栏：搜索 icon + 小红点（分类管理）。两个 28dp 触控区。
+        // Cycle 0029 加搜索；cycle 0026 起小红点是分类管理入口。
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 28.dp, end = 22.dp)
-                .size(28.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onOpenCategoryManager),
-            contentAlignment = Alignment.Center,
+                .padding(top = 24.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            // 搜索 icon — 简笔放大镜：圆 + 短斜线手柄
             Box(
                 modifier = Modifier
-                    .size(12.dp)
+                    .size(32.dp)
                     .clip(CircleShape)
-                    .background(androidx.compose.ui.graphics.Color(0xFFC5392E)),
-            )
+                    .clickable(onClick = onOpenSearch),
+                contentAlignment = Alignment.Center,
+            ) {
+                SearchGlyph(color = colors.ink)
+            }
+            // 红点分类管理入口
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onOpenCategoryManager),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(androidx.compose.ui.graphics.Color(0xFFC5392E)),
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun SearchGlyph(color: androidx.compose.ui.graphics.Color) {
+    androidx.compose.foundation.Canvas(
+        modifier = Modifier.size(16.dp),
+    ) {
+        val cx = size.width * 0.42f
+        val cy = size.height * 0.42f
+        val r = size.minDimension * 0.32f
+        drawCircle(
+            color = color,
+            radius = r,
+            center = androidx.compose.ui.geometry.Offset(cx, cy),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = size.minDimension * 0.10f),
+        )
+        // 手柄
+        val handleStart = androidx.compose.ui.geometry.Offset(
+            cx + r * 0.7f,
+            cy + r * 0.7f,
+        )
+        val handleEnd = androidx.compose.ui.geometry.Offset(
+            size.width * 0.88f,
+            size.height * 0.88f,
+        )
+        drawLine(
+            color = color,
+            start = handleStart,
+            end = handleEnd,
+            strokeWidth = size.minDimension * 0.10f,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
     }
 }
 

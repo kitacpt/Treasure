@@ -12,9 +12,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.treasure.ui.category.CategoryEditorRoute
 import com.treasure.ui.detail.DetailRoute
 import com.treasure.ui.edit.EditRoute
 import com.treasure.ui.main.MainScreen
+import com.treasure.ui.search.SearchRoute
 
 private val SlideTween = tween<androidx.compose.ui.unit.IntOffset>(durationMillis = 300)
 
@@ -36,6 +38,9 @@ fun TreasureNavHost() {
             composable(Routes.Main) {
                 MainScreen(
                     onOpenDetail = { id -> nav.navigate(Routes.detail(id)) },
+                    onOpenSearch = { nav.navigate(Routes.Search) },
+                    onAddCategory = { nav.navigate(Routes.CategoryNew) },
+                    onEditCategory = { id -> nav.navigate(Routes.categoryEdit(id)) },
                 )
             }
 
@@ -59,6 +64,32 @@ fun TreasureNavHost() {
                 EditRoute(
                     itemId = id,
                     onDone = { nav.popBackStack() },
+                )
+            }
+
+            // Cycle 0029：分类新建 / 编辑都改全屏路由
+            composable(Routes.CategoryNew) {
+                CategoryEditorRoute(
+                    categoryId = null,
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(
+                route = Routes.CategoryEditPattern,
+                arguments = listOf(navArgument("categoryId") { type = NavType.StringType }),
+            ) { entry ->
+                val id = entry.arguments?.getString("categoryId").orEmpty()
+                CategoryEditorRoute(
+                    categoryId = id,
+                    onBack = { nav.popBackStack() },
+                )
+            }
+
+            // Cycle 0029：图鉴页右上小搜索 icon → 全屏搜索
+            composable(Routes.Search) {
+                SearchRoute(
+                    onBack = { nav.popBackStack() },
+                    onOpenItem = { id -> nav.navigate(Routes.detail(id)) },
                 )
             }
         }

@@ -66,11 +66,12 @@ import kotlin.math.roundToInt
 @Composable
 fun CategoryManager(
     onClose: () -> Unit,
+    onAddCategory: () -> Unit,
+    onEditCategory: (CategoryInfo) -> Unit,
     vm: CategoryManagerViewModel = viewModel(factory = CategoryManagerViewModel.Factory),
 ) {
     val colors = LocalTreasureColors.current
     val all by vm.all.collectAsStateWithLifecycle()
-    var mode by remember { mutableStateOf<Mode>(Mode.List) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -79,52 +80,24 @@ fun CategoryManager(
         containerColor = colors.paper,
         contentColor = colors.ink,
     ) {
-        when (val m = mode) {
-            is Mode.List -> CategoryList(
-                all = all,
-                onEdit = { mode = Mode.Edit(it) },
-                onAdd = { mode = Mode.Add },
-                onCommit = { orderedIds, hiddenIds ->
-                    vm.applyReorder(orderedIds, hiddenIds)
-                },
-            )
-            is Mode.Edit -> CategoryEditor(
-                initial = m.info,
-                onBack = { mode = Mode.List },
-                onSaveBuiltIn = { heroVector, hidden ->
-                    vm.saveHeroVectorOnly(m.info.id, heroVector)
-                    if (hidden != m.info.hidden) vm.setHidden(m.info.id, hidden)
-                    mode = Mode.List
-                },
-                onSaveCustom = { nameZh, nameEn, heroVector, hidden ->
-                    vm.saveCustom(m.info.id, nameZh, nameEn, heroVector)
-                    if (hidden != m.info.hidden) vm.setHidden(m.info.id, hidden)
-                    mode = Mode.List
-                },
-                onDelete = {
-                    vm.deleteCustom(m.info.id)
-                    mode = Mode.List
-                },
-            )
-            is Mode.Add -> CategoryEditor(
-                initial = null,
-                onBack = { mode = Mode.List },
-                onSaveBuiltIn = { _, _ -> /* unreachable */ },
-                onSaveCustom = { nameZh, nameEn, heroVector, _ ->
-                    vm.addCustom(nameZh, nameEn, heroVector)
-                    mode = Mode.List
-                },
-                onDelete = { /* unreachable when initial == null */ },
-            )
-        }
+        // Cycle 0029：编辑 / 新建都拆成全屏路由，Manager 只剩 List 模式。点击
+        // 时 onClose() 收抽屉再 navigate 过去，避免抽屉和全屏页同时存在。
+        CategoryList(
+            all = all,
+            onEdit = { info ->
+                onClose()
+                onEditCategory(info)
+            },
+            onAdd = {
+                onClose()
+                onAddCategory()
+            },
+            onCommit = { orderedIds, hiddenIds ->
+                vm.applyReorder(orderedIds, hiddenIds)
+            },
+        )
         Spacer(Modifier.height(20.dp))
     }
-}
-
-private sealed interface Mode {
-    data object List : Mode
-    data class Edit(val info: CategoryInfo) : Mode
-    data object Add : Mode
 }
 
 // ─── List with drag-to-reorder ─────────────────────────────────────────
@@ -329,13 +302,6 @@ private fun CategoryList(
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "长按 ≡ 拖动 — 跨过分割线即可隐藏 / 显示，所有变更实时生效",
-            color = colors.sub.copy(alpha = 0.7f),
-            style = MaterialTheme.typography.labelSmall,
-            fontStyle = FontStyle.Italic,
-        )
     }
 }
 
@@ -431,392 +397,4 @@ private fun CategoryRow(
             )
         }
     }
-}
-
-// ─── Editor ───────────────────────────────────────────────────────────────
-
-/** [initial] = null → 新增；non-null → 编辑既有项。 */
-@Composable
-private fun CategoryEditor(
-    initial: CategoryInfo?,
-    onBack: () -> Unit,
-    onSaveBuiltIn: (heroVector: HeroVector, hidden: Boolean) -> Unit,
-    onSaveCustom: (nameZh: String, nameEn: String, heroVector: HeroVector, hidden: Boolean) -> Unit,
-    onDelete: () -> Unit,
-) {
-    val colors = LocalTreasureColors.current
-    val isBuiltIn = initial?.isBuiltIn == true
-    val isAdd = initial == null
-    var nameZh by remember { mutableStateOf(initial?.nameZh.orEmpty()) }
-    var nameEn by remember { mutableStateOf(initial?.nameEn.orEmpty()) }
-    // Cycle 0028：插画必填 — null 表示用户还没挑过。内建自动锁定到 enum 的
-    // defaultHeroVector（CategoryInfo.heroVector 已经被 repo 覆盖了）。自定
-    // 义首次创建时给 null，强迫用户选；编辑现有自定义时回填已有的。
-    var heroVector by remember {
-        mutableStateOf<HeroVector?>(
-            when {
-                isAdd -> null
-                isBuiltIn -> initial?.heroVector // 显示用，但保存时不写入
-                else -> initial?.heroVector
-            },
-        )
-    }
-    var hidden by remember { mutableStateOf(initial?.hidden == true) }
-    var confirmingDelete by remember { mutableStateOf(false) }
-
-    val canSave = (isBuiltIn || nameZh.isNotBlank()) && heroVector != null
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 620.dp)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp),
-    ) {
-        // 头：左 ‹ 返回，右 保存 / 新建
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "‹ 返回",
-                color = colors.sub,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .clickable(onClick = onBack)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = if (isAdd) "新建" else "保存",
-                color = if (canSave) colors.terra else colors.sub.copy(alpha = 0.45f),
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .clickable(enabled = canSave) {
-                        val hv = heroVector ?: return@clickable
-                        if (isBuiltIn) onSaveBuiltIn(hv, hidden)
-                        else onSaveCustom(nameZh, nameEn, hv, hidden)
-                    }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-            )
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = if (isAdd) "新增分类" else "编辑 ${initial?.nameZh}",
-            color = colors.ink,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        if (isBuiltIn) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "内建分类的名字和插画不可改；只能切显示状态。",
-                color = colors.sub,
-                style = MaterialTheme.typography.labelSmall,
-                fontStyle = FontStyle.Italic,
-            )
-        } else if (isAdd) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "新建必须填中文名 + 选一张插画。",
-                color = colors.sub,
-                style = MaterialTheme.typography.labelSmall,
-                fontStyle = FontStyle.Italic,
-            )
-        }
-        Spacer(Modifier.height(18.dp))
-
-        // 顶部：插画"头像" — 像物品编辑页那样的 112dp 大圆
-        AvatarHero(
-            heroVector = heroVector,
-            placeholderEmpty = isAdd && heroVector == null,
-        )
-        Spacer(Modifier.height(10.dp))
-
-        // 插画选择 row — 内建锁定（点击没反应），自定义可选
-        Text(
-            text = if (isBuiltIn) "插画（内建已固定）" else "插画 · 必选",
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-        )
-        Spacer(Modifier.height(6.dp))
-        HeroVectorRow(
-            selected = heroVector,
-            enabled = !isBuiltIn,
-            onSelect = { heroVector = it },
-        )
-        Spacer(Modifier.height(20.dp))
-
-        // 中文 / 英文名（内建锁定）
-        FieldRow(label = "中文名") {
-            EditorTextField(
-                value = nameZh,
-                onValueChange = { nameZh = it },
-                enabled = !isBuiltIn,
-                placeholder = "如 图书",
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-        FieldRow(label = "英文名") {
-            EditorTextField(
-                value = nameEn,
-                onValueChange = { nameEn = it },
-                enabled = !isBuiltIn,
-                placeholder = "如 Books（可选）",
-            )
-        }
-        Spacer(Modifier.height(16.dp))
-
-        // 显示 toggle（仅编辑模式，新增模式默认显示状态）
-        if (!isAdd) {
-            FieldRow(label = "显示") {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    PillChip("显示", !hidden) { hidden = false }
-                    PillChip("隐藏", hidden) { hidden = true }
-                }
-            }
-            Spacer(Modifier.height(20.dp))
-        }
-
-        // 删除（仅自定义 + 编辑模式）
-        if (initial != null && !isBuiltIn) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(2.dp))
-                    .border(0.5.dp, colors.terra.copy(alpha = 0.55f))
-                    .clickable { confirmingDelete = true }
-                    .padding(vertical = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "删除分类",
-                    color = colors.terra,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        }
-    }
-
-    if (confirmingDelete && initial != null) {
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text("删除 ${initial.nameZh}？") },
-            text = {
-                Text(
-                    text = "这只是删掉这个分类本身。原本收在这里的物品不会被删 — 它们会被自动重新归到\"电子产品\"分类下，进图鉴后可手动改类别。",
-                    color = colors.sub,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmingDelete = false
-                    onDelete()
-                }) { Text("删除", color = colors.terra) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingDelete = false }) { Text("取消") }
-            },
-            containerColor = colors.paper,
-            titleContentColor = colors.ink,
-            textContentColor = colors.sub,
-        )
-    }
-}
-
-/**
- * Cycle 0028：分类编辑页的"头像"。借用 HeroIllustration 但包成同样大小的
- * 112dp 圆，跟物品编辑页 HeroAvatarPicker 的 hero plate 视觉一致。null
- * 时画 + 占位提示用户去下面 row 挑。
- */
-@Composable
-private fun AvatarHero(
-    heroVector: HeroVector?,
-    placeholderEmpty: Boolean,
-) {
-    val colors = LocalTreasureColors.current
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(112.dp)
-                .clip(CircleShape)
-                .background(colors.paper)
-                .border(0.8.dp, colors.line, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (heroVector == null) {
-                Text(
-                    text = if (placeholderEmpty) "+ 选张插画" else "—",
-                    color = colors.sub.copy(alpha = 0.6f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontStyle = FontStyle.Italic,
-                )
-            } else {
-                // 用一份兜底 palette + 这个 heroVector 合成 stub item 画
-                val stub = remember(heroVector) {
-                    com.treasure.core.domain.Item(
-                        id = "preview",
-                        category = "preview",
-                        brand = "", model = "", nickname = "", acquired = "", parted = null,
-                        status = com.treasure.core.domain.ItemStatus.OWNED,
-                        palette = listOf("#0e0e0e", "#a47836", "#e8e2d4", "#5a5a5a"),
-                        oneLiner = "",
-                        heroVector = heroVector,
-                        specs = emptyList(),
-                        history = emptyList(),
-                        photos = emptyList(),
-                        createdAt = 0L, updatedAt = 0L,
-                    )
-                }
-                Box(modifier = Modifier.size(80.dp)) {
-                    HeroIllustration(item = stub, modifier = Modifier.fillMaxSize())
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun FieldRow(label: String, content: @Composable () -> Unit) {
-    val colors = LocalTreasureColors.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = label,
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.width(64.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Box(modifier = Modifier.weight(1f)) { content() }
-    }
-}
-
-@Composable
-private fun EditorTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    enabled: Boolean,
-    placeholder: String,
-) {
-    val colors = LocalTreasureColors.current
-    Column {
-        Box(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-            if (value.isEmpty()) {
-                Text(
-                    text = placeholder,
-                    color = colors.sub.copy(alpha = 0.4f),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-            }
-            androidx.compose.foundation.text.BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                singleLine = true,
-                enabled = enabled,
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.terra),
-                textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
-                    color = if (enabled) colors.ink else colors.sub.copy(alpha = 0.5f),
-                    fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
-                    fontSize = MaterialTheme.typography.bodyLarge.fontSize,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(0.5.dp)
-                .background(colors.line),
-        )
-    }
-}
-
-@Composable
-private fun PillChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val colors = LocalTreasureColors.current
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(if (selected) colors.ink else Color.Transparent)
-            .border(
-                0.5.dp,
-                if (selected) colors.ink else colors.line,
-                RoundedCornerShape(999.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-    ) {
-        Text(
-            text = label,
-            color = if (selected) colors.paper else colors.ink,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-    }
-}
-
-@Composable
-private fun HeroVectorRow(
-    selected: HeroVector?,
-    enabled: Boolean,
-    onSelect: (HeroVector) -> Unit,
-) {
-    val colors = LocalTreasureColors.current
-    val scrollState = rememberScrollState()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        HeroVector.entries.forEach { hv ->
-            val isSel = hv == selected
-            val rowAlpha = if (enabled) 1f else 0.55f
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(
-                        (if (isSel) colors.ink else Color.Transparent)
-                            .copy(alpha = if (isSel) rowAlpha else 1f),
-                    )
-                    .border(
-                        0.5.dp,
-                        if (isSel) colors.ink.copy(alpha = rowAlpha) else colors.line,
-                        RoundedCornerShape(999.dp),
-                    )
-                    .clickable(enabled = enabled) { onSelect(hv) }
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-            ) {
-                Text(
-                    text = heroLabel(hv),
-                    color = (if (isSel) colors.paper else colors.ink).copy(alpha = rowAlpha),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        }
-    }
-}
-
-private fun heroLabel(hv: HeroVector): String = when (hv) {
-    HeroVector.RACKET -> "球拍"
-    HeroVector.SHOES -> "鞋"
-    HeroVector.CAMERA_DSLR -> "单反"
-    HeroVector.CAMERA_RANGEFINDER -> "旁轴"
-    HeroVector.LENS_PRIME -> "镜头"
-    HeroVector.TRIPOD -> "三脚架"
-    HeroVector.CAR_SEDAN -> "轿车"
-    HeroVector.CAR_SUV -> "SUV"
-    HeroVector.LAPTOP -> "笔记本"
-    HeroVector.TABLET -> "平板"
-    HeroVector.EARBUDS -> "耳机"
-    HeroVector.KINDLE -> "电纸书"
-    HeroVector.WATCH -> "手表"
-    HeroVector.ESPRESSO_MACHINE -> "意式机"
-    HeroVector.COFFEE_GRINDER -> "磨豆机"
-    HeroVector.COFFEE_BEAN -> "咖啡豆"
-    HeroVector.WINE_BOTTLE -> "酒瓶"
-    HeroVector.COCKTAIL_GLASS -> "鸡尾酒杯"
-    HeroVector.GENERIC -> "通用"
 }
