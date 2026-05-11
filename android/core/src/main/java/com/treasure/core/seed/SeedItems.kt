@@ -1,6 +1,5 @@
 package com.treasure.core.seed
 
-import com.treasure.core.domain.Category
 import com.treasure.core.domain.HeroSpec
 import com.treasure.core.domain.HeroVector
 import com.treasure.core.domain.HistoryEvent
@@ -20,7 +19,7 @@ object SeedItems {
         // Badminton ───────────────────────────────────────────────────────
         Item(
             id = "racket-vt-zf2",
-            category = Category.BADMINTON,
+            category = "badminton",
             brand = "Yonex",
             model = "Voltric Z-Force II",
             nickname = "黑刃",
@@ -54,7 +53,7 @@ object SeedItems {
         ),
         Item(
             id = "racket-astrox-99",
-            category = Category.BADMINTON,
+            category = "badminton",
             brand = "Yonex",
             model = "Astrox 99 Pro",
             nickname = "橘子",
@@ -86,7 +85,7 @@ object SeedItems {
         // Photography ─────────────────────────────────────────────────────
         Item(
             id = "cam-fuji-xt5",
-            category = Category.PHOTO,
+            category = "photo",
             brand = "Fujifilm",
             model = "X-T5",
             nickname = "小富士",
@@ -119,7 +118,7 @@ object SeedItems {
         ),
         Item(
             id = "cam-leica-m6",
-            category = Category.PHOTO,
+            category = "photo",
             brand = "Leica",
             model = "M6",
             nickname = "老玩具",
@@ -151,7 +150,7 @@ object SeedItems {
         // Cars (rentals) ──────────────────────────────────────────────────
         Item(
             id = "car-911",
-            category = Category.CARS,
+            category = "cars",
             brand = "Porsche",
             model = "911 Carrera S",
             nickname = "梦中情车",
@@ -182,7 +181,7 @@ object SeedItems {
         ),
         Item(
             id = "car-defender",
-            category = Category.CARS,
+            category = "cars",
             brand = "Land Rover",
             model = "Defender 110",
             nickname = "大方块",
@@ -215,7 +214,7 @@ object SeedItems {
         // Tech ────────────────────────────────────────────────────────────
         Item(
             id = "tech-mbp",
-            category = Category.TECH,
+            category = "tech",
             brand = "Apple",
             model = "MacBook Pro 14\" M4 Pro",
             nickname = "主力机",
@@ -243,7 +242,7 @@ object SeedItems {
         ),
         Item(
             id = "tech-airpods",
-            category = Category.TECH,
+            category = "tech",
             brand = "Apple",
             model = "AirPods Pro 2",
             nickname = "耳朵",

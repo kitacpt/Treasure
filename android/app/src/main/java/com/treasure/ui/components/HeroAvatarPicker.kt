@@ -35,7 +35,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.treasure.core.domain.Category
 import com.treasure.core.domain.HeroVector
 import com.treasure.core.domain.Item
 import com.treasure.core.domain.ItemStatus
@@ -57,7 +56,7 @@ import com.treasure.theme.LocalTreasureColors
  */
 @Composable
 fun HeroAvatarPicker(
-    category: Category,
+    categoryId: String,
     palette: List<String>,
     options: List<HeroVector>,
     selected: HeroVector,
@@ -99,7 +98,7 @@ fun HeroAvatarPicker(
             } else {
                 Box(modifier = Modifier.padding(14.dp).fillMaxSize()) {
                     HeroIllustration(
-                        item = previewItem(selected, palette, category),
+                        item = previewItem(selected, palette, categoryId),
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -184,7 +183,7 @@ fun HeroAvatarPicker(
                             .padding(7.dp),
                     ) {
                         HeroIllustration(
-                            item = previewItem(v, palette, category),
+                            item = previewItem(v, palette, categoryId),
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -247,10 +246,10 @@ private fun ActionChip(
 private fun previewItem(
     v: HeroVector,
     palette: List<String>,
-    category: Category,
+    categoryId: String,
 ): Item = Item(
     id = "preview",
-    category = category,
+    category = categoryId,
     brand = "", model = "", nickname = "", acquired = "", parted = null,
     status = ItemStatus.OWNED,
     palette = palette,

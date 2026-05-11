@@ -80,9 +80,10 @@ class OpenAiClient(
         imageJpegBytes: ByteArray?,
         priorTurns: List<AiTurn>,
         baseline: ItemDraft?,
+        categoryHints: List<CategoryHint>,
     ): Result<ItemDraft> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = buildPayload(text, imageJpegBytes, priorTurns, baseline)
+            val payload = buildPayload(text, imageJpegBytes, priorTurns, baseline, categoryHints)
             val response = client.newCall(
                 Request.Builder()
                     .url(buildUrl())
@@ -120,6 +121,7 @@ class OpenAiClient(
         image: ByteArray?,
         priorTurns: List<AiTurn>,
         baseline: ItemDraft?,
+        categoryHints: List<CategoryHint>,
     ): String {
         val toolSchema = json.parseToJsonElement(EXTRACT_TOOL_PARAMETERS).jsonObject
         val payload = buildJsonObject {
@@ -133,7 +135,7 @@ class OpenAiClient(
             putJsonArray("messages") {
                 add(buildJsonObject {
                     put("role", "system")
-                    put("content", buildSystemWithBaseline(baseline, json))
+                    put("content", buildSystemWithBaseline(baseline, json, categoryHints))
                 })
                 priorTurns.forEach { turn ->
                     add(buildJsonObject {

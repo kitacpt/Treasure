@@ -52,11 +52,11 @@ class GridViewModel(
     ) { items, selectedId, allCats ->
         val visible = allCats.filter { !it.hidden }
         val filteredItems = if (selectedId == null) items
-        else items.filter { it.category.id == selectedId }
+        else items.filter { it.category == selectedId }
         GridUiState(
             currentCategoryId = selectedId,
             itemsInCategory = filteredItems,
-            countByCategoryId = items.groupBy { it.category.id }
+            countByCategoryId = items.groupBy { it.category }
                 .mapValues { it.value.size },
             totalCount = items.size,
             visibleCategories = visible,

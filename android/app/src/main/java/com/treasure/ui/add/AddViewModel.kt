@@ -13,6 +13,7 @@ import com.treasure.core.ai.AiTurn
 import com.treasure.core.ai.ItemDraft
 import com.treasure.core.domain.Category
 import com.treasure.core.domain.HeroSpec
+import com.treasure.core.domain.HeroVector
 import com.treasure.core.domain.HistoryEvent
 import com.treasure.core.domain.HistoryKind
 import com.treasure.core.domain.Item
@@ -115,6 +116,7 @@ class AddViewModel(
     application: Application,
     private val repo: ItemRepository,
     private val conversations: AddConversationRepository,
+    private val categoryRepo: com.treasure.core.repo.CategoryRepository,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(AddUiState())
@@ -462,6 +464,10 @@ class AddViewModel(
         // Cycle 0024：baseline = 当前已确认的草稿；AI 在此基础上 propose 下一版
         val baseline = _state.value.confirmedDraft
         viewModelScope.launch {
+            // Cycle 0027：把 manager 里能选的分类喂给 AI（内建 + 未隐藏自定义）
+            val hints = categoryRepo.loadAll()
+                .filter { !it.hidden }
+                .map { com.treasure.core.ai.CategoryHint(it.id, it.nameZh, it.nameEn) }
             val bytes = imageUri?.let { uri ->
                 runCatching {
                     withContext(Dispatchers.IO) {
@@ -476,6 +482,7 @@ class AddViewModel(
                 imageJpegBytes = bytes,
                 priorTurns = priorTurns,
                 baseline = baseline,
+                categoryHints = hints,
             )
                 .onSuccess { draft ->
                     val title = listOf(draft.brand, draft.model)
@@ -649,24 +656,32 @@ class AddViewModel(
         val draft = _state.value.confirmedDraft ?: return
         viewModelScope.launch {
             val now = System.currentTimeMillis()
-            val category = Category.fromId(draft.category ?: Category.TECH.id)
-            val template = CategoryTemplates.forCategory(category)
-            val id = makeId(category, draft.brand, draft.model, now)
+            // Cycle 0027：category 现在是 String id。优先用 draft 里的；空就
+            // 默认 "tech"（最泛的内建分类）。如果命中内建 enum，用对应模板
+            // 拿 palette / heroVector；不命中（自定义分类）就走 GENERIC 套
+            // generic palette。
+            val categoryId = draft.category?.takeIf { it.isNotBlank() } ?: "tech"
+            val builtIn = Category.entries.firstOrNull { it.id == categoryId }
+            val template = builtIn?.let { CategoryTemplates.forCategory(it) }
+            val palette = template?.palette
+                ?: listOf("#0e0e0e", "#a47836", "#e8e2d4", "#5a5a5a")
+            val heroVector = template?.heroVector ?: HeroVector.GENERIC
+            val id = makeId(categoryId, draft.brand, draft.model, now)
             // 还是优先看 AI 填没填 "入手日期" spec；没填就今天。手动改的也会
             // 体现在 spec 列表里，于是这里能拿到。
             val acquired = readPurchaseField(draft, "入手日期").ifBlank { LocalDate.now().toString() }
             val item = Item(
                 id = id,
-                category = category,
+                category = categoryId,
                 brand = draft.brand.trim(),
                 model = draft.model.trim(),
                 nickname = draft.nickname.trim(),
                 acquired = acquired,
                 parted = null,
                 status = status,
-                palette = template.palette,
+                palette = palette,
                 oneLiner = draft.oneLiner.trim(),
-                heroVector = template.heroVector,
+                heroVector = heroVector,
                 specs = draft.specs.filter { it.label.isNotBlank() || it.value.isNotBlank() },
                 history = listOf(
                     HistoryEvent(acquired, HistoryKind.ACQUIRED, "购入", ""),
@@ -696,13 +711,13 @@ class AddViewModel(
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             val acquiredOrToday = acquired.ifBlank { LocalDate.now().toString() }
-            val id = makeId(template.category, brand, model, now)
+            val id = makeId(template.category.id, brand, model, now)
             val specs = template.heroSpecLabels.zip(heroSpecValues) { l, v ->
                 HeroSpec(l, v.trim())
             }
             val item = Item(
                 id = id,
-                category = template.category,
+                category = template.category.id,
                 brand = brand.trim(),
                 model = model.trim(),
                 nickname = nickname.trim(),
@@ -839,7 +854,7 @@ class AddViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as TreasureApp
-                AddViewModel(app, app.repository, app.conversationRepository)
+                AddViewModel(app, app.repository, app.conversationRepository, app.categoryRepository)
             }
         }
     }
@@ -878,10 +893,17 @@ enum class PreviewField(val label: String) {
 }
 
 private fun applyFieldEdit(draft: ItemDraft, field: PreviewField, value: String): ItemDraft = when (field) {
+    // Cycle 0027：Category 现在直接传 String id（dropdown 选项是 CategoryInfo，
+    // 回调 onSelect 传 it.id）。兼容老调用方传中文 / 英文名也匹配一下内建 enum。
     PreviewField.Category -> {
-        val matched = Category.entries.firstOrNull { it.nameZh == value || it.nameEn.equals(value, ignoreCase = true) }
-        if (matched != null) draft.copy(category = matched.id)
-        else draft
+        val matched = Category.entries.firstOrNull {
+            it.id == value || it.nameZh == value || it.nameEn.equals(value, ignoreCase = true)
+        }
+        when {
+            matched != null -> draft.copy(category = matched.id)
+            value.isNotBlank() -> draft.copy(category = value)
+            else -> draft
+        }
     }
     PreviewField.Brand    -> draft.copy(brand = value)
     PreviewField.Model    -> draft.copy(model = value)
@@ -899,12 +921,13 @@ private fun fieldCount(draft: ItemDraft): Int {
     return first + specs
 }
 
-private fun makeId(category: Category, brand: String, model: String, now: Long): String {
+private fun makeId(categoryId: String, brand: String, model: String, now: Long): String {
     val slug = "$brand-$model"
         .lowercase()
         .replace(Regex("[^a-z0-9]+"), "-")
         .trim('-')
         .ifBlank { "item" }
         .take(40)
-    return "${category.id}-$slug-${(now / 1000) % 100000}"
+    // categoryId 已是 url-safe slug（内建 6 个固定 id；自定义是 "custom-uuid"）
+    return "$categoryId-$slug-${(now / 1000) % 100000}"
 }

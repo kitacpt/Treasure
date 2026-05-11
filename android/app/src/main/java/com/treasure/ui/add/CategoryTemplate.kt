@@ -29,6 +29,18 @@ fun heroVectorOptionsFor(category: Category): List<HeroVector> = when (category)
 }
 
 /**
+ * Cycle 0027：按 String id 查可选插画。命中内建走 [heroVectorOptionsFor]，
+ * 未命中（自定义分类）回退到一份"所有插画 + GENERIC 兜底"列表，让用户随
+ * 便挑。
+ */
+fun heroVectorOptionsForId(id: String): List<HeroVector> {
+    val builtIn = Category.entries.firstOrNull { it.id == id }
+    if (builtIn != null) return heroVectorOptionsFor(builtIn)
+    // 自定义分类：全套可选 + GENERIC 在末尾兜底
+    return HeroVector.entries
+}
+
+/**
  * Per-category form scaffolding. Pre-fills the four hero spec labels and
  * a sensible default heroVector / palette so the user only needs to fill
  * values, not figure out what to ask themselves.

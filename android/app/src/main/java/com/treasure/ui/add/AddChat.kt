@@ -875,7 +875,7 @@ private fun DraftCtaCard(
     val previewItem = remember(message.draft, template) {
         com.treasure.core.domain.Item(
             id = "preview",
-            category = template.category,
+            category = template.category.id,
             brand = message.draft.brand,
             model = message.draft.model,
             nickname = "",

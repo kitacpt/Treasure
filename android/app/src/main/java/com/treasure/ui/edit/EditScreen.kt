@@ -81,12 +81,18 @@ fun EditRoute(
     val state by vm.state.collectAsStateWithLifecycle()
     val item = state.item
     val colors = LocalTreasureColors.current
+    // Cycle 0027：从 TreasureApp 拉分类仓库给 InlineDropdown 用
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext
+        as com.treasure.TreasureApp
+    val categories by remember { app.categoryRepository.observeAll() }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     if (!state.loaded || item == null) {
         Box(modifier = Modifier.fillMaxSize().background(colors.paper))
         return
     }
     EditScreen(
         item = item,
+        categories = categories,
         onCancel = onDone,
         onUpdate = vm::update,
         onAddPhoto = vm::addPhoto,
@@ -99,6 +105,7 @@ fun EditRoute(
 @Composable
 fun EditScreen(
     item: Item,
+    categories: List<com.treasure.core.domain.CategoryInfo>,
     onCancel: () -> Unit,
     onUpdate: (Item) -> Unit,
     onAddPhoto: (android.net.Uri) -> Unit,
@@ -198,9 +205,13 @@ fun EditScreen(
             modifier = Modifier.fillMaxSize(),
         ) {
             item {
+                // Cycle 0027：item.category 是 String id，查 CategoryInfo 拿
+                // 显示名；查不到（孤儿 id，比如自定义分类被删了）回退到原 id。
+                val subtitle = categories.firstOrNull { it.id == item.category }?.nameZh
+                    ?: item.category
                 EditPageHeader(
                     title = "Edit",
-                    subtitle = item.category.nameZh,
+                    subtitle = subtitle,
                     leading = { BackArrow(color = colors.ink, onClick = onCancel) },
                     trailing = {
                         Text(
@@ -220,9 +231,9 @@ fun EditScreen(
             item {
                 Spacer(Modifier.height(6.dp))
                 com.treasure.ui.components.HeroAvatarPicker(
-                    category = category,
+                    categoryId = category,
                     palette = item.palette,
-                    options = remember(category) { com.treasure.ui.add.heroVectorOptionsFor(category) },
+                    options = remember(category) { com.treasure.ui.add.heroVectorOptionsForId(category) },
                     selected = heroVector,
                     onSelect = {
                         heroVector = it
@@ -267,11 +278,24 @@ fun EditScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FieldLabel("品类")
                         Spacer(Modifier.width(LABEL_GAP))
+                        // Cycle 0027：选项来自分类仓库（含内建 + 用户自定义）。
+                        // selected 不在列表里（孤儿 id）时给一个伪 CategoryInfo
+                        // 占位，否则 dropdown 显示不出当前值。
+                        val current = categories.firstOrNull { it.id == category }
+                            ?: com.treasure.core.domain.CategoryInfo(
+                                id = category, nameZh = category, nameEn = "",
+                                heroVector = com.treasure.core.domain.HeroVector.GENERIC,
+                                hidden = false, sortOrder = -1, isBuiltIn = false,
+                            )
+                        val visibleOptions = remember(categories, current) {
+                            val list = categories.filter { !it.hidden }
+                            if (list.any { it.id == current.id }) list else list + current
+                        }
                         InlineDropdown(
-                            options = Category.entries,
-                            selected = category,
+                            options = visibleOptions,
+                            selected = current,
                             label = { it.nameZh },
-                            onSelect = { category = it },
+                            onSelect = { category = it.id },
                         )
                     }
                 }

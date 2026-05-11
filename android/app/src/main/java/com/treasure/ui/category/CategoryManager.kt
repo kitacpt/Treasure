@@ -449,7 +449,7 @@ private fun CategoryEditor(
             title = { Text("删除 ${initial.nameZh}？") },
             text = {
                 Text(
-                    text = "这只是删掉这个分类本身。已经收在这个分类下的物品不会被删，但它们会归到一个空 id（要重新指派分类）。",
+                    text = "这只是删掉这个分类本身。原本收在这里的物品不会被删 — 它们会被自动重新归到\"电子产品\"分类下，进图鉴后可手动改类别。",
                     color = colors.sub,
                 )
             },

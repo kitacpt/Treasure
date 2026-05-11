@@ -22,12 +22,16 @@ interface AiClient {
      * @param baseline 上一次用户已"采用"的草稿。Cycle 0024：AI 不从零开
      *  始 propose，而是基于这份基线给出"下一版" — 给 AI 一种"修订"语境，
      *  避免每轮都生成完全不同的字段集。
+     * @param categoryHints Cycle 0027：当前用户可用的分类列表（内建 +
+     *  未隐藏的自定义）。空时退回 SYSTEM_PROMPT 里的内建 6 个。非空时
+     *  会拼到 system prompt 让 AI 选自定义 id（比如"custom-xxx"）。
      */
     suspend fun extractItemDraft(
         text: String,
         imageJpegBytes: ByteArray? = null,
         priorTurns: List<AiTurn> = emptyList(),
         baseline: ItemDraft? = null,
+        categoryHints: List<CategoryHint> = emptyList(),
     ): Result<ItemDraft>
 }
 

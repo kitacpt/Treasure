@@ -16,7 +16,17 @@ import androidx.compose.runtime.Immutable
 @Immutable
 data class Item(
     val id: String,
-    val category: Category,
+    /**
+     * Cycle 0027：分类用 String id 而不是 [Category] enum，让用户自定义
+     * 分类（cycle 0026 加的 category_prefs 表里 built_in=0 的行）也能挂
+     * 物品。Display name / hero vector 等去 [com.treasure.core.repo
+     * .CategoryRepository] 查 — domain 层不再绑死 6 个内建。
+     *
+     * 历史 v8 之前的数据库里 category 列就一直是字符串 id，只是 toDomain
+     * 时被强行 `Category.fromId(...)` 转回 enum；本 cycle 把那层转换拆掉，
+     * domain 看到的就是原值（"badminton" / "tech" / "custom-uuid-..."）。
+     */
+    val category: String,
     val brand: String,
     val model: String,
     val nickname: String,

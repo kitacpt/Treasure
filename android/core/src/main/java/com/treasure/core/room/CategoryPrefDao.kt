@@ -40,4 +40,8 @@ internal interface CategoryPrefDao {
 
     @Query("DELETE FROM category_prefs WHERE id = :id AND built_in = 0")
     suspend fun deleteCustom(id: String)
+
+    /** Cycle 0027：删自定义分类时把里面的物品挪到 tech 兜底，避免出现孤儿 id。 */
+    @Query("UPDATE items SET category = 'tech' WHERE category = :id")
+    suspend fun reassignItemsToTech(id: String)
 }

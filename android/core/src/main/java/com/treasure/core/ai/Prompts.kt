@@ -1,5 +1,12 @@
 package com.treasure.core.ai
 
+/**
+ * Cycle 0027：可选传递给 [AiClient.extractItemDraft] 的"当前可选分类"
+ * 列表 — UI 层从 [com.treasure.core.repo.CategoryRepository] 拉，传给
+ * AI 让它**在自定义分类里也能选**，而不是只能选 6 个内建。
+ */
+data class CategoryHint(val id: String, val nameZh: String, val nameEn: String)
+
 internal const val SYSTEM_PROMPT: String = """You are a museum cataloguer for Treasure, a personal-collection app.
 Given a user's description (and optionally a photo) of an item they own, fill out the structured form by
 calling the fill_item_draft tool. Never reply with prose; always call the tool.
@@ -45,18 +52,34 @@ evidence for.
 internal fun buildSystemWithBaseline(
     baseline: ItemDraft?,
     json: kotlinx.serialization.json.Json,
+    categoryHints: List<CategoryHint> = emptyList(),
 ): String {
-    if (baseline == null) return SYSTEM_PROMPT
-    val baselineJson = json.encodeToString(ItemDraft.serializer(), baseline)
-    return SYSTEM_PROMPT + "\n\n" + """
-        [CURRENT CONFIRMED DRAFT — the user has accepted this as the
-        baseline for this conversation. Your job is to give the *next
-        version* of this draft, not start from scratch. Keep fields you
-        don't have evidence to change. Only add / refine / overwrite the
-        parts the user's new message actually addresses.]
+    val sb = StringBuilder(SYSTEM_PROMPT)
+    if (categoryHints.isNotEmpty()) {
+        // Cycle 0027：把用户当前可用的分类（内建 + 自定义未隐藏）拼到 system
+        // prompt 末尾。覆盖前面写死的 6 个内建列表 — 让 AI 知道还有
+        // "图书"、"乐器" 这种用户自建的也能选。
+        sb.append("\n\n[AVAILABLE CATEGORIES — these are the actual ids the user has set up in this app right now. Pick the `category` value from THIS list (id), not the hardcoded six above.]\n")
+        categoryHints.forEach { (id, zh, en) ->
+            sb.append("  $id  ($zh${if (en.isNotBlank()) " / $en" else ""})\n")
+        }
+    }
+    if (baseline != null) {
+        val baselineJson = json.encodeToString(ItemDraft.serializer(), baseline)
+        sb.append("\n\n")
+        sb.append(
+            """
+            [CURRENT CONFIRMED DRAFT — the user has accepted this as the
+            baseline for this conversation. Your job is to give the *next
+            version* of this draft, not start from scratch. Keep fields you
+            don't have evidence to change. Only add / refine / overwrite the
+            parts the user's new message actually addresses.]
 
-        $baselineJson
-    """.trimIndent()
+            $baselineJson
+            """.trimIndent(),
+        )
+    }
+    return sb.toString()
 }
 
 /**
@@ -71,7 +94,7 @@ internal val EXTRACT_TOOL_PARAMETERS: String = """
   "properties": {
     "category": {
       "type": "string",
-      "enum": ["badminton", "photo", "cars", "tech", "coffee", "wine"]
+      "description": "Category id; pick from the list in the system prompt (built-in or user-added)."
     },
     "brand": { "type": "string" },
     "model": { "type": "string" },

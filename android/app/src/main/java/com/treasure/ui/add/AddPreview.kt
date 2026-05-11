@@ -64,6 +64,7 @@ import com.treasure.ui.edit.LabeledField
 @Composable
 fun AddPreview(
     draft: ItemDraft?,
+    categories: List<com.treasure.core.domain.CategoryInfo>,
     onBack: () -> Unit,
     onUpdateField: (PreviewField, String) -> Unit,
     onUpdateSpec: (Int, HeroSpec) -> Unit,
@@ -90,12 +91,19 @@ fun AddPreview(
         return
     }
 
-    val category = remember(draft.category) {
-        draft.category?.let { id ->
-            Category.entries.firstOrNull { it.id == id }
-        } ?: Category.TECH
+    // Cycle 0027：草稿的 category 是 String id；模板（hero / palette / tagline）
+    // 命中内建走 CategoryTemplates，自定义分类回退到 TECH 模板的视觉占位。
+    val builtIn = remember(draft.category) {
+        draft.category?.let { id -> Category.entries.firstOrNull { it.id == id } }
     }
-    val template = remember(category) { CategoryTemplates.forCategory(category) }
+    val template = remember(builtIn) {
+        CategoryTemplates.forCategory(builtIn ?: Category.TECH)
+    }
+    val categoryDisplay = remember(draft.category, categories) {
+        categories.firstOrNull { it.id == draft.category }?.nameZh
+            ?: builtIn?.nameZh
+            ?: "未选择"
+    }
     var status by remember { mutableStateOf(ItemStatus.OWNED) }
     // Cycle 0025：确认收入加二次确认，避免误触把还没整理好的草稿落到图鉴里
     var confirming by remember { mutableStateOf(false) }
@@ -114,7 +122,7 @@ fun AddPreview(
             item {
                 EditPageHeader(
                     title = "Refine",
-                    subtitle = category.nameZh,
+                    subtitle = categoryDisplay,
                     leading = {
                         Text(
                             text = "取消",
@@ -141,9 +149,9 @@ fun AddPreview(
             }
             item {
                 HeroAvatarPicker(
-                    category = template.category,
+                    categoryId = template.category.id,
                     palette = template.palette,
-                    options = remember(category) { heroVectorOptionsFor(category) },
+                    options = remember(template.category) { heroVectorOptionsFor(template.category) },
                     selected = template.heroVector,
                     onSelect = { /* read-only — 草稿页不让换插画 */ },
                 )
@@ -201,11 +209,25 @@ fun AddPreview(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FieldLabel("品类")
                         Spacer(Modifier.width(LABEL_GAP))
+                        // Cycle 0027：从仓库读分类（内建 + 自定义），过掉隐藏的；
+                        // 选中 id 不在列表里时给伪行让 dropdown 仍能 echo 当前值。
+                        val current = categories.firstOrNull { it.id == draft.category }
+                            ?: com.treasure.core.domain.CategoryInfo(
+                                id = draft.category ?: "tech",
+                                nameZh = categoryDisplay,
+                                nameEn = "",
+                                heroVector = com.treasure.core.domain.HeroVector.GENERIC,
+                                hidden = false, sortOrder = -1, isBuiltIn = false,
+                            )
+                        val visible = remember(categories, current) {
+                            val list = categories.filter { !it.hidden }
+                            if (list.any { it.id == current.id }) list else list + current
+                        }
                         InlineDropdown(
-                            options = Category.entries,
-                            selected = category,
+                            options = visible,
+                            selected = current,
                             label = { it.nameZh },
-                            onSelect = { onUpdateField(PreviewField.Category, it.nameZh) },
+                            onSelect = { onUpdateField(PreviewField.Category, it.id) },
                         )
                     }
                 }
@@ -228,13 +250,13 @@ fun AddPreview(
         val title = listOf(draft.brand, draft.model)
             .filter { it.isNotBlank() }
             .joinToString(" ")
-            .ifBlank { "这件 ${category.nameZh}" }
+            .ifBlank { "这件 ${categoryDisplay}" }
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirming = false },
             title = { androidx.compose.material3.Text("收入 $title？") },
             text = {
                 androidx.compose.material3.Text(
-                    text = "确认后会作为一件 ${category.nameZh} 入图鉴，再改就要从图鉴里点进去编辑。",
+                    text = "确认后会作为一件 ${categoryDisplay} 入图鉴，再改就要从图鉴里点进去编辑。",
                     color = colors.sub,
                 )
             },

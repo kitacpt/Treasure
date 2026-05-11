@@ -3,7 +3,6 @@ package com.treasure.core.room
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-import com.treasure.core.domain.Category
 import com.treasure.core.domain.HeroSpec
 import com.treasure.core.domain.HeroVector
 import com.treasure.core.domain.HistoryEvent
@@ -41,7 +40,8 @@ internal data class ItemEntity(
 ) {
     fun toDomain(): Item = Item(
         id = id,
-        category = Category.fromId(category),
+        // Cycle 0027：直接透传 String id，不再 fromId 转 enum。
+        category = category,
         brand = brand,
         model = model,
         nickname = nickname,
@@ -63,7 +63,7 @@ internal data class ItemEntity(
     companion object {
         fun fromDomain(item: Item): ItemEntity = ItemEntity(
             id = item.id,
-            category = item.category.id,
+            category = item.category,
             brand = item.brand,
             model = item.model,
             nickname = item.nickname,

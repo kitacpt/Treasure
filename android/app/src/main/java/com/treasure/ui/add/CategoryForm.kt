@@ -129,7 +129,7 @@ fun CategoryForm(
 
         Spacer(Modifier.height(8.dp))
         HeroAvatarPicker(
-            category = template.category,
+            categoryId = template.category.id,
             palette = template.palette,
             options = remember(template.category) { heroVectorOptionsFor(template.category) },
             selected = heroVector,

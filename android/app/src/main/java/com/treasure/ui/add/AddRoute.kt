@@ -50,6 +50,9 @@ fun AddRoute(
     // 它当成用户在录入页发了一条文本消息派给 AI；消费后清空。
     val app = androidx.compose.ui.platform.LocalContext.current
         .applicationContext as com.treasure.TreasureApp
+    // Cycle 0027：草稿页的品类 dropdown 要拉仓库里的分类列表
+    val categories by app.categoryRepository.observeAll()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     LaunchedEffect(Unit) {
         app.shareIntake.collect { text ->
             if (!text.isNullOrBlank()) {
@@ -102,6 +105,7 @@ fun AddRoute(
                 AddMode.Preview -> AddPreview(
                     // Cycle 0024：草稿页编辑的是 confirmedDraft（已采用的状态）。
                     draft = state.confirmedDraft,
+                    categories = categories,
                     onBack = { mode = AddMode.Chat },
                     onUpdateField = vm::updateDraftField,
                     onUpdateSpec = vm::updateDraftSpec,

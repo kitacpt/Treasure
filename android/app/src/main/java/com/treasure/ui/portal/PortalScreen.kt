@@ -201,7 +201,7 @@ private fun stubItemFor(info: CategoryInfo): Item {
     val tpl = builtIn?.let { com.treasure.ui.add.CategoryTemplates.forCategory(it) }
     return Item(
         id = "stub-${info.id}",
-        category = builtIn ?: Category.TECH,
+        category = info.id,
         brand = "", model = "", nickname = "", acquired = "", parted = null,
         status = com.treasure.core.domain.ItemStatus.OWNED,
         palette = tpl?.palette ?: listOf("#0e0e0e", "#a47836", "#e8e2d4", "#5a5a5a"),

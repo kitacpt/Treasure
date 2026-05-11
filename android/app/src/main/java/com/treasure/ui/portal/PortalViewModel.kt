@@ -42,10 +42,10 @@ class PortalViewModel(
             totalItems = items.size,
             ownedCount = items.count { it.status == ItemStatus.OWNED },
             visibleCategories = visible,
-            countByCategoryId = items.groupBy { it.category.id }
+            countByCategoryId = items.groupBy { it.category }
                 .mapValues { it.value.size },
             latestByCategoryId = visible.associate { c ->
-                c.id to items.filter { it.category.id == c.id }.maxByOrNull { it.acquired }
+                c.id to items.filter { it.category == c.id }.maxByOrNull { it.acquired }
             },
             latestOverall = items.maxByOrNull { it.acquired },
         )

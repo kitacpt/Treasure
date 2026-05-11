@@ -59,6 +59,9 @@ class RoomCategoryRepository internal constructor(
     }
 
     override suspend fun deleteCustom(id: String) {
+        // Cycle 0027：自定义分类删除前先把它名下的 item 重指给 tech（兜底），
+        // 不让任何 item 落到孤儿 id 上。
+        dao.reassignItemsToTech(id)
         dao.deleteCustom(id)
     }
 
