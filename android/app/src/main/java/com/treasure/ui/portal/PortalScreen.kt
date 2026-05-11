@@ -40,10 +40,16 @@ import com.treasure.ui.components.Ornament
 fun PortalRoute(
     onEnterCategory: (String) -> Unit,
     onOpenItem: (String) -> Unit,
+    onOpenCategoryManager: () -> Unit,
     vm: PortalViewModel = viewModel(factory = PortalViewModel.Factory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
-    PortalScreen(state = state, onEnterCategory = onEnterCategory, onOpenItem = onOpenItem)
+    PortalScreen(
+        state = state,
+        onEnterCategory = onEnterCategory,
+        onOpenItem = onOpenItem,
+        onOpenCategoryManager = onOpenCategoryManager,
+    )
 }
 
 @Composable
@@ -51,6 +57,7 @@ fun PortalScreen(
     state: PortalUiState,
     onEnterCategory: (String) -> Unit,
     onOpenItem: (String) -> Unit,
+    onOpenCategoryManager: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
     Box(
@@ -77,18 +84,86 @@ fun PortalScreen(
                 )
             }
             item { Spacer(Modifier.height(14.dp)) }
-            item { DoorwaysGrid(state, onEnterCategory) }
+            if (state.visibleCategories.isEmpty()) {
+                item { EmptyRoomsHint(onOpenCategoryManager = onOpenCategoryManager) }
+            } else {
+                item { DoorwaysGrid(state, onEnterCategory) }
+            }
             item { Spacer(Modifier.height(28.dp)) }
+            // Cycle 0028：Latest entry 标签改成跟 THE ROOMS 一样的居中 + 两边星星
             item {
                 SectionLabel(
-                    text = "✦ Latest entry",
+                    text = "✦ Latest entry ✦",
                     modifier = Modifier.padding(horizontal = 22.dp),
-                    centered = false,
+                    centered = true,
                 )
             }
             item { Spacer(Modifier.height(12.dp)) }
-            item { state.latestOverall?.let { LatestEntryCard(it, onOpenItem) } }
+            item {
+                val latest = state.latestOverall
+                if (latest != null) {
+                    LatestEntryCard(latest, onOpenItem)
+                } else {
+                    EmptyLatestHint(onOpenCategoryManager = onOpenCategoryManager)
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun EmptyRoomsHint(onOpenCategoryManager: () -> Unit) {
+    val colors = LocalTreasureColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp, vertical = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "所有分类都被隐藏了 — 没有房间可以走进去。",
+            color = colors.sub,
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = "去分类管理 →",
+            color = colors.terra,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier
+                .clickable(onClick = onOpenCategoryManager)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+        )
+    }
+}
+
+@Composable
+private fun EmptyLatestHint(onOpenCategoryManager: () -> Unit) {
+    val colors = LocalTreasureColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "暂时没有可展示的物品",
+            color = colors.sub,
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "去分类管理 →",
+            color = colors.terra,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier
+                .clickable(onClick = onOpenCategoryManager)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        )
     }
 }
 
@@ -175,7 +250,6 @@ private fun DoorwaysGrid(
                         info = c,
                         roman = romans.getOrNull(romanIdx) ?: "",
                         count = state.countByCategoryId[c.id] ?: 0,
-                        latest = state.latestByCategoryId[c.id],
                         modifier = Modifier.weight(1f),
                         onClick = { onEnterCategory(c.id) },
                     )
@@ -219,7 +293,6 @@ private fun DoorwayCard(
     info: CategoryInfo,
     roman: String,
     count: Int,
-    latest: Item?,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -248,7 +321,10 @@ private fun DoorwayCard(
                 .aspectRatio(1.6f),
             contentAlignment = Alignment.Center,
         ) {
-            val displayItem = latest ?: remember(info.id, info.heroVector) { stubItemFor(info) }
+            // Cycle 0028：首页 doorway 总是显示分类自己的"基础图"（CategoryInfo
+            // .heroVector），而不是第一个物品的图片或插画。用户反馈"插画是基础图，
+            // 不是物品的插图"。latest 只用于点击后里面的物品列表。
+            val displayItem = remember(info.id, info.heroVector) { stubItemFor(info) }
             HeroAvatar(item = displayItem, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.height(10.dp))

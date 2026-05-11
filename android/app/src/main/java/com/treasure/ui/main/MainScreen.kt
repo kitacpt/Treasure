@@ -45,6 +45,11 @@ fun MainScreen(onOpenDetail: (String) -> Unit) {
     val pagerState = rememberPagerState(pageCount = { PAGE_COUNT })
     val scope = rememberCoroutineScope()
     var gridCategoryId by rememberSaveable { mutableStateOf(Category.PHOTO.id) }
+    // Cycle 0028：分类管理抽屉提到 MainScreen 顶层 — 既能从 Grid 右上小红点
+    // 打开，也能从 Portal 空态引导打开（"去分类管理 →"）。
+    var categoryManagerOpen by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
 
     // Cycle 0019：监听 shareIntake — 从京东 / 淘宝 / 浏览器分享过来的文字
     // 一旦到，就先切到录入 tab，让 AddRoute 那边的 LaunchedEffect 派给 VM。
@@ -74,6 +79,7 @@ fun MainScreen(onOpenDetail: (String) -> Unit) {
                         scope.launch { pagerState.animateScrollToPage(PAGE_GRID) }
                     },
                     onOpenItem = onOpenDetail,
+                    onOpenCategoryManager = { categoryManagerOpen = true },
                 )
                 PAGE_GRID -> GridRoute(
                     initialCategoryId = gridCategoryId,
@@ -85,6 +91,7 @@ fun MainScreen(onOpenDetail: (String) -> Unit) {
                         scope.launch { pagerState.animateScrollToPage(PAGE_PORTAL) }
                     },
                     onOpenItem = onOpenDetail,
+                    onOpenCategoryManager = { categoryManagerOpen = true },
                 )
                 PAGE_ADD -> AddRoute(
                     onSaved = onOpenDetail,
@@ -106,6 +113,15 @@ fun MainScreen(onOpenDetail: (String) -> Unit) {
                 .navigationBarsPadding()
                 .padding(bottom = 18.dp),
         )
+
+        // Cycle 0028：分类管理抽屉提到 MainScreen 顶层 — 入口可以是 Grid 右上
+        // 小红点（cycle 0026），也可以是 Portal 空态 "去分类管理" 链接（cycle
+        // 0028）。两边都用同一份抽屉、同一个 VM。
+        if (categoryManagerOpen) {
+            com.treasure.ui.category.CategoryManager(
+                onClose = { categoryManagerOpen = false },
+            )
+        }
     }
 }
 

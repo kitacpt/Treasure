@@ -37,17 +37,21 @@ class PortalViewModel(
         categories.observeAll(),
     ) { items, allCats ->
         val visible = allCats.filter { !it.hidden }
+        val visibleIds = visible.map { it.id }.toSet()
+        // Cycle 0028：只看可见分类下的 items。total / latest 都按它算 — 用户
+        // 隐藏一个分类后，那分类里的东西不该再出现在首页统计 / LATEST ENTRY。
+        val visibleItems = items.filter { it.category in visibleIds }
         PortalUiState(
-            items = items,
-            totalItems = items.size,
-            ownedCount = items.count { it.status == ItemStatus.OWNED },
+            items = visibleItems,
+            totalItems = visibleItems.size,
+            ownedCount = visibleItems.count { it.status == ItemStatus.OWNED },
             visibleCategories = visible,
-            countByCategoryId = items.groupBy { it.category }
+            countByCategoryId = visibleItems.groupBy { it.category }
                 .mapValues { it.value.size },
             latestByCategoryId = visible.associate { c ->
-                c.id to items.filter { it.category == c.id }.maxByOrNull { it.acquired }
+                c.id to visibleItems.filter { it.category == c.id }.maxByOrNull { it.acquired }
             },
-            latestOverall = items.maxByOrNull { it.acquired },
+            latestOverall = visibleItems.maxByOrNull { it.acquired },
         )
     }.stateIn(
         scope = viewModelScope,

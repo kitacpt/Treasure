@@ -51,14 +51,19 @@ class GridViewModel(
         categories.observeAll(),
     ) { items, selectedId, allCats ->
         val visible = allCats.filter { !it.hidden }
-        val filteredItems = if (selectedId == null) items
+        val visibleIds = visible.map { it.id }.toSet()
+        // Cycle 0028：把隐藏分类下的物品从所有统计里剔除 — 用户反馈"隐藏分类
+        // 后全部还会算它的数 + 全部 chip 还显示这些物品"。"全部" 只算可见分
+        // 类下的 items。
+        val visibleItems = items.filter { it.category in visibleIds }
+        val filteredItems = if (selectedId == null) visibleItems
         else items.filter { it.category == selectedId }
         GridUiState(
             currentCategoryId = selectedId,
             itemsInCategory = filteredItems,
             countByCategoryId = items.groupBy { it.category }
                 .mapValues { it.value.size },
-            totalCount = items.size,
+            totalCount = visibleItems.size,
             visibleCategories = visible,
         )
     }.stateIn(

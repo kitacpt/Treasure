@@ -57,6 +57,21 @@ class CategoryManagerViewModel(
         onCreated(id)
     }
 
+    /**
+     * Cycle 0028：拖动结束一次性提交。先 reorder（按新顺序写 sort_order），
+     * 再把每行的 hidden 同步成 [hiddenIds] 里的状态。
+     */
+    fun applyReorder(orderedIds: List<String>, hiddenIds: Set<String>) =
+        viewModelScope.launch {
+            repo.reorder(orderedIds)
+            // 只对发生变化的行调用 setHidden，少写几条 SQL
+            val current = repo.loadAll().associate { it.id to it.hidden }
+            orderedIds.forEach { id ->
+                val want = id in hiddenIds
+                if (current[id] != want) repo.setHidden(id, want)
+            }
+        }
+
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

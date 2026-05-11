@@ -1,6 +1,7 @@
 package com.treasure.core.repo
 
 import android.content.Context
+import com.treasure.core.domain.Category
 import com.treasure.core.domain.CategoryInfo
 import com.treasure.core.domain.HeroVector
 import com.treasure.core.room.CategoryPrefEntity
@@ -100,8 +101,15 @@ class RoomCategoryRepository internal constructor(
 }
 
 private fun CategoryPrefEntity.toDomain(): CategoryInfo {
-    val hv = runCatching { HeroVector.valueOf(hero_vector) }
+    val isBuiltIn = built_in != 0
+    // Cycle 0028：内建分类的 heroVector 一律以 Category enum 的 defaultHeroVector
+    // 为准 — 不读 row 里存的（cycle 0026 种子写的是 GENERIC，是个错）。自定义分
+    // 类才用用户存的值。
+    val storedHv = runCatching { HeroVector.valueOf(hero_vector) }
         .getOrDefault(HeroVector.GENERIC)
+    val hv = if (isBuiltIn) {
+        Category.entries.firstOrNull { it.id == id }?.defaultHeroVector ?: storedHv
+    } else storedHv
     return CategoryInfo(
         id = id,
         nameZh = name_zh,

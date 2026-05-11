@@ -4,9 +4,9 @@
 
 ## 当前状态 · 2026-05-09
 
-**cycle 0001 → 0027 全部落地。**
+**cycle 0001 → 0028 全部落地。**
 
-- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.27.0 候选，14 MB，debug 签名）
+- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.28.0 候选，14 MB，debug 签名）
 - GitHub：<https://github.com/kitacpt/Treasure>（main 分支）
 - Schema：v9（cycle 0026 加 category_prefs 表 + 种子 6 内建分类）
 - 测试设备：vivo X200 Pro mini（Android 15）
@@ -142,6 +142,7 @@ treasure/
 | 0025 | 戒指图标 v3：椭圆压扁到 ry/rx=0.36 + 删前侧壁带第二 path + 删 rune，回归"单一 evenOdd 圆环 + 顶亮底暗渐变"清晰 ring 观感 · 草稿页 [确认收入] 加 AlertDialog 二次确认（仿 Settings 重置设置同款样式） | done |
 | 0026 | 图标回退到 cycle 0013 平面版（用户说 3D 几版越来越丑）· **分类管理大刀**：schema v9 加 category_prefs 表 + Migration 种子 6 内建；新 CategoryInfo 领域 + CategoryRepository；Grid 右上小红点 → ModalBottomSheet 管理器（显示中 / 已隐藏 + 分割线，每行编辑 + toggle，标题右侧 + 新增）；编辑子页改名 / 换插画 / 显示状态 / 删除（AlertDialog 二次确认，仅自定义）；Portal doorways + Grid chip 按 visibleCategories 渲染。自定义分类暂时不能装物品（cycle 0027 候选） | done |
 | 0027 | 自定义分类能装物品 — `Item.category` 从 `Category` enum 改 `String`（无 schema migration，列本来就是 TEXT，cycle 0027 只改 domain 强转）· AI prompt 加动态 categoryHints（内建+未隐藏自定义都喂给 AI）· tool schema 去 enum 改 description · `AddPreview` / `EditScreen` 的品类 InlineDropdown 改读 categoryRepo 仓库 · HeroAvatarPicker 接 String id · 新 `heroVectorOptionsForId` 自定义分类回 HeroVector.entries 全集 · 删自定义分类时 `reassignItemsToTech` 兜底，物品不丢 | done |
+| 0028 | 隐藏真生效（Grid/Portal "全部"/total/latest 都过 visibleItems）· Portal LATEST ENTRY 标签居中两边加 ✦ + 全空状态 + "去分类管理 →" 链接 · Portal doorway 永远用 `info.heroVector`（"基础图" 不跟物品） · Manager 重写：删副标题 + 删 [隐藏/显示] pill + 删 [完成]、"编辑"→小红点、左侧三横纹握把长按拖动 + 跨分割线 toggle hidden · Editor 顶部 112dp Avatar + 插画必填 + 内建锁定 · Category enum 加 `defaultHeroVector`，repo override 内建 heroVector（修 cycle 0026 种子的 'GENERIC' bug） | done |
 
 详见 [`openspec/`](openspec/) 各 cycle 的 proposal / spec / notes。
 
@@ -156,9 +157,9 @@ treasure/
 5. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) — 录入页 v2 设计稿
 6. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 7. [`docs/adr/`](docs/adr/) — 6 份决策记录
-8. [`openspec/`](openspec/) — cycle 0001-0027 提案 / 规格 / 笔记
+8. [`openspec/`](openspec/) — cycle 0001-0028 提案 / 规格 / 笔记
 
-## 下一刀候选（cycle 0028）
+## 下一刀候选（cycle 0029）
 
 1. **死代码清理**：CategoryForm.kt / ManualCategoryPicker / AddViewModel.saveManual 自 cycle 0024 起没人调
 2. **撤销采用**：用户采用 AI 提案后想反悔，目前没法回到上一版 confirmedDraft
@@ -196,6 +197,7 @@ treasure/
 
 | 日期 | 摘要 |
 |---|---|
+| 2026-05-11 | cycle 0028：隐藏分类真生效（Grid/Portal 全部 chip + total + latest 全过 visibleItems）· Portal LATEST ENTRY 居中两边加 ✦ + 全空时显示"去分类管理 →"链接 · Portal doorway 永远用 info.heroVector（基础图不跟物品）· Manager 重写：删副标题 / [隐藏 显示] pill / [完成]，编辑入口改小红点，左侧三横纹握把长按拖动 + 跨分割线 toggle hidden 实时生效 · Editor 顶部 112dp Avatar + 插画必填 + 内建锁定 name+插画 · Category enum 加 defaultHeroVector，repo override 内建（修 cycle 0026 种子的 GENERIC bug） |
 | 2026-05-11 | cycle 0027：自定义分类能装物品 — `Item.category` 从 `Category` enum 改 String（无 schema migration，列本来就是 TEXT，cycle 0027 只改 domain 强转）· AI prompt 加动态 categoryHints + tool schema 去 enum 改 description · AddPreview / EditScreen InlineDropdown 改读 categoryRepo · HeroAvatarPicker 接 categoryId: String · heroVectorOptionsForId 自定义分类返回 HeroVector.entries 全集 · 删自定义分类时 reassignItemsToTech 兜底（item 不丢） |
 | 2026-05-11 | cycle 0026：图标回退 cycle 0013 平面版（3D 几版作废，留在 git 历史）· 分类管理：schema v9 加 category_prefs 表（Migration 种子 6 内建）· 新 CategoryInfo / CategoryRepository · Grid 右上小红点 → ModalBottomSheet 管理器（显示中 / 已隐藏 分割线 + 每行 [隐藏/显示] + [编辑 →]，标题右侧 [+ 新增分类]）· 编辑子页：改名 / 换插画（HeroVector 横滚 picker）/ 显示状态 / 删除（AlertDialog 二次确认，仅自定义）· Portal doorways + Grid chip 按 visibleCategories 渲染（隐藏的不出）· Item.category 仍是 enum，自定义分类暂时空容器（cycle 0027 候选） |
 | 2026-05-11 | cycle 0025：戒指图标 v3（外圈压扁到 28×10，删前侧壁第二 path 和 rune，纯垂直顶亮底暗渐变，回到"单一 evenOdd 圆环 + 凸面金属光照"读法）· 草稿页 [确认收入] 加二次确认 AlertDialog（仿 Settings 重置设置） |

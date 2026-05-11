@@ -16,13 +16,13 @@
 4. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
 5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 6. [`docs/adr/`](docs/adr/) —— 6 份决策记录
-7. [`openspec/`](openspec/) —— cycle 0001-0027 的 proposal / spec / notes
+7. [`openspec/`](openspec/) —— cycle 0001-0028 的 proposal / spec / notes
 
 ## 当前状态（2026-05-09）
 
-**cycle 0001 → 0027 全部落地**。14 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
+**cycle 0001 → 0028 全部落地**。14 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
 
-- 6 个内建品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画；**cycle 0026 起在图鉴页右上小红点入口可以管理分类显示/隐藏 + 自定义新分类**（Schema v9 加 `category_prefs` 表，含 Migration 种子）；**cycle 0027 起自定义分类真正能装物品** —`Item.category` 由 enum 改 String id，AI prompt 喂动态 categoryHints，删自定义分类时把物品 rehome 到电子产品兜底
+- 6 个内建品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画；**cycle 0026 起在图鉴页右上小红点入口可以管理分类显示/隐藏 + 自定义新分类**（Schema v9 加 `category_prefs` 表，含 Migration 种子）；**cycle 0027 起自定义分类真正能装物品** —`Item.category` 由 enum 改 String id，AI prompt 喂动态 categoryHints，删自定义分类时把物品 rehome 到电子产品兜底；**cycle 0028 起 Manager 改长按拖动**（同段拖动改排序 / 跨分割线 toggle 隐藏），编辑页顶部插画必填，Portal doorway 永远用分类的"基础图"
 - 主屏 4 tab 横滑切换：门厅 / 图鉴 / 录入 / 设置（HorizontalPager）；Detail / Edit 是 push 上来的覆盖屏
 - Detail 抽屉（历史 / 参数 / 影集）+ 明信片翻面；影集点缩略图 → 全屏 viewer（横滑翻页 / 双指缩放 / 长按图加注 / 长按已有标注改或删，cycle 0012）
 - Detail 右上点 → Edit 单页表单，与手动录入共用 EditPageHeader + SectionDivider；状态 / 品类 / 历史类型用统一的 `InlineDropdown`，不再换行

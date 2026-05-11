@@ -47,6 +47,7 @@ fun GridRoute(
     onCategoryChanged: (String) -> Unit,
     onBack: () -> Unit,
     onOpenItem: (String) -> Unit,
+    onOpenCategoryManager: () -> Unit,
     vm: GridViewModel = viewModel(factory = GridViewModel.factory(initialCategoryId)),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -70,6 +71,7 @@ fun GridRoute(
         },
         onOpenItem = onOpenItem,
         onBack = onBack,
+        onOpenCategoryManager = onOpenCategoryManager,
     )
 }
 
@@ -79,10 +81,9 @@ fun GridScreen(
     onSelectCategory: (String?) -> Unit,
     onOpenItem: (String) -> Unit,
     onBack: () -> Unit,
+    onOpenCategoryManager: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
-    // Cycle 0026：右上小红点 → 打开分类管理抽屉
-    var managerOpen by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -120,14 +121,15 @@ fun GridScreen(
         }
 
         // Cycle 0026：右上小红点入口（分类管理）。统计岛 / Header 之外、状态
-        // 栏之下的右上角，点击打开 ModalBottomSheet 管理器。
+        // 栏之下的右上角。Cycle 0028：抽屉本身提到 MainScreen 顶层管理，这里
+        // 只 fire callback。
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = 28.dp, end = 22.dp)
                 .size(28.dp)
                 .clip(CircleShape)
-                .clickable { managerOpen = true },
+                .clickable(onClick = onOpenCategoryManager),
             contentAlignment = Alignment.Center,
         ) {
             Box(
@@ -137,10 +139,6 @@ fun GridScreen(
                     .background(androidx.compose.ui.graphics.Color(0xFFC5392E)),
             )
         }
-    }
-
-    if (managerOpen) {
-        CategoryManager(onClose = { managerOpen = false })
     }
 }
 
