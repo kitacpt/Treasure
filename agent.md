@@ -2,13 +2,13 @@
 
 每次工作结束更新这一份。新人 / 新一轮 agent 进来先读它。
 
-## 当前状态 · 2026-05-09
+## 当前状态 · 2026-05-11
 
 **cycle 0001 → 0030 全部落地。**
 
 - APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.30.0 候选，14 MB，debug 签名）
-- GitHub：<https://github.com/kitacpt/Treasure>（main 分支）
-- Schema：v10（cycle 0030 加 `hero_photo_path` 列；cycle 0026 加 `category_prefs` 表 + 种子 6 内建分类）
+- GitHub：<https://github.com/kitacpt/Treasure>（main 分支；当前 main 比 origin 多 9 commits 未推）
+- Schema：**v10**（cycle 0030 加 `hero_photo_path` 列；cycle 0026 加 `category_prefs` 表 + 种子 6 内建分类；v5→v10 全程 `addMigrations`，没再 destructive）
 - 测试设备：vivo X200 Pro mini（Android 15）
 
 ## 端到端能跑通的功能
@@ -16,11 +16,42 @@
 ```
 Main (HorizontalPager)    左右滑切换 4 个 tab：门厅 / 图鉴 / 录入 / 设置
                           控制岛点击 = animateScrollToPage；左右滑 = 高亮跟随
+                          BackHandler：非 Portal tab → 回 Portal；Manager 抽屉
+                          打开时优先收抽屉（cycle 0029）
 
-Portal (page 0)           门厅：ornament + 大字 Treasure + 三连计数 + 4 扇门 + Latest entry
-   ↓ 点扇门               (set gridCategory + 滑到 Grid)
+Portal (page 0)           门厅：底部 + 顶部 Ornament + 大字 Treasure (displayLarge)
+                          + 英文 tagline + 三连计数 + ✦ The Rooms ✦ +
+                          可见分类 doorway 网格 + ✦ Latest entry ✦
+                          隐藏分类不出 doorway / 不参与 latestOverall（cycle 0028）
+                          doorway 永远用 CategoryInfo.heroVector 或 heroPhotoPath
+                          (cycle 0030)。所有分类隐藏 / 没物品 → italic 文案 +
+                          "去分类管理 →" 链接（cycle 0028）
+   ↓ 点扇门               (set gridCategoryId + 滑到 Grid)
+
 Grid (page 1)             品类网格：标题 + N ITEMS + 横滚 chips + 2 列卡片
+                          右上工具栏（cycle 0026/0029）：[🔍 搜索] [小红点 ·
+                          分类管理]
+                          chip 点击不再自动置首；只在目标离屏时滚（cycle 0024）
+                          全部 chip 只算 visibleItems；当前 chip 分类被隐藏
+                          时自动 fallback "全部"（cycle 0028/0030）
+   ↓ 点 🔍                push SearchRoute：BackArrow + 圆角搜索框（auto focus
+                          + IME 弹出）+ brand/model/nickname contains 实时过滤
+                          + 命中段 terra/SemiBold 高亮 + 2 列结果（cycle 0029）
+   ↓ 点小红点             弹 ModalBottomSheet CategoryManager（cycle 0026/0028/0030）：
+                          [分类管理] / [+ 新增分类]
+                          单一拖动 list：visible 段 / divider 块 / hidden 段
+                          长按左侧 ≡ 握把 + 拖动 → 同段重排 sort_order；跨过
+                          divider toggle hidden；松手实时提交
+                          每行右侧小红点 → push CategoryEditor 全屏（cycle 0029）
    ↓ 点卡片 / Latest entry → push Detail (NavHost)
+
+CategoryEditor (push)     EditPageHeader + BackArrow（跟物品 Edit 同款）
+                          顶部 112dp 圆 Avatar：内建有默认线描兜底，自定义
+                          必须从相册挑图（cycle 0030：PickVisualMedia + AsyncImage）
+                          中文名 / 英文名 / 显示状态 toggle / 删除（仅自定义，
+                          AlertDialog 二次确认；删后里面 items 自动 rehome 到
+                          电子产品兜底 — cycle 0027）
+
 Detail (push, 只读)       ←  · (右上 dot 进编辑)
                           Hero (点翻面，有/无照片不同) + 4 行 hero specs
                           底部 40dp 拉手 → 上滑 78% 抽屉
@@ -28,41 +59,58 @@ Detail (push, 只读)       ←  · (右上 dot 进编辑)
                               影集点缩略图 → 全屏 viewer (横滑/缩放/长按加注)
                           ↓ 点右上 ·
 Edit (push)               ← 单页表单
-                          基础 / 时间 / 标签 (品类用 InlineDropdown) /
-                          插画 / 参数(拖动选前 4 hero) / 历史 (类型用
-                          InlineDropdown) / 实拍 (📷 拍照 + + 多选)  /
-                          DANGER ZONE 删除
+                          基础 / 标签 (品类 InlineDropdown 拉仓库 visibleCategories
+                          + 当前 id 不在仓库列表时给伪 CategoryInfo 占位)
+                          / 插画 / 参数(拖动选前 4 hero) / 历史 (类型 InlineDropdown)
+                          / 实拍 (📷 拍照 + + 多选) / DANGER ZONE 删除
 
 Add (page 2, RECORD)      chat-first；对话已落 Room (add_conversations / add_messages)
-                          Header: Cormorant `Record` + mono `RECORD` caption
-                                  右侧 🕐 (历史抽屉) ⊕ (新对话) [手动]
-                          未配置 AI 时顶部出一行 banner（点 → 滑到 Settings）
-                          Composer 浮在控制岛上方：📷 / 文本 / 🎙 / →
-                              📷 → 系统 picker（先请 READ_MEDIA_IMAGES）
-                              🎙 → SpeechRecognizer 真转写（先请 RECORD_AUDIO）
-                              → → AiClient.extractItemDraft(text, image, priorTurns)
-                                   priorTurns = 当前对话最后 20 条文字消息
-                          AI 出草稿 → DraftCta 卡片（多轮可继续 refine）
-                              点 → Preview 屏 9 字段 + confidence dots → 确认
-                              确认 → 写 Room → 跳新 Detail
-                          🕐 → 历史抽屉列出最近 20 段对话；点旧的就 reload
-                          点 [手动] → 4 品类选择弹层 → CategoryForm
-                              顶部 124dp 大插画 + 56dp 横滚选项（按品类过滤）
-                              下面 italic tagline + 各字段 hint
-                              EditPageHeader (cancel / 大字 / 保存)
+                          Header: Cormorant `Record` + 副标 = 当前对话标题
+                                  右侧 🕐 (历史抽屉) [手动]
+                          Cycle 0022 起：进入默认续上次对话，不再每次新建空壳
+                          未配置 AI 时顶部出 banner（点 → 滑到 Settings）
+                          Composer 浮在控制岛上方：📷 / 文本 / →
+                              📷 → 系统 picker（先请 READ_MEDIA_IMAGES）→ 上
+                                  传图自动喂 AI；点聊天里的图 → 全屏 viewer
+                                  (cycle 0023)
+                              → → AiClient.extractItemDraft(text, image,
+                                   priorTurns, baseline = confirmedDraft,
+                                   categoryHints = visibleCategories) — cycle
+                                   0024/0027
+                              发 URL → PageFetcher 拉页面（mobile UA + HTML
+                                  strip + meta charset 探测）+ SystemNote 显
+                                  示 "正在抓取" / "✓ 已抓取" / "⚠ 防爬挡住"
+                                  (cycle 0020/0021/0022)
+                          ✦ 会话 = 草稿（cycle 0024）：
+                              AI 跑出 DraftCta(status=Pending)，右下角
+                              [采用]/[不要] 按钮。每段对话只有一个 pending；
+                              新提案到来时把旧的标 Rejected
+                              [采用] → confirmedDraft = proposedDraft；
+                                       append 一行 ✓ 已采用 · N 字段（落 Room）
+                              [不要] → proposedDraft 清掉
+                              点 [手动] → push 进 Refine 页（之前是 CategoryForm
+                                       弹层，cycle 0024 退役）
+                                       Refine 页改的是 confirmedDraft
+                              Refine 页 [确认收入] → AlertDialog 二次确认
+                                       (cycle 0025) → 写 Room → 新会话
+                          🕐 → 历史抽屉（ModalBottomSheet，cycle 0018）列出
+                                最近 20 段对话；点旧的就 reload
 
-Settings (page 3)         AI 摘要卡（provider + 已配置/未配置 pill +
-                          Model / Base URL / 掩码 Key + “调整 →”）
+Settings (page 3)         AI 摘要卡（provider + 已配置/未连通/已连通 三态 pill
+                          + Model 行 + 🖼 多模态 / 纯文本 pill +
+                          Base URL + 掩码 Key + "调整 →"，cycle 0018/0022/0023）
                           点卡片 → 底部抽屉编辑：
                               Provider 下拉（Anthropic / OpenAI / Kimi
                               · Moonshot / DeepSeek / 通义千问 / 智谱 GLM
                               / Xiaomi MiLM / 自定义）
-                              Base URL · Model · API Key · 保存 · 测试
-                          DANGER ZONE 清除
+                              Base URL · Model · API Key · 高阶 (temperature /
+                              thinking) · 保存 · 测试
+                          DANGER ZONE 重置设置（AlertDialog 二次确认）
                           EncryptedSharedPreferences 存
 ```
 
-控制岛（4 颗胶囊：门厅 / 图鉴 / 录入 / 设置）浮于 pager 底部，Detail / Edit 屏因为是 push 路由所以自然不可见。
+控制岛（4 颗胶囊：门厅 / 图鉴 / 录入 / 设置）浮于 pager 底部，Detail / Edit /
+Search / CategoryEditor 屏因为是 push 路由所以自然不可见。
 
 ## 视觉系统
 
@@ -70,28 +118,64 @@ Settings (page 3)         AI 摘要卡（provider + 已配置/未配置 pill +
 - 颜色 token：paper / ink / terra / card / sub / line（浅 + 深双套）
 - edge-to-edge + statusBarsPadding；控制岛 navigationBarsPadding
 - 滑动转场：300ms `slideIntoContainer(Start/End)`
-- 11 个博物馆线描插画（Racket / Camera / Lens / Tripod / Shoes / Car / Laptop / Earbuds / Tablet / Watch / Generic）
-- App icon：纸面背景 + 重笔粗黑环 + 顶/底 paper-color rune + terra 中心 dot 三粒（cycle 0008）
+- 16 个博物馆线描插画（Racket / Shoes / Camera (DSLR + 旁轴共享) / Lens /
+  Tripod / Car (轿车 + SUV 共享) / Laptop / Tablet (Kindle 也共享) /
+  Earbuds / Watch / EspressoMachine / CoffeeGrinder / CoffeeBean /
+  WineBottle / CocktailGlass / Generic）
+- App icon：cycle 0026 回到 cycle 0013 平面版（外圈 23 内圈 17.5 圆环 +
+  forged-gold gradient + 顶/底 paper-color rune + 两侧 tick + 内边 bevel 高光
+  暗弧）。3D 几个版本（cycle 0024/0025）作废留 git 历史
 
 ## 数据 / AI
 
-- Room **v7**（cycle 0010 起 `exportSchema = true`，schema JSON 在 `core/schemas/`）
-- 三张表：
-    - `items` — 单表 + JSON 列（specs / history / photos / **callouts**）；callouts 是 `Map<path, List<PhotoCallout(x, y, text)>>`
+- Room **v10**（cycle 0010 起 `exportSchema = true`，schema JSON 在 `core/schemas/`）
+- 四张表：
+    - `items` — 单表 + JSON 列（specs / history / photos / **callouts**）；
+      `Item.category` 是 String id（cycle 0027 起，自定义分类也能装；老存储列
+      本来就 TEXT，不需要 migration）
     - `add_conversations` — 录入页对话主表（id / title / 时间戳）
-    - `add_messages` — 对话单条（role + payload，按角色取舍字段）
+    - `add_messages` — 对话单条（role + payload，按角色取舍字段）。Cycle 0024
+      起 role 加了 `draft_confirmed`，DraftCta 的 status 复用 text 列存
+    - `category_prefs` — cycle 0026 起的分类元数据：内建（built_in=1）+ 自定义
+      (built_in=0) 同一张表，含 hidden / sort_order / hero_vector / hero_photo_path
+      / name_zh / name_en
 - `Item.specs: List<HeroSpec>` 单列表；前 4 项为 hero（计算属性 `heroSpecs` / `tailSpecs`）
-- 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`；相机直拍中转 `filesDir/captures/<uuid>.jpg`（FileProvider 暴露给系统相机）
-- 8 条种子物品（移植自 prototype/data.jsx）首启写入
-- **Migration 制度（[ADR-0006](docs/adr/0006-schema-migrations.md)）**：从 cycle 0010 起每次 schema 改动必须 bump version + 写 Migration + 提交 schema JSON。`Migrations.ALL` 现在装 `MIGRATION_5_6`（加 conversation 两表）+ `MIGRATION_6_7`（items 加 callouts_json）
+- 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`；相机直拍中转 `filesDir/captures/<uuid>.jpg`（FileProvider）。
+  Cycle 0030：分类代表图存 `filesDir/category-photos/<categoryId|"tmp">/<uuid>.jpg`
+- 8 条种子物品 + 6 条 category_prefs 种子（Migration_8_9 直接写）首启 / 升级时落地
+- **Migration 制度（[ADR-0006](docs/adr/0006-schema-migrations.md)）**：从 cycle
+  0010 起每次 schema 改动必须 bump version + 写 Migration + 提交 schema JSON。
+  `Migrations.ALL` 当前：5_6（conversation 两表）/ 6_7（items+callouts_json）/
+  7_8（items+avatar_photo_path）/ 8_9（category_prefs 表 + 种子）/ 9_10
+  (category_prefs+hero_photo_path)
 
 AI:
 - `core/ai/AiClient` interface + `AnthropicClient` / `OpenAiClient`（OpenAI client 同时覆盖兼容端点）
-- `extractItemDraft(text, imageJpegBytes?, priorTurns: List<AiTurn>)` — 多轮：把当前对话最后 20 条文字消息按 user/assistant 顺序拼到 prior
-- 强制 tool-use 结构化输出（fill_item_draft）
+- `extractItemDraft(text, imageJpegBytes?, priorTurns, baseline, categoryHints)`：
+  - `priorTurns`：当前对话最后 20 条文字消息（cycle 0010 起）
+  - `baseline`：上一版已采用的草稿，AI 在它基础上 propose 下一版（cycle 0024）
+  - `categoryHints`：当前可用分类列表（内建 + 未隐藏自定义），让 AI 选对的
+    category id（cycle 0027 起，包括 "custom-uuid"）
+- 强制 tool-use 结构化输出（fill_item_draft），cycle 0027 把 category.enum 移
+  到 description 自由文本，由 categoryHints 在 system prompt 末尾约束
+- 思考模型自动嗅探（kimi-k* / o1-3* / 名字含 thinking）→ tool_choice 自动 auto
+  + readTimeout/callTimeout 360s（cycle 0015/0018）
 - vision：image base64 块；语言：zh-CN
 - 用户 BYO key，存 `EncryptedSharedPreferences`
 - AI **设备直连 provider**，不走代理（[ADR-0004](docs/adr/0004-byo-ai-key.md)）
+
+## 分类系统（cycle 0026-0030）
+
+- `Category` enum 留作 6 个内建模板的 map key（CategoryTemplates 还按 enum
+  查 hero spec labels / palette / tagline / defaultHeroVector）— **不再决定**
+  Item.category 的合法值
+- 真相在 `core/repo/CategoryRepository`（Room 后端），返回 `CategoryInfo(id,
+  nameZh, nameEn, heroVector, heroPhotoPath, hidden, sortOrder, isBuiltIn)`
+- 内建 6 个的 hero_vector 在 toDomain 时被 override 成 `Category.defaultHeroVector`
+  （cycle 0028 修了 cycle 0026 种子写 GENERIC 的 bug）
+- Portal doorway / Grid chip / AddPreview / EditScreen 的品类下拉、AI prompt
+  的 categoryHints — 都读这个仓库
+- 删自定义分类：`reassignItemsToTech` 兜底，items 不丢（cycle 0027）
 
 ## 工程布局
 
@@ -99,14 +183,55 @@ AI:
 treasure/
 ├── android/                   Kotlin + Jetpack Compose（Gradle 8.10.2 / AGP 8.7.2 / Kotlin 2.0.21）
 │   ├── app/                   :app — 屏幕 / VM / 主题 / 插画 / voice / data
-│   └── core/                  :core — 域模型 / Room / Repo / Seed / AI clients
+│   │   src/main/java/com/treasure/
+│   │   ├── ui/
+│   │   │   ├── nav/           Routes + TreasureNavHost (Main / Detail / Edit /
+│   │   │   │                   Search / CategoryNew / CategoryEdit)
+│   │   │   ├── main/          MainScreen + ControlIsland + BackHandler
+│   │   │   ├── portal/        PortalScreen + PortalViewModel
+│   │   │   ├── grid/          GridScreen + GridViewModel + 右上工具栏 + 搜索 icon
+│   │   │   ├── detail/        DetailScreen + DetailViewModel
+│   │   │   ├── edit/          EditScreen + (用 DetailViewModel 复用)
+│   │   │   ├── add/           AddRoute + AddChat + AddPreview + AddViewModel
+│   │   │   │                   + CategoryTemplate + CategoryForm (cycle 0024
+│   │   │   │                   起退役但文件还在)
+│   │   │   ├── settings/      SettingsRoute + SettingsViewModel
+│   │   │   ├── search/        SearchRoute (cycle 0029 新加)
+│   │   │   ├── category/      CategoryManager (cycle 0026 起的抽屉) +
+│   │   │   │                   CategoryEditorRoute (cycle 0029 拆出) +
+│   │   │   │                   CategoryManagerViewModel
+│   │   │   ├── photo/         FullscreenPhotoViewer
+│   │   │   └── components/    EditPageHeader / BackArrow / ControlIsland /
+│   │   │                       HeroAvatar / HeroAvatarPicker / InlineDropdown
+│   │   │                       / Ornament / SectionDivider
+│   │   ├── illust/            16 个 Compose Canvas 博物馆插画
+│   │   ├── voice/             SpeechRecognizer 封装
+│   │   ├── data/              SettingsStore + AiProviderPreset
+│   │   ├── theme/             Theme / Color / Type
+│   │   ├── TreasureApp.kt     Application：ServiceLocator 装 repo + 仓库
+│   │   └── MainActivity.kt    + Share intent consume
+│   └── core/                  :core — 域模型 / Room / Repo / Seed / AI / Web
+│       src/main/java/com/treasure/core/
+│       ├── domain/            Item / Category / CategoryInfo / HeroVector /
+│       │                       HeroSpec / HistoryEvent / ItemStatus / PhotoCallout
+│       ├── ai/                AiClient + AnthropicClient + OpenAiClient +
+│       │                       Prompts (CategoryHint / SYSTEM_PROMPT +
+│       │                       buildSystemWithBaseline) + ItemDraft (data class)
+│       ├── repo/              ItemRepository + AddConversationRepository +
+│       │                       CategoryRepository
+│       ├── room/              TreasureDatabase v10 + 4 entities + 3 daos +
+│       │                       Migrations.ALL（5 个 migration）
+│       ├── seed/              SeedItems：8 条种子物品
+│       └── web/               PageFetcher（cycle 0020-0022）
+│   schemas/com.treasure.core.room.TreasureDatabase/  5–10.json（exportSchema）
 ├── prototype/                 Claude Design 原型（活的视觉规格）
 │   ├── project/               原版 8 画板（cycle 0001–0006）
 │   └── add-page-v2/           录入页 v2 设计稿（cycle 0007，HANDOFF.md 解释差异）
-├── docs/                      长期指引（product / architecture / visual-language / dev-loop / 5 ADRs）
-├── openspec/                  变更周期（0001–0008，每个 1 文件夹 3 文档）
+├── docs/                      长期指引（product / architecture / visual-language / dev-loop / 6 ADRs）
+├── openspec/                  变更周期（0001–0030，每个 1 文件夹 3 文档）
 ├── scripts/                   bootstrap.sh / prototype-serve.sh / serve-apk.sh
-├── backend/                   FastAPI 占位（cycle 0011+ 才接通）
+├── backend/                   FastAPI 占位（始终是空脚手架，本地没起，
+│                              ADR-0003 留的同步接口未真接）
 ├── README.md
 └── agent.md                   这一份
 ```
@@ -182,18 +307,22 @@ treasure/
 - ADR 是钉死的决策。要推翻某个 ADR，写新 ADR 来 supersede 它
 - 一个 cycle 一个文件夹（`openspec/NNNN-*/`），proposal → spec → notes 三件套
 - 任何 "日期" 在文档里写绝对日期（YYYY-MM-DD），不写 "上周"
-- ⚠️ **Schema 不再 destructive**（cycle 0010 / [ADR-0006](docs/adr/0006-schema-migrations.md)）：每改 entity / column 必须 bump `@Database(version)` + 在 `core/room/Migrations.kt` 追加新 Migration + 让 KSP 写出新 schema JSON 一并提交
-- 控制岛在 Detail / Edit 屏自然隐藏（这两个是 NavHost push 路由，不在 pager 里）
-- 主屏是 `ui/main/MainScreen` 的 HorizontalPager；要在 tab 间跳，set pagerState 而不是 nav.navigate
+- ⚠️ **Schema 不再 destructive**（cycle 0010 起，[ADR-0006](docs/adr/0006-schema-migrations.md)）：每改 entity / column 必须 bump `@Database(version)` + 在 `core/room/Migrations.kt` 追加新 Migration + 让 KSP 写出新 schema JSON 一并提交。**绝对禁止** `fallbackToDestructiveMigration()`（dev 环境降级用 `fallbackToDestructiveMigrationOnDowngrade` 是 OK 的）
+- 控制岛在 Detail / Edit / Search / CategoryEditor 屏自然隐藏（这些是 NavHost push 路由，不在 pager 里）
+- 主屏是 `ui/main/MainScreen` 的 HorizontalPager；要在 tab 间跳，set pagerState 而不是 nav.navigate；要 push 详情用 nav.navigate
 - Pager 的状态由 `rememberPagerState` + `rememberSaveable gridCategoryId` 维护；从 Detail / Edit 返回会自然落回原 tab
 - 字体 / SVG / 历史事件等数据移植参考 `prototype/project/{vectors,data}.jsx`
-- 录入页的具体交互（chat / preview / voice / history）参考 `prototype/add-page-v2/`
+- 录入页的具体交互参考 `prototype/add-page-v2/` 但**对话 = 草稿** 这套（confirmed / proposed / 采用 / 不要）是 cycle 0024 新增，原型里没有
 - 录入页对话已落 Room — 千万别把 `add_conversations` / `add_messages` 表当 stub 删掉
-- AiClient 现在接 `priorTurns: List<AiTurn>`，调用方需要构造历史；UserPhoto 的图不进 prior，仅当条 image block
-- 真 STT 在国行 ROM（华为 / vivo 部分机型）不可用 — 已做 `onUnavailable` fallback，不要去掉。云端 STT 兜底是 cycle 0011 的活
+- AiClient 当前签名是 `extractItemDraft(text, imageJpegBytes?, priorTurns, baseline, categoryHints)`；UserPhoto 的图不进 prior，仅当条 image block。baseline = confirmedDraft，会自动拼到 system prompt 让 AI 做增量修订
+- 真 STT 在国行 ROM（华为 / vivo 部分机型）不可用 — 已做 `onUnavailable` fallback，不要去掉。麦克风按钮 cycle 0017 暂去掉了；云端 STT 仍是候选
 - 拍照走 FileProvider + `${applicationId}.fileprovider`；如果改 package name 记得同步 manifest
 - AI key 存 EncryptedSharedPreferences；切勿改成 PlainSharedPreferences
-- Xiaomi MiLM preset 的 base URL 是占位，cycle 0011 要么校准要么删除该 preset
+- **Item.category 是 String id 不是 Category enum**（cycle 0027 起）；要查显示名 / heroVector 等去 CategoryRepository，不要假设它在 6 个内建里
+- **Category enum 仍保留**作为 CategoryTemplates 的 map key（hero spec labels / palette / tagline / defaultHeroVector）— 但 enum 不再决定 Item.category 的合法值
+- 分类管理抽屉（CategoryManager）和分类编辑（CategoryEditorRoute）拆开：抽屉是 ModalBottomSheet 在 MainScreen 顶层 mount；编辑是 NavHost push 全屏路由。改了一边不要忘了对应 API 调整另一边
+- Manager 拖动是 cycle 0030 重写的：divider 当 row-height 块占独立 visualSlot，所有 drag 数学都在 `combinedToVisual` / `computeShift` / `commitDrag` 三个纯函数里。改其中之一前先看 cycle 0030 notes.md
+- Xiaomi MiLM preset 的 base URL 还是占位（`https://api.xiaomi.com/v1`），用户提示要填正确才能 test，列为 cycle 0031+ 候选
 
 ## 历史
 

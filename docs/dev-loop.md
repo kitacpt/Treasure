@@ -48,7 +48,7 @@ cd android
 ./gradlew :app:assembleDebug
 ```
 
-输出在 `android/app/build/outputs/apk/debug/app-debug.apk`（cycle 0008 ~13 MB，debug 签名 → 直接装手机）。
+输出在 `android/app/build/outputs/apk/debug/app-debug.apk`（cycle 0030 ~14 MB，debug 签名 → 直接装手机）。
 
 第一次构建会 download AGP / Kotlin / Compose / Room / KSP 等依赖（~5 min）；后续增量构建 ~10–30s。
 
@@ -161,29 +161,40 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 **录入路径**
 
-10. 控制岛 ⊕ 录入 → 看到 **RECORD** header（无 New entry 副标题）
-11. 点 📷 → （首次）弹 READ_MEDIA_IMAGES 权限 → 选一张图 → AI 解析 → 草稿气泡
-12. 点 🎙 → （首次）弹 RECORD_AUDIO 权限 → 同意 → 蒙层 + 波形 + 实时 partial 转写 → tap → 真转写气泡 → AI 再解析
-13. 拒绝麦克风 → 蒙层立即 dismiss，不报错；ROM 没识别服务 → 蒙层秒退 + 占位语音消息
-14. 点草稿气泡 → Preview 9 字段 + confidence dots → 确认 → 跳新 Detail
-15. composer 多行输入 4 行 → 不溢出，不压控制岛胶囊
-16. 头部 🕐 → 历史 dropdown：圆角 + 软阴影 + ✦ ornament + 当前对话右侧 terra dot
+10. 控制岛 ⊕ 录入 → 看到 **RECORD** header（副标 = 当前对话标题，cycle 0018 起；进入默认续上次对话，cycle 0022 起）
+11. 点 📷 → （首次）弹 READ_MEDIA_IMAGES 权限 → 选一张图 → AI 解析 → DraftCta 卡片（Pending 状态）
+12. （cycle 0017 暂去掉了麦克风按钮，云端 STT 兜底是 cycle 0031 候选）
+13. DraftCta 卡片：[采用]/[不要]（cycle 0024）；[采用] → 卡片置灰 + 下方出现 "✓ 已采用 · N 字段" 行 + confirmedDraft 升格
+14. 继续聊："颜色是红色" → AI 在 confirmedDraft 上叠加，新 DraftCta 出现，旧的标 Rejected
+15. 点 [手动] → push Refine 页（confirmedDraft 编辑器）→ 改字段 → [确认收入] → AlertDialog 二次确认 → 写 Room → 新对话
+16. composer 多行输入 4 行 → 不溢出，不压控制岛胶囊
+17. 头部 🕐 → 历史 ModalBottomSheet（cycle 0018）：列最近 20 段，点旧的 reload
+18. 发 URL（如京东商品链接）→ 聊天里 SystemNote "正在抓取 jd.com…" → "✓ 已抓取 jd.com · 1.2K 字" / "⚠ 防爬挡住"
+
+**搜索 + 分类管理（cycle 0026-0030）**
+
+19. 图鉴页右上 [🔍][小红点] 两个图标；点 🔍 → SearchRoute → 输入"yon" → 立刻 2 列结果，标题里 "yon" terra 加粗
+20. 点小红点 → ModalBottomSheet Manager：6 内建分类显示中 + divider + 已隐藏（空）
+21. 长按某行 ≡ 拖动跨过 divider → 实时进入"已隐藏"段 → 回 Portal / Grid 它消失
+22. 点行右侧小红点 → push CategoryEditor 全屏：内建有插画兜底；自定义必须从相册挑图才能 [新建]
+23. 自定义"图书"创建后 → 录入页对 AI 说"《时间简史》" → AI 应自动选 category = custom-xxx → DraftCta → [采用] → [确认收入] → 物品落到 "图书" 分类
 
 **设置 + AI**
 
-17. 控制岛 ⊕ 设置 → 切 Provider chips（Anthropic / OpenAI / Custom）→ 填 Model + Base URL（按 provider 显隐）+ API Key → 保存 → 测试连接（应返回 OK）
-18. 清除 key → 录入页再点 📷 → 草稿不出现，AI 提示未配置
+24. 控制岛 ⊕ 设置 → 切 Provider chips（Anthropic / OpenAI / Custom 等 8 个 preset）→ 填 Model + Base URL（按 provider 显隐）+ API Key → 摘要卡显示 🖼 多模态 / 纯文本 pill（按 model 名启发式）→ 保存 → 测试连接（应返回 OK）
+25. 清除 key → 录入页再点 📷 → 草稿不出现，AI 提示未配置
 
-**持久化 / 图标**
+**持久化 / 图标 / Schema**
 
-19. **杀进程**（`adb shell am force-stop com.treasure`）重启 → 数据还在
-20. 桌面查看图标：纸面 + 重笔黑环 + 顶/底 paper-color rune + terra 中心 dot
-21. `adb shell pm clear com.treasure` 重启 → 种子重新写入（v5 schema，destructive）
+26. **杀进程**（`adb shell am force-stop com.treasure`）重启 → 数据还在
+27. 桌面查看图标：cycle 0026 回到的平面圆环 + gold gradient + 顶/底 paper-color rune + 两侧 tick
+28. `adb shell pm clear com.treasure` 重启 → 种子重新写入（v10 schema 直接 create，含 category_prefs 表 6 内建种子）
+29. （可选）装 cycle 0030 之前的旧 APK 跑一次再覆盖装新版 → migration 5_6 / 6_7 / 7_8 / 8_9 / 9_10 链按需触发，数据不丢
 
 ## 常见踩坑
 
 - **build 卡 dl.google.com**：偶尔某个 .aar TLS 抖一下挂掉。删那个目录重试：`rm -rf ~/.gradle/caches/modules-2/files-2.1/<group>/<artifact>/<version>; ./gradlew :app:assembleDebug`
-- **schema 升级丢数据**：⚠️ cycle 0001-0008 全程 `fallbackToDestructiveMigration()`，已 destructive 8 次（v1 → v5）。**cycle 0009 必须切真 migration**，否则用户的录入物品 / hero specs / 照片都会丢。
+- **schema 升级丢数据**：cycle 0010 起切了真 migration（[ADR-0006](adr/0006-schema-migrations.md)），当前 v10，链路完整：5→6→7→8→9→10。`fallbackToDestructiveMigrationOnDowngrade()` 还开着，**只**在用户从更高版本降回老 APK 时才会清库（dev 环境 OK，线上几乎不会发生）。每加 schema 改动必 bump + 写 Migration + 提交 schemas/N.json。
 - **vivo 装非商店 APK 弹安全检测**：每装一次都会弹（"应用未经过 vivo 安全检测"），点继续安装。习惯就好。
 - **覆盖装签名冲突**：debug 签名固定（Android Debug keystore），同包名同签名直接覆盖；除非你换了 keystore（不会发生）
 - **真 STT 在国行 ROM 不可用**：vivo / 华为部分机型没装 Google App，`SpeechRecognizer.isRecognitionAvailable` 返回 false → 走 `onUnavailable` 回退（占位语音消息）。这是预期行为，不要拆掉 fallback。

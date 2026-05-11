@@ -18,12 +18,14 @@
 6. [`docs/adr/`](docs/adr/) —— 6 份决策记录
 7. [`openspec/`](openspec/) —— cycle 0001-0030 的 proposal / spec / notes
 
-## 当前状态（2026-05-09）
+## 当前状态（2026-05-11）
 
 **cycle 0001 → 0030 全部落地**。14 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
 
-- 6 个内建品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画；**cycle 0026 起在图鉴页右上小红点入口可以管理分类显示/隐藏 + 自定义新分类**（Schema v9 加 `category_prefs` 表，含 Migration 种子）；**cycle 0027 起自定义分类真正能装物品** —`Item.category` 由 enum 改 String id，AI prompt 喂动态 categoryHints，删自定义分类时把物品 rehome 到电子产品兜底；**cycle 0028 起 Manager 改长按拖动**（同段拖动改排序 / 跨分割线 toggle 隐藏），编辑页顶部插画必填，Portal doorway 永远用分类的"基础图"
-- 主屏 4 tab 横滑切换：门厅 / 图鉴 / 录入 / 设置（HorizontalPager）；Detail / Edit 是 push 上来的覆盖屏
+- 6 个内建品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画；**cycle 0026 起在图鉴页右上小红点入口可以管理分类显示/隐藏 + 自定义新分类**（Schema v9 加 `category_prefs` 表，含 Migration 种子）；**cycle 0027 起自定义分类真正能装物品** —`Item.category` 由 enum 改 String id，AI prompt 喂动态 categoryHints，删自定义分类时把物品 rehome 到电子产品兜底；**cycle 0028 起 Manager 改长按拖动**（同段拖动改排序 / 跨分割线 toggle 隐藏），编辑页顶部插画必填，Portal doorway 永远用分类的"基础图"；**cycle 0029 起分类编辑器拆全屏路由**（跟物品 Edit 同款 BackArrow / EditPageHeader）；**cycle 0030 起分类代表图改从相册挑**（PickVisualMedia，Schema v10 加 `hero_photo_path` 列）— 自定义新建必须挑图，内建可选覆盖默认线描；Manager 拖动算法 divider 当 row-height 块（不再"飞到不知道哪儿"）
+- 主屏 4 tab 横滑切换：门厅 / 图鉴 / 录入 / 设置（HorizontalPager）；Detail / Edit / Search / CategoryEditor 都是 push 上来的覆盖屏（NavHost）
+- **cycle 0029** 起加 BackHandler：非 Portal tab 按返回回 Portal；Manager 抽屉打开先收抽屉
+- **cycle 0029** 起 Grid 右上加搜索 icon，push SearchRoute（auto-focus 搜索框 + brand/model/nickname 实时过滤 + 命中段 terra 高亮 + 2 列 grid 结果）
 - Detail 抽屉（历史 / 参数 / 影集）+ 明信片翻面；影集点缩略图 → 全屏 viewer（横滑翻页 / 双指缩放 / 长按图加注 / 长按已有标注改或删，cycle 0012）
 - Detail 右上点 → Edit 单页表单，与手动录入共用 EditPageHeader + SectionDivider；状态 / 品类 / 历史类型用统一的 `InlineDropdown`，不再换行
 - Edit 实拍：📷 拍照（FileProvider + 直调系统相机）+ + 多选照片（最多 9 张）

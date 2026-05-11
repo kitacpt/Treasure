@@ -55,160 +55,211 @@ android/
         (Room DAO)              (sync, cycle 0003+)
 ```
 
-cycle 0001 的实际链路只到 LocalItemSource。`RemoteItemSource` 在 :core 里**只有 interface 定义和一个 NoOp 实现**，等接通时再写真实现。
+实际链路只到 Room — 同步层 `RemoteItemSource` 至今没接（backend/ 是空脚手架）。
 
-参见 [ADR-0003](adr/0003-local-first-with-optional-sync.md) 关于同步协议。
+参见 [ADR-0003](adr/0003-local-first-with-optional-sync.md) 关于同步协议；接通是 cycle 0031+ 候选。
 
 ## :core 内部结构（实际）
 
 ```
 core/
 ├── domain/
-│   ├── Item.kt                         # 领域模型；specs 单列表，前 4 项为 hero（计算属性 heroSpecs / tailSpecs）
-│   ├── Category.kt                     # 4 个 enum：BADMINTON / PHOTO / CARS / TECH
+│   ├── Item.kt                         # 领域模型；category 是 String id（cycle 0027 起）；
+│   │                                   #   specs 单列表，前 4 项为 hero（计算属性 heroSpecs / tailSpecs）；
+│   │                                   #   avatarPhotoPath（cycle 0016）、callouts（cycle 0010）
+│   ├── Category.kt                     # 6 个 enum：BADMINTON / PHOTO / CARS / TECH / COFFEE / WINE，
+│   │                                   #   每个带 defaultHeroVector（cycle 0028）。**只作 CategoryTemplates
+│   │                                   #   的 map key**，不再决定 Item.category 的合法值
+│   ├── CategoryInfo.kt                 # cycle 0026 起的统一分类模型（内建 + 自定义）
 │   ├── ItemStatus.kt                   # OWNED / PARTED / RENTED
-│   ├── HeroVector.kt                   # 预置插画 enum
+│   ├── HeroVector.kt                   # 19 个预置插画 enum
 │   ├── HeroSpec.kt                     # @Serializable
-│   └── HistoryEvent.kt                 # @Serializable + HistoryKind enum
+│   ├── HistoryEvent.kt                 # @Serializable + HistoryKind enum
+│   └── PhotoCallout.kt                 # cycle 0010：照片文字标注
 ├── ai/
-│   ├── AiClient.kt                     # interface：extractItemDraft(transcript, photo?, category?) → ItemDraft
-│   ├── AnthropicClient.kt              # POST /v1/messages，强制 tool_use=fill_item_draft
-│   ├── OpenAiClient.kt                 # POST /v1/chat/completions，同时覆盖 OpenAI 兼容端点
-│   ├── Prompts.kt                      # 共享 system prompt + tool schema（fill_item_draft）
-│   └── ItemDraft.kt                    # 9 字段草稿 + per-field confidence
+│   ├── AiClient.kt                     # interface：extractItemDraft(text, imageJpegBytes?,
+│   │                                   #   priorTurns, baseline, categoryHints) → Result<ItemDraft>；
+│   │                                   #   + AiTurn / AiRole / Provider / CategoryHint / ItemDraft
+│   ├── AnthropicClient.kt              # POST /v1/messages；强制 tool_use=fill_item_draft（thinking 模式 auto）
+│   ├── OpenAiClient.kt                 # POST .../chat/completions；覆盖 OpenAI + OpenAI 兼容端点
+│   └── Prompts.kt                      # SYSTEM_PROMPT + buildSystemWithBaseline(baseline, json,
+│                                       #   categoryHints) + EXTRACT_TOOL_PARAMETERS
 ├── repo/
-│   └── ItemRepository.kt               # interface + RoomItemRepository 实现
+│   ├── ItemRepository.kt               # interface + RoomItemRepository 实现
+│   ├── AddConversationRepository.kt    # cycle 0010 起；含 AddConversationMessage 5 种 + DraftCtaStatus
+│   └── CategoryRepository.kt           # cycle 0026 起；含 setHidden / reorder / addCustom /
+│                                       #   setHeroPhotoPath / deleteCustom（自动 reassign items）
 ├── room/
-│   ├── TreasureDatabase.kt             # @Database version=5, fallbackToDestructiveMigration ⚠️
+│   ├── TreasureDatabase.kt             # @Database version=10；4 个 entity；addMigrations(*Migrations.ALL)
+│   ├── Migrations.kt                   # 5_6 / 6_7 / 7_8 / 8_9 / 9_10
 │   ├── ItemEntity.kt                   # internal；含 toDomain/fromDomain；JsonCodec object
-│   └── ItemDao.kt                      # observeAll/observeById/count/upsert/deleteById
-└── seed/
-    └── SeedItems.kt                    # 8 条 + 真实 history（移植自 prototype/project/data.jsx）
+│   ├── ItemDao.kt                      # observeAll/observeById/count/upsert/deleteById
+│   ├── ConversationEntity.kt           # cycle 0010：add_conversations + add_messages
+│   ├── ConversationDao.kt
+│   ├── CategoryPrefEntity.kt           # cycle 0026 起；含 hero_photo_path（cycle 0030 加）
+│   └── CategoryPrefDao.kt
+├── seed/
+│   └── SeedItems.kt                    # 8 条 + 真实 history（category 都是 String id 了）
+└── web/
+    └── PageFetcher.kt                  # cycle 0020-0022：OkHttp + mobile UA + HTML strip +
+                                        # meta charset 探测 + 防爬启发式（FetchResult 三态）
 ```
 
-⚠️ Schema 已 destructive 迁移过 8 次（v1 → v5）。cycle 0009 必须切真 migration（见 agent.md 候选清单）。
+Schema 历史（[ADR-0006](adr/0006-schema-migrations.md)）：
+
+| 版本 | cycle | 变化 |
+|---|---|---|
+| v5 | 0010 baseline | 起点（cycle 0001-0009 全 destructive） |
+| v6 | 0010 | 加 `add_conversations` + `add_messages` |
+| v7 | 0010 | items 加 `callouts_json` |
+| v8 | 0016 | items 加 `avatar_photo_path` |
+| v9 | 0026 | 加 `category_prefs` 表 + 种子 6 内建 |
+| v10 | 0030 | category_prefs 加 `hero_photo_path` |
 
 简化 vs. 早期设计稿：
 
-- **没拆 source 子层**（之前画的 `LocalItemSource` / `RemoteItemSource` interface）—— 直接 `RoomItemRepository` 持有 `TreasureDatabase`。等 cycle 0003+ 真要接同步层时再拆。
-- **没拆 usecase 层** —— ViewModel 直接用 Repository。屏数 < 6 个，过早抽象没收益。
-- **没拆 history_events 表** —— history 当作 JSON 列嵌在 items 里。等需要"按 kind 跨物品查"时再正规化。
+- **没拆 source 子层** —— 直接 `RoomItemRepository` 持有 `TreasureDatabase`。同步层（[ADR-0003](adr/0003-local-first-with-optional-sync.md)）还没接，backend/ 是空脚手架
+- **没拆 usecase 层** —— ViewModel 直接用 Repository
+- **没拆 history_events 表** —— history 当作 JSON 列嵌在 items 里
 
 ## :app 内部结构（实际）
 
 ```
 app/
-├── MainActivity.kt                     # ComponentActivity + enableEdgeToEdge → TreasureNavHost
-├── TreasureApp.kt                      # Application：构造 ItemRepository + SettingsStore + AiClient + 首启 seed
+├── MainActivity.kt                     # ComponentActivity + enableEdgeToEdge + Share intent consume → TreasureNavHost
+├── TreasureApp.kt                      # Application：装 ItemRepository / AddConversationRepository /
+│                                       #   CategoryRepository / SettingsStore / PageFetcher / shareIntake；
+│                                       #   首启 seed
 ├── data/
-│   └── SettingsStore.kt                # EncryptedSharedPreferences：provider / model / baseUrl / apiKey
+│   ├── SettingsStore.kt                # EncryptedSharedPreferences：provider / model / baseUrl / apiKey /
+│   │                                   #   temperature / thinkingEnabled / lastTestPassed / presetId
+│   └── AiProviderPreset.kt             # 8 个 preset + modelSupportsVision 启发式（cycle 0022）
 ├── voice/
-│   └── VoiceCapture.kt                 # @Composable 包装 SpeechRecognizer + RECORD_AUDIO 权限 + 不可用回退
-├── theme/
-│   ├── Theme.kt                        # TreasureTheme + LocalTreasureColors
-│   ├── Color.kt                        # paper / ink / terra / card / sub / line（浅深双套）
-│   └── Type.kt                         # Cormorant / Space Grotesk / JetBrains Mono FontFamily
+│   └── VoiceCapture.kt                 # SpeechRecognizer + RECORD_AUDIO 权限 + 不可用回退（cycle 0017
+│                                       #   起 UI 没入口；保留实现供云端 STT 兜底用）
+├── theme/                              # TreasureTheme / Color / Type / Cormorant
 ├── ui/
 │   ├── nav/
-│   │   ├── Routes.kt                   # 路由常量（Portal / Grid / Detail / Edit / Add / Settings）
-│   │   └── TreasureNavHost.kt          # NavHost + 滑动转场 + 全局 ControlIsland（Detail/Edit 屏隐藏）
+│   │   ├── Routes.kt                   # Main / Detail / Edit / Search / CategoryNew / CategoryEditPattern
+│   │   └── TreasureNavHost.kt          # NavHost + 6 routes + 300ms 滑动转场
+│   ├── main/
+│   │   └── MainScreen.kt               # HorizontalPager 4 tab + ControlIsland + BackHandler +
+│   │                                   #   CategoryManager 抽屉顶层 mount
 │   ├── portal/                         # PortalRoute + PortalScreen + PortalViewModel
-│   ├── grid/                           # GridScreen + GridViewModel
-│   ├── detail/
-│   │   ├── DetailScreen.kt             # BottomSheetScaffold + 翻面 + 3-tab 抽屉（只读）+ 右上 · 入 Edit
-│   │   └── DetailViewModel.kt          # observeById + delete
-│   ├── edit/
-│   │   ├── EditRoute.kt                # 单页编辑：基础 / 时间 / 标签 / 插画 / 参数(拖动) / 历史 / 实拍 / 删除
-│   │   └── EditViewModel.kt            # 加载 Item → 内存表单 → 保存 / 删除 / 上传照片
+│   ├── grid/                           # GridRoute + GridScreen + GridViewModel + 右上 [🔍][小红点]
+│   ├── detail/                         # DetailScreen + DetailViewModel；BottomSheetScaffold + 翻面 + 3-tab
+│   ├── edit/                           # EditScreen + 用 DetailViewModel 复用
 │   ├── add/
-│   │   ├── AddRoute.kt                 # 编排：Chat / Preview 模式 + voice / history / manual 浮层
-│   │   ├── AddChat.kt                  # RECORD header + 浮动 composer + 历史 dropdown + 权限封装
-│   │   ├── AddPreview.kt               # 草稿预览 9 字段 + confidence dots + 确认入库
-│   │   ├── CategoryForm.kt             # 旧手动表单（[手动] 入口仍保留）
-│   │   └── AddViewModel.kt             # 消息流 + sendText / sendPhoto / sendVoice → AiClient → ItemDraft
+│   │   ├── AddRoute.kt                 # 编排：Chat / Preview（Refine）模式 + photo preview overlay
+│   │   ├── AddChat.kt                  # RECORD header + 浮动 composer + 历史 ModalBottomSheet
+│   │   ├── AddPreview.kt               # 草稿页镜像 Edit：基础 / 标签 / 参数 + 确认收入二次确认
+│   │   ├── AddViewModel.kt             # 状态机：confirmedDraft + proposedDraft + pendingCtaId；
+│   │   │                               #   newConversation / openConversation / sendText/Photo /
+│   │   │                               #   acceptProposal / rejectProposal / commitDraft
+│   │   ├── CategoryTemplate.kt         # 6 内建模板 + heroVectorOptionsForId
+│   │   └── CategoryForm.kt             # 旧手动表单（cycle 0024 退役但文件未删）
 │   ├── settings/
-│   │   ├── SettingsRoute.kt            # Provider chips / Model / Base URL / API Key (mask) / 测试连接 / 清除
+│   │   ├── SettingsScreen.kt           # 摘要卡 + 编辑抽屉 + 多模态 pill + 重置确认
 │   │   └── SettingsViewModel.kt
+│   ├── search/
+│   │   └── SearchRoute.kt              # cycle 0029：BackArrow + auto-focus 搜索框 + 实时过滤
+│   │                                   #   brand/model/nickname + 命中段 terra 高亮 + 2 列结果
+│   ├── category/
+│   │   ├── CategoryManager.kt          # cycle 0026/0028/0030：ModalBottomSheet 拖动 list +
+│   │   │                               #   divider 当 row-height 块 + 跨段 toggle hidden + 实时
+│   │   │                               #   commit applyReorder。computeShift / commitDrag 纯函数
+│   │   ├── CategoryEditorRoute.kt      # cycle 0029 拆出的全屏编辑：EditPageHeader + BackArrow +
+│   │   │                               #   PickVisualMedia 相册 picker (cycle 0030)
+│   │   └── CategoryManagerViewModel.kt # 代理 CategoryRepository + pendingPhotoForNew 暂存 +
+│   │                                   #   addCustomWithPhoto / pickHeroPhoto / applyReorder
+│   ├── photo/
+│   │   └── FullscreenPhotoViewer.kt    # cycle 0010/0019/0020：横滑翻页 + 双指缩放 + callout
 │   └── components/
 │       ├── ControlIsland.kt            # 底部浮动控制岛（4 颗胶囊）
-│       ├── BackArrow.kt                # 手绘加粗 ← 箭头（无文字）
-│       └── Ornament.kt                 # Portal 顶部罗盘装饰
-└── illust/                             # 11 个 Compose Canvas 博物馆插画
-    ├── IllustHelpers.kt                # drawInViewBox / palette4 / parseHex / INK
-    ├── HeroIllustration.kt             # 按 HeroVector enum 分发的 dispatcher
-    ├── Racket.kt                       # 球拍
-    ├── Camera.kt                       # 相机（DSLR + 旁轴共享）
-    ├── Lens.kt                         # 镜头
-    ├── Tripod.kt                       # 三脚架
-    ├── Shoes.kt                        # 球鞋
-    ├── Car.kt                          # 汽车（轿车 + SUV 共享）
-    ├── Laptop.kt                       # 笔电
-    ├── Earbuds.kt                      # TWS 耳机
-    ├── Tablet.kt                       # 平板（含 Kindle）
-    ├── Watch.kt                        # 智能手表
-    └── Generic.kt                      # 兜底空白博物馆牌
+│       ├── BackArrow.kt                # 手绘加粗 ← 箭头
+│       ├── EditPageHeader.kt           # 共用 EditScreen / AddPreview / CategoryEditor
+│       ├── HeroAvatar.kt               # photo 优先 → HeroIllustration 兜底
+│       ├── HeroAvatarPicker.kt         # 物品编辑头像选择器
+│       ├── InlineDropdown.kt           # 仿原型的中性 dropdown
+│       ├── Ornament.kt                 # Portal 顶部 / 底部罗盘装饰
+│       └── SectionDivider.kt
+└── illust/                             # 16 个 Compose Canvas 博物馆插画 + HeroIllustration dispatcher
 ```
 
-差异 vs. 早期设计稿：插画 dispatcher 没有按 enum 一一拆文件，而是把多个 enum 值映射到同一个 Composable（CAMERA_DSLR / CAMERA_RANGEFINDER → Camera()，CAR_SEDAN / CAR_SUV → Car()，KINDLE → Tablet()）。
-
-`HeroIllustration.kt` 按 `item.heroVector` 分发到 `illust/` 下具体函数，所有具体函数都接受 `IllustrationStyle`（含 ink、palette、showCallouts）。
+`HeroIllustration.kt` 按 `item.heroVector` 分发到 `illust/` 下具体函数；多个 enum 值可共享一个
+Composable（CAMERA_DSLR / CAMERA_RANGEFINDER → Camera()，CAR_SEDAN / CAR_SUV → Car()，
+KINDLE → Tablet()）。
 
 ## 导航图（实际）
 
 ```
-NavHost (start = "portal")
-├── "portal"            ─→  PortalRoute
-├── "grid/{categoryId}" ─→  GridRoute
-├── "detail/{itemId}"   ─→  DetailRoute
-├── "edit/{itemId}"     ─→  EditRoute              # cycle 0005，从 Detail 右上 · 进入
-├── "add"               ─→  AddRoute               # cycle 0007 chat-first 重做
-└── "settings"          ─→  SettingsRoute          # cycle 0005 起接 AI 配置
+NavHost (start = "main")
+├── "main"                      ─→  MainScreen
+│                                   ├── PortalRoute (page 0)
+│                                   ├── GridRoute (page 1)
+│                                   ├── AddRoute (page 2)
+│                                   └── SettingsRoute (page 3)
+│                                   + CategoryManager (ModalBottomSheet 顶层 mount)
+├── "detail/{itemId}"           ─→  DetailRoute             # cycle 0001
+├── "edit/{itemId}"             ─→  EditRoute               # cycle 0005
+├── "search"                    ─→  SearchRoute             # cycle 0029
+├── "category/new"              ─→  CategoryEditorRoute(null)  # cycle 0029
+└── "category/edit/{categoryId}" ─→ CategoryEditorRoute(id)  # cycle 0029
 ```
 
-转场（NavHost 全局）：
+转场（NavHost 全局）：300ms tween 的 `slideIntoContainer(Start/End)`。
 
-| 方向 | 进 | 出 |
-|---|---|---|
-| 前进 (push) | `slideIntoContainer(Start)` 从右进 | `slideOutOfContainer(Start)` 向左推 |
-| 回退 (pop)  | `slideIntoContainer(End)` 从左进  | `slideOutOfContainer(End)` 向右推  |
+控制岛 4 颗胶囊：门厅 / 图鉴 / 录入 / 设置。Detail / Edit / Search / CategoryEditor 屏控制岛**隐藏**（这些是 NavHost push 路由，不在 pager 里）。
 
-均 300ms tween。
+**BackHandler**（cycle 0029）：在 MainScreen 顶层。Manager 抽屉打开优先收抽屉；非 Portal tab 返回 Portal；Portal 默认行为 → 退出。
 
-控制岛 4 颗胶囊：门厅 / 图鉴 / 录入 / 设置。"图鉴"按当前路由：在 grid/X 时停留；不在时跳 `grid/photo` 默认。Detail / Edit 屏控制岛**隐藏**（视觉规格要求 — 这两屏右上角有自己的入口）。
-
-## AI / 录入数据流
+## AI / 录入数据流（cycle 0024 重构后）
 
 ```
 AddRoute（chat-first）
    │
-   ├─ 文本 / 真照片 / 真 STT 转写
+   ├─ 文本 / 照片 / URL 分享
    │       │
    │       ▼
-   │   AddViewModel.runExtract()
+   │   AddViewModel.sendText / sendPhoto / runExtract
+   │       │                                  │
+   │       │                                  ▼
+   │       │                          baseline = confirmedDraft（cycle 0024）
+   │       │                          categoryHints = visibleCategories（cycle 0027）
+   │       │                                  │
+   │       │                                  ▼
+   │       └→ AiClient.extractItemDraft(text, image?, priorTurns, baseline, categoryHints)
+   │                  │
+   │                  └→ AnthropicClient / OpenAiClient（按 SettingsStore）
+   │                       POST + tool_use(fill_item_draft) → ItemDraft
    │       │
    │       ▼
-   │   AiClient.extractItemDraft(transcript, photoBytes?, category?)
-   │       │            │
-   │       │            └→ AnthropicClient / OpenAiClient（按 SettingsStore.provider）
-   │       │                  POST + tool_use(fill_item_draft) → JSON 草稿
-   │       ▼
-   │   DraftCta 卡片（chat 内）
+   │   DraftCta(status=Pending) 落到 messages（同时 supersede 旧 Pending）
    │
-   ├─ 点 DraftCta → AddPreview（9 字段 + confidence dots）
+   ├─ 用户点 [采用] → acceptProposal()
    │       │
    │       ▼
-   │   AddViewModel.commitDraft()
-   │       │
-   │       ▼
-   │   ItemRepository.upsert(Item) → 跳 Detail
+   │   confirmedDraft = proposedDraft；append DraftConfirmed（落 Room）；
+   │   旧 DraftCta status = Accepted
    │
-   └─ 点 [手动] → CategoryForm（4 品类模板）
+   ├─ 用户点 [不要] → rejectProposal()
+   │       │
+   │       ▼
+   │   proposedDraft = null；旧 DraftCta status = Rejected
+   │
+   └─ 用户点 [手动] → AddRoute push 进 Refine（AddPreview）
            │
            ▼
-       AddViewModel.saveManual() → ItemRepository.upsert
+       AddPreview 编辑 confirmedDraft 各字段 + DraftSpecs
+           │
+           ▼
+       [确认收入] → AlertDialog 二次确认（cycle 0025）→ commitDraft(status)
+           │
+           ▼
+       ItemRepository.upsert(Item) → vm.newConversation() → 跳新对话
 ```
 
-AI key 通过 `SettingsStore`（EncryptedSharedPreferences）注入到 `AiClient` 的工厂方法（`TreasureApp` 持有）。设备直连 provider，不走代理（[ADR-0004](adr/0004-byo-ai-key.md)）。
+AI key 通过 `SettingsStore`（EncryptedSharedPreferences）注入到 `AiClient` 的工厂方法（`TreasureApp.aiClient()` 持有）。设备直连 provider，不走代理（[ADR-0004](adr/0004-byo-ai-key.md)）。
 
 ## 状态与事件
 
