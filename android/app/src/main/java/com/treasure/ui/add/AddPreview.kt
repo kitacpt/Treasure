@@ -70,6 +70,7 @@ fun AddPreview(
     onUpdateSpec: (Int, HeroSpec) -> Unit,
     onAddSpec: () -> Unit,
     onRemoveSpec: (Int) -> Unit,
+    onUpdateHistory: (List<com.treasure.core.domain.HistoryEvent>) -> Unit = {},
     onConfirm: (ItemStatus) -> Unit,
 ) {
     val colors = LocalTreasureColors.current
@@ -240,6 +241,16 @@ fun AddPreview(
                     onChange = onUpdateSpec,
                     onDelete = onRemoveSpec,
                     onAdd = onAddSpec,
+                )
+            }
+
+            // Cycle 0031：草稿页加历史栏，跟物品 Edit 页同一份 UI（HistorySection
+            // 复用）。AI 不直接填 history；用户手动加，commit 时带进 Item。
+            item { SectionDivider("历史") }
+            item {
+                com.treasure.ui.edit.HistorySection(
+                    history = draft.history,
+                    onUpdateHistory = onUpdateHistory,
                 )
             }
             item { Spacer(Modifier.height(40.dp)) }

@@ -30,6 +30,10 @@ interface CategoryRepository {
     suspend fun addCustom(nameZh: String, nameEn: String, heroVector: HeroVector): String
     suspend fun reorder(orderedIds: List<String>)
 
+    /** Cycle 0031：把 reorder + setHidden 合并成单事务一次性写，
+     *  observeAll 只 emit 一次。避免拖动 commit 期间 UI 闪到中间态。 */
+    suspend fun applyOrderAndHidden(orderedIds: List<String>, hiddenIds: Set<String>)
+
     /** Cycle 0030：设置 / 清除分类代表图。传 null 清除。 */
     suspend fun setHeroPhotoPath(id: String, path: String?)
 }
@@ -95,6 +99,13 @@ class RoomCategoryRepository internal constructor(
 
     override suspend fun reorder(orderedIds: List<String>) {
         orderedIds.forEachIndexed { idx, id -> dao.setSortOrder(id, idx) }
+    }
+
+    override suspend fun applyOrderAndHidden(
+        orderedIds: List<String>,
+        hiddenIds: Set<String>,
+    ) {
+        dao.reorder(orderedIds, hiddenIds)
     }
 
     override suspend fun setHeroPhotoPath(id: String, path: String?) {

@@ -253,12 +253,16 @@ class AddViewModel(
         }
     }
 
-    /** 删一段对话（历史抽屉里 ✕ 按钮）。如果删的是当前会话，就开一段新的。 */
+    /** 删一段对话（历史抽屉里 ✕ 按钮）。
+     *  Cycle 0031：删的是当前会话时不再自动开"New entry · HH:MM"空壳 — 之
+     *  前用户反馈"删了发现位置上又冒了一条新的，以为没删干净"。改成：把
+     *  current 滑到剩下里最新一段；剩下都没了才 newConversation。 */
     fun deleteConversation(id: String) {
         viewModelScope.launch {
             conversations.delete(id)
             if (id == _state.value.conversationId) {
-                newConversation()
+                val next = conversations.observeRecent(limit = 1).first().firstOrNull()
+                if (next != null) resumeConversation(next) else newConversation()
             }
         }
     }
@@ -636,6 +640,15 @@ class AddViewModel(
         )
     }
 
+    /** Cycle 0031：草稿页历史时间轴整段替换。AddPreview 加 / 改 / 删一行
+     *  都通过这一个出口。 */
+    fun setDraftHistory(history: List<HistoryEvent>) {
+        val current = _state.value.confirmedDraft ?: ItemDraft()
+        _state.value = _state.value.copy(
+            confirmedDraft = current.copy(history = history.sortedBy { it.date }),
+        )
+    }
+
     /** 进入手动 Refine 模式时调用：如果没有 confirmedDraft，建一个空草稿
      *  来让 UI 有东西可编。 */
     fun ensureDraftForManual() {
@@ -683,9 +696,11 @@ class AddViewModel(
                 oneLiner = draft.oneLiner.trim(),
                 heroVector = heroVector,
                 specs = draft.specs.filter { it.label.isNotBlank() || it.value.isNotBlank() },
-                history = listOf(
-                    HistoryEvent(acquired, HistoryKind.ACQUIRED, "购入", ""),
-                ),
+                // Cycle 0031：草稿页用户能编辑 history 时间轴；用户填了就直接
+                // 用，没填就走老逻辑默认一条 ACQUIRED。
+                history = draft.history.ifEmpty {
+                    listOf(HistoryEvent(acquired, HistoryKind.ACQUIRED, "购入", ""))
+                },
                 photos = emptyList(),
                 createdAt = now,
                 updatedAt = now,

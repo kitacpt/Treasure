@@ -32,7 +32,9 @@ import com.treasure.core.domain.Category
 import com.treasure.core.domain.CategoryInfo
 import com.treasure.core.domain.Item
 import com.treasure.theme.LocalTreasureColors
+import com.treasure.illust.Door
 import com.treasure.illust.HeroIllustration
+import com.treasure.illust.IllustPalette
 import com.treasure.ui.components.HeroAvatar
 import com.treasure.ui.components.Ornament
 
@@ -76,35 +78,38 @@ fun PortalScreen(
             item { Spacer(Modifier.height(26.dp)) }
             item { Tally(state) }
             item { Spacer(Modifier.height(26.dp)) }
-            item {
-                SectionLabel(
-                    text = "✦ The Rooms ✦",
-                    modifier = Modifier.padding(horizontal = 22.dp),
-                    centered = true,
-                )
-            }
-            item { Spacer(Modifier.height(14.dp)) }
             if (state.visibleCategories.isEmpty()) {
-                item { EmptyRoomsHint(onOpenCategoryManager = onOpenCategoryManager) }
+                // Cycle 0031：完全空态 — 去掉 ✦ The Rooms ✦ / ✦ Latest entry ✦
+                // 两段标签 + 空提示，换成中间一扇大门 + 一行小字"点开大门，
+                // 跳转到分类管理"。点门即进 manager。
+                item { EmptyDoorway(onOpenCategoryManager = onOpenCategoryManager) }
             } else {
+                item {
+                    SectionLabel(
+                        text = "✦ The Rooms ✦",
+                        modifier = Modifier.padding(horizontal = 22.dp),
+                        centered = true,
+                    )
+                }
+                item { Spacer(Modifier.height(14.dp)) }
                 item { DoorwaysGrid(state, onEnterCategory) }
-            }
-            item { Spacer(Modifier.height(28.dp)) }
-            // Cycle 0028：Latest entry 标签改成跟 THE ROOMS 一样的居中 + 两边星星
-            item {
-                SectionLabel(
-                    text = "✦ Latest entry ✦",
-                    modifier = Modifier.padding(horizontal = 22.dp),
-                    centered = true,
-                )
-            }
-            item { Spacer(Modifier.height(12.dp)) }
-            item {
-                val latest = state.latestOverall
-                if (latest != null) {
-                    LatestEntryCard(latest, onOpenItem)
-                } else {
-                    EmptyLatestHint(onOpenCategoryManager = onOpenCategoryManager)
+                item { Spacer(Modifier.height(28.dp)) }
+                // Cycle 0028：Latest entry 标签改成跟 THE ROOMS 一样的居中 + 两边星星
+                item {
+                    SectionLabel(
+                        text = "✦ Latest entry ✦",
+                        modifier = Modifier.padding(horizontal = 22.dp),
+                        centered = true,
+                    )
+                }
+                item { Spacer(Modifier.height(12.dp)) }
+                item {
+                    val latest = state.latestOverall
+                    if (latest != null) {
+                        LatestEntryCard(latest, onOpenItem)
+                    } else {
+                        EmptyLatestHint(onOpenCategoryManager = onOpenCategoryManager)
+                    }
                 }
             }
             // Cycle 0030：底部 Ornament 是 cycle 0001 起的视觉收尾；cycle 0026
@@ -112,6 +117,50 @@ fun PortalScreen(
             item { Spacer(Modifier.height(28.dp)) }
             item { Ornament(modifier = Modifier.padding(horizontal = 24.dp)) }
         }
+    }
+}
+
+/**
+ * Cycle 0031：空态首页中间的大门 — 一个正方形铺整张图，下方一行小字。
+ * 点门 → 分类管理。EmptyRoomsHint / EmptyLatestHint 留作"部分空"场景。
+ */
+@Composable
+private fun EmptyDoorway(onOpenCategoryManager: () -> Unit) {
+    val colors = LocalTreasureColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // 用一份中性 palette — 跟其它馆藏插画同款 ink + 浅纸色填充。
+        val doorPalette = remember {
+            IllustPalette(
+                listOf(
+                    androidx.compose.ui.graphics.Color(0xFF1A1815),
+                    androidx.compose.ui.graphics.Color(0xFF8A3A1F),
+                    androidx.compose.ui.graphics.Color(0xFFE8E2D4),
+                    androidx.compose.ui.graphics.Color(0xFF7A7A7A),
+                ),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clickable(onClick = onOpenCategoryManager),
+            contentAlignment = Alignment.Center,
+        ) {
+            Door(palette = doorPalette, modifier = Modifier.fillMaxSize())
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "点开大门，展示你的专属 treasure",
+            color = colors.sub,
+            style = MaterialTheme.typography.labelMedium,
+            textAlign = TextAlign.Center,
+            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+        )
     }
 }
 

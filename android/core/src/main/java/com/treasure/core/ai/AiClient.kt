@@ -102,4 +102,8 @@ data class ItemDraft(
     val nickname: String = "",
     val oneLiner: String = "",
     val specs: List<HeroSpec> = emptyList(),
+    /** Cycle 0031：草稿也能编辑 history 时间轴 — 跟物品 Edit 页同款逻辑。
+     *  AI 不直接填这个字段；用户在 Refine 页手动加。commitDraft 把它带进
+     *  最终 Item。 */
+    val history: List<com.treasure.core.domain.HistoryEvent> = emptyList(),
 )

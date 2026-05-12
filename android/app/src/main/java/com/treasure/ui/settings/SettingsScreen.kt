@@ -92,6 +92,12 @@ fun SettingsScreen(
 ) {
     val colors = LocalTreasureColors.current
 
+    // Cycle 0031：AI 配置抽屉是 AnimatedVisibility 自渲染的层（不是 ModalBottomSheet），
+    // 没有系统级 back 处理。开着时按返回应只关抽屉，不能把用户推到首页。
+    androidx.activity.compose.BackHandler(enabled = state.editorOpen) {
+        onCloseEditor()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -136,18 +142,40 @@ fun SettingsScreen(
 @Composable
 private fun Header() {
     val colors = LocalTreasureColors.current
-    Column {
-        Text(
-            text = "Settings",
-            color = colors.ink,
-            style = MaterialTheme.typography.titleLarge,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "AI SERVICE",
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-        )
+    val app = androidx.compose.ui.platform.LocalContext.current
+        .applicationContext as com.treasure.TreasureApp
+    val override by app.darkModeOverride.collectAsStateWithLifecycle()
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val effectiveDark = override ?: systemDark
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Settings",
+                color = colors.ink,
+                style = MaterialTheme.typography.titleLarge,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "AI SERVICE",
+                color = colors.sub,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        // Cycle 0031：暗黑 / 明亮切换 — 图标显示"切过去会变成什么"（当前暗
+        // 黑就显示 ☀，提示"点一下回到明亮"）。
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .clickable { app.setDarkModeOverride(!effectiveDark) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (effectiveDark) "☀" else "☾",
+                color = colors.ink,
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
     }
 }
 

@@ -16,11 +16,23 @@
 4. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
 5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
 6. [`docs/adr/`](docs/adr/) —— 6 份决策记录
-7. [`openspec/`](openspec/) —— cycle 0001-0030 的 proposal / spec / notes
+7. [`openspec/`](openspec/) —— cycle 0001-0031 的 proposal / spec / notes
 
-## 当前状态（2026-05-11）
+## 当前状态（2026-05-12）
 
-**cycle 0001 → 0030 全部落地**。14 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
+**cycle 0001 → 0031 全部落地**。14 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
+
+cycle 0031（一个长 cycle，多轮迭代）的主要肉：
+- **返回栈**：AddRoute / SettingsScreen / DetailScreen 局部 BackHandler，子层 back 不再被 MainScreen 全局兜底推回首页
+- **分类管理拖动复修**：`rememberUpdatedState` 兜 stale lambda、`indexOfFirst(info.id)`、DAO `@Transaction reorder` 单事务 — cycle 0030 留下的"位置弹回去"根治
+- **Theme**：Settings header `☀/☾` icon 切换暗黑 / 明亮
+- **Portal 空态**：换成大门插画 + "点开大门，展示你的专属 treasure"，点门进 manager
+- **Detail 抽屉**：3 页 `HorizontalPager` 横滑；影集 + tile + 长按多选 + 底部 [删除 N] 长条 + 二次确认；drag handle 改文字提示
+- **Grid**：标题动态两行（同行任一两行 → 两个都两行，TextMeasurer 同步），搜索按钮挪 chip 条左侧、点击原地变输入框实时过滤，Edit + 红点跟 Treasure 标题 baseline 对齐
+- **Edit**：参数 / 操作 区名、"+" 单字按钮、spec 行卡片化（key+value 共框 + 中间竖分隔）、divider 提示行去横线
+- **历史**：add/edit 改 `ModalBottomSheet` + 顶部 emoji icon picker（🛒🏆🔧⚙️👋）+ Material `DatePicker` + 中文长日期；row 视觉左圆 emoji + 中标题 + 日期
+- **Draft**：`ItemDraft.history` 加历史栏，AddPreview 复用 `HistorySection`；"手动" → "Draft"
+- **Seeds**：物品 8 → 6（每个内建分类 1 条，新加咖啡 MaraX + 酒水 Margaux 2015）；fresh-install 用 `SeedCategoriesCallback` 补分类种子（cycle 0026 那 migration 只覆盖升级用户）
 
 - 6 个内建品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画；**cycle 0026 起在图鉴页右上小红点入口可以管理分类显示/隐藏 + 自定义新分类**（Schema v9 加 `category_prefs` 表，含 Migration 种子）；**cycle 0027 起自定义分类真正能装物品** —`Item.category` 由 enum 改 String id，AI prompt 喂动态 categoryHints，删自定义分类时把物品 rehome 到电子产品兜底；**cycle 0028 起 Manager 改长按拖动**（同段拖动改排序 / 跨分割线 toggle 隐藏），编辑页顶部插画必填，Portal doorway 永远用分类的"基础图"；**cycle 0029 起分类编辑器拆全屏路由**（跟物品 Edit 同款 BackArrow / EditPageHeader）；**cycle 0030 起分类代表图改从相册挑**（PickVisualMedia，Schema v10 加 `hero_photo_path` 列）— 自定义新建必须挑图，内建可选覆盖默认线描；Manager 拖动算法 divider 当 row-height 块（不再"飞到不知道哪儿"）
 - 主屏 4 tab 横滑切换：门厅 / 图鉴 / 录入 / 设置（HorizontalPager）；Detail / Edit / Search / CategoryEditor 都是 push 上来的覆盖屏（NavHost）

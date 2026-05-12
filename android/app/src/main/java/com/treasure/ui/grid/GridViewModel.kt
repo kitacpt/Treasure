@@ -30,6 +30,8 @@ data class GridUiState(
     val totalCount: Int = 0,
     /** 当前未隐藏的分类列表，按 sort_order 排好。空时回退到 emptyList。 */
     val visibleCategories: List<CategoryInfo> = emptyList(),
+    /** Cycle 0031：所有可见分类下的物品全集，给图鉴页内联搜索过滤用。 */
+    val allVisibleItems: List<Item> = emptyList(),
 )
 
 class GridViewModel(
@@ -70,6 +72,7 @@ class GridViewModel(
                 .mapValues { it.value.size },
             totalCount = visibleItems.size,
             visibleCategories = visible,
+            allVisibleItems = visibleItems,
         )
     }.stateIn(
         scope = viewModelScope,

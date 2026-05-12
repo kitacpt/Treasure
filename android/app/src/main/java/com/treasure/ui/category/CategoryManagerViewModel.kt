@@ -63,18 +63,15 @@ class CategoryManagerViewModel(
     }
 
     /**
-     * Cycle 0028：拖动结束一次性提交。先 reorder（按新顺序写 sort_order），
-     * 再把每行的 hidden 同步成 [hiddenIds] 里的状态。
+     * Cycle 0028：拖动结束一次性提交 sort_order + hidden 两条修改。
+     * Cycle 0031：合并到单 SQLite 事务（`applyOrderAndHidden`）— 之前分多
+     * 次 setSortOrder + setHidden 写，Room InvalidationTracker 会在中间状态
+     * emit 一次 observeAll，UI 那边的工作副本若按"id 集合不变就不重 sync"
+     * 仍能稳住，但事务统一更稳。
      */
     fun applyReorder(orderedIds: List<String>, hiddenIds: Set<String>) =
         viewModelScope.launch {
-            repo.reorder(orderedIds)
-            // 只对发生变化的行调用 setHidden，少写几条 SQL
-            val current = repo.loadAll().associate { it.id to it.hidden }
-            orderedIds.forEach { id ->
-                val want = id in hiddenIds
-                if (current[id] != want) repo.setHidden(id, want)
-            }
+            repo.applyOrderAndHidden(orderedIds, hiddenIds)
         }
 
     /**

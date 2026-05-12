@@ -17,12 +17,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AlertDialog
@@ -40,24 +37,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
 import com.treasure.core.domain.CategoryInfo
 import com.treasure.core.domain.HeroVector
-import com.treasure.illust.HeroIllustration
 import com.treasure.theme.LocalTreasureColors
+import com.treasure.ui.add.canonical
+import com.treasure.ui.add.heroVectorOptionsForId
+import com.treasure.ui.add.uniqueHeroVectors
 import com.treasure.ui.components.BackArrow
 import com.treasure.ui.components.EditPageHeader
+import com.treasure.ui.components.HeroAvatarPicker
 
 /**
- * Cycle 0029：分类编辑改成全屏 route（之前在 Manager 抽屉里内嵌）。同款
- * 物品 Edit 页的 [EditPageHeader] 头 + [BackArrow] 返回，视觉一致。
+ * Cycle 0029：分类编辑全屏 route。
+ * Cycle 0031：插画选择改用与物品 Edit 页同款 [HeroAvatarPicker] — 点头像即
+ *   展开候选行（"+ 从相册选" 动作 chip + 当前 photo + 可选线描），跟物品编
+ *   辑一致的肌肉记忆。
  *
- * 路由两种入口：
+ * 路由：
  *   - Routes.CategoryNew → categoryId = null → 新建模式
  *   - Routes.CategoryEditPattern → categoryId 命中现有 row → 编辑模式
  */
@@ -72,7 +72,7 @@ fun CategoryEditorRoute(
         if (categoryId.isNullOrBlank()) null
         else all.firstOrNull { it.id == categoryId }
     }
-    // 编辑模式但仓库还没加载到（id 在但 list 还空）→ 静默等
+    // 编辑模式但仓库还没加载完（id 在但 list 还空）→ 静默等
     if (!categoryId.isNullOrBlank() && initial == null && all.isEmpty()) {
         val colors = LocalTreasureColors.current
         Box(
@@ -86,28 +86,6 @@ fun CategoryEditorRoute(
         initial = initial,
         vm = vm,
         onBack = onBack,
-        onSaveBuiltIn = { hidden ->
-            initial?.let { info ->
-                if (hidden != info.hidden) vm.setHidden(info.id, hidden)
-            }
-            onBack()
-        },
-        onSaveCustom = { nameZh, nameEn, hidden, photoPath ->
-            if (initial != null) {
-                vm.saveCustom(initial.id, nameZh, nameEn, initial.heroVector)
-                if (hidden != initial.hidden) vm.setHidden(initial.id, hidden)
-                onBack()
-            } else if (photoPath != null) {
-                vm.addCustomWithPhoto(nameZh, nameEn, photoPath) { onBack() }
-            } else {
-                // 防御：自定义新建没有 photo 时（按 canSave 应该被挡，但兜底）
-                vm.addCustom(nameZh, nameEn, HeroVector.GENERIC) { onBack() }
-            }
-        },
-        onDelete = {
-            initial?.let { vm.deleteCustom(it.id) }
-            onBack()
-        },
     )
 }
 
@@ -116,23 +94,28 @@ private fun CategoryEditorScreen(
     initial: CategoryInfo?,
     vm: CategoryManagerViewModel,
     onBack: () -> Unit,
-    onSaveBuiltIn: (hidden: Boolean) -> Unit,
-    onSaveCustom: (nameZh: String, nameEn: String, hidden: Boolean, pendingPhotoPath: String?) -> Unit,
-    onDelete: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
     val isBuiltIn = initial?.isBuiltIn == true
     val isAdd = initial == null
+
     var nameZh by remember(initial) { mutableStateOf(initial?.nameZh.orEmpty()) }
     var nameEn by remember(initial) { mutableStateOf(initial?.nameEn.orEmpty()) }
-    // Cycle 0030：插画统一改成从相册挑的图。null = 没图。built-in 在没图时
-    // fall back 到 enum 默认插画；自定义必须有图才能创建。
-    // pendingPhotoForNew 是 VM 在新建模式下暂存的本地路径（在用户点 [新建]
-    // 之前不写 DB），collect 进来给 UI 回显。
-    val currentPhoto = if (isAdd) vm.pendingPhotoForNew else initial?.heroPhotoPath
-    var photoTick by remember { mutableStateOf(0) }  // 强迫 recompose 跟 pendingPhotoForNew
+    var heroVector by remember(initial) {
+        mutableStateOf(initial?.heroVector ?: HeroVector.GENERIC)
+    }
     var hidden by remember(initial) { mutableStateOf(initial?.hidden == true) }
     var confirmingDelete by remember { mutableStateOf(false) }
+
+    // 当前 photo 显示用：
+    //   - 编辑模式：来自 initial（DB 行的 hero_photo_path），改动通过 vm
+    //     立刻写 DB，all StateFlow 触发 recompose，所以这里再读 initial 是
+    //     stale；用一个 photoTick 强迫 recompose 拉新 initial。
+    //   - 新建模式：vm.pendingPhotoForNew 是 VM 字段（不是 StateFlow），手动
+    //     用 photoTick 触发重组。
+    var photoTick by remember { mutableStateOf(0) }
+    @Suppress("UNUSED_EXPRESSION") photoTick
+    val currentPhoto = if (isAdd) vm.pendingPhotoForNew else initial?.heroPhotoPath
 
     val pickPhoto = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -142,10 +125,42 @@ private fun CategoryEditorScreen(
         }
     }
 
+    // 自定义可挑全套插画；内建仅展示自己的默认线描（用户唯一能"恢复"的目标）。
+    // Cycle 0031：渲染同线描的 HeroVector 折成一项 — picker 不会再出现重复
+    // 小圆（用户原话："3/4、7/8、10/12 重复"）。
+    val vectorOptions: List<HeroVector> = remember(initial?.id, isBuiltIn) {
+        when {
+            isBuiltIn -> listOfNotNull(initial?.heroVector?.canonical())
+            isAdd -> uniqueHeroVectors
+            else -> heroVectorOptionsForId(initial!!.id)
+        }
+    }
+
     val canSave = when {
-        isBuiltIn -> true                                  // 内建始终能存（fall back 到默认插画）
-        isAdd -> nameZh.isNotBlank() && currentPhoto != null  // 自定义新建必须有名 + 图
-        else -> nameZh.isNotBlank()                        // 自定义编辑：图可保留也可清
+        isBuiltIn -> true                 // 内建始终能存（什么都不改也无害）
+        else -> nameZh.isNotBlank()       // 自定义：只要有中文名
+    }
+
+    fun commitSave() {
+        when {
+            isBuiltIn -> {
+                if (hidden != (initial?.hidden == true)) vm.setHidden(initial!!.id, hidden)
+                onBack()
+            }
+            isAdd -> {
+                // 自定义新建：有照片走 addCustomWithPhoto；没图就用当前选的 heroVector。
+                if (currentPhoto != null) {
+                    vm.addCustomWithPhoto(nameZh, nameEn, currentPhoto) { onBack() }
+                } else {
+                    vm.addCustom(nameZh, nameEn, heroVector) { onBack() }
+                }
+            }
+            else -> {
+                vm.saveCustom(initial!!.id, nameZh, nameEn, heroVector)
+                if (hidden != initial.hidden) vm.setHidden(initial.id, hidden)
+                onBack()
+            }
+        }
     }
 
     Box(
@@ -160,7 +175,6 @@ private fun CategoryEditorScreen(
             modifier = Modifier.fillMaxSize(),
         ) {
             item {
-                // 头：跟物品 Edit 页同款 — BackArrow + 居中标题 + 右侧 [保存]/[新建]
                 EditPageHeader(
                     title = if (isAdd) "New" else "Edit",
                     subtitle = if (isAdd) "新增分类" else (initial?.nameZh ?: "分类"),
@@ -172,10 +186,7 @@ private fun CategoryEditorScreen(
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
-                                .clickable(enabled = canSave) {
-                                    if (isBuiltIn) onSaveBuiltIn(hidden)
-                                    else onSaveCustom(nameZh, nameEn, hidden, currentPhoto)
-                                }
+                                .clickable(enabled = canSave) { commitSave() }
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                         )
                     },
@@ -185,7 +196,7 @@ private fun CategoryEditorScreen(
             if (isBuiltIn) {
                 item {
                     Text(
-                        text = "内建分类名字不可改；插画用内建默认，也可以从相册挑一张代表图覆盖。",
+                        text = "内建分类的名字不可改；插画用内建默认，也可以从相册挑一张代表图覆盖。",
                         color = colors.sub,
                         style = MaterialTheme.typography.labelSmall,
                         fontStyle = FontStyle.Italic,
@@ -198,7 +209,7 @@ private fun CategoryEditorScreen(
             } else if (isAdd) {
                 item {
                     Text(
-                        text = "新建必须填中文名 + 从相册挑一张代表图。",
+                        text = "填中文名 → 点头像选一张代表图，或从下方挑一张线描插画。",
                         color = colors.sub,
                         style = MaterialTheme.typography.labelSmall,
                         fontStyle = FontStyle.Italic,
@@ -210,75 +221,52 @@ private fun CategoryEditorScreen(
                 }
             }
 
-            // 头像 — 优先 photo，没图时 built-in fall back 到 enum 插画
+            // Avatar picker — 同物品 Edit 页同款交互
             item {
                 Spacer(Modifier.height(6.dp))
-                @Suppress("UNUSED_EXPRESSION") photoTick  // 触发 recompose
-                AvatarHero(
-                    photoPath = currentPhoto,
-                    fallbackHeroVector = if (isBuiltIn) initial?.heroVector else null,
-                )
-                Spacer(Modifier.height(10.dp))
-            }
-
-            // 相册 picker：[从相册选] [清除]
-            item {
-                Column(modifier = Modifier.padding(horizontal = 22.dp)) {
-                    Text(
-                        text = if (isAdd) "代表图 · 必选" else "代表图",
-                        color = colors.sub,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(2.dp))
-                                .border(0.5.dp, colors.line)
-                                .clickable {
-                                    pickPhoto.launch(
-                                        PickVisualMediaRequest(
-                                            ActivityResultContracts.PickVisualMedia.ImageOnly,
-                                        ),
-                                    )
-                                }
-                                .padding(vertical = 12.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = if (currentPhoto == null) "+ 从相册选" else "换一张",
-                                color = colors.terra,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
+                HeroAvatarPicker(
+                    categoryId = initial?.id ?: "category-new",
+                    palette = DefaultPalette,
+                    options = vectorOptions,
+                    selected = heroVector.canonical(),
+                    onSelect = { v ->
+                        heroVector = v
+                        // 选了线描就清掉照片，让头像回归插画
                         if (currentPhoto != null) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .border(0.5.dp, colors.line)
-                                    .clickable {
-                                        vm.clearHeroPhoto(initial?.id)
-                                        photoTick++
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = "清除",
-                                    color = colors.sub,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                            }
+                            vm.clearHeroPhoto(initial?.id)
+                            photoTick++
                         }
-                    }
-                }
+                        // 自定义编辑模式：vector 改动立刻写 DB（跟 photo 一样 eager），
+                        // 否则用户改完不点 [保存] 也会丢。
+                        if (!isBuiltIn && !isAdd) {
+                            vm.saveHeroVectorOnly(initial!!.id, v)
+                        }
+                    },
+                    photoOptions = listOfNotNull(currentPhoto),
+                    selectedPhoto = currentPhoto,
+                    onSelectPhoto = { /* 只有一张，点击 == 已选，no-op */ },
+                    onTakePhoto = null,
+                    onPickPhotos = {
+                        pickPhoto.launch(
+                            PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.ImageOnly,
+                            ),
+                        )
+                    },
+                    onRemovePhoto = {
+                        vm.clearHeroPhoto(initial?.id)
+                        photoTick++
+                    },
+                )
                 Spacer(Modifier.height(18.dp))
             }
 
             // 中文 / 英文名
             item {
-                Column(modifier = Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 22.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     FieldRow(label = "中文名") {
                         EditorTextField(
                             value = nameZh,
@@ -358,7 +346,8 @@ private fun CategoryEditorScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmingDelete = false
-                    onDelete()
+                    vm.deleteCustom(initial.id)
+                    onBack()
                 }) { Text("删除", color = colors.terra) }
             },
             dismissButton = {
@@ -371,67 +360,7 @@ private fun CategoryEditorScreen(
     }
 }
 
-/**
- * Cycle 0030：分类编辑页的"头像"。优先显示用户挑的代表图 [photoPath]，没图
- * 时若 [fallbackHeroVector] 非 null（= 内建分类）则画 enum 默认插画，否则
- * 是 italic "+ 从相册选" 占位。
- */
-@Composable
-private fun AvatarHero(photoPath: String?, fallbackHeroVector: HeroVector?) {
-    val colors = LocalTreasureColors.current
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(112.dp)
-                .clip(CircleShape)
-                .background(colors.paper)
-                .border(0.8.dp, colors.line, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            when {
-                !photoPath.isNullOrBlank() -> {
-                    AsyncImage(
-                        model = photoPath,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().clip(CircleShape),
-                    )
-                }
-                fallbackHeroVector != null -> {
-                    val stub = remember(fallbackHeroVector) {
-                        com.treasure.core.domain.Item(
-                            id = "preview",
-                            category = "preview",
-                            brand = "", model = "", nickname = "", acquired = "", parted = null,
-                            status = com.treasure.core.domain.ItemStatus.OWNED,
-                            palette = listOf("#0e0e0e", "#a47836", "#e8e2d4", "#5a5a5a"),
-                            oneLiner = "",
-                            heroVector = fallbackHeroVector,
-                            specs = emptyList(),
-                            history = emptyList(),
-                            photos = emptyList(),
-                            createdAt = 0L, updatedAt = 0L,
-                        )
-                    }
-                    Box(modifier = Modifier.size(80.dp)) {
-                        HeroIllustration(item = stub, modifier = Modifier.fillMaxSize())
-                    }
-                }
-                else -> {
-                    Text(
-                        text = "+ 从相册选",
-                        color = colors.sub.copy(alpha = 0.6f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontStyle = FontStyle.Italic,
-                    )
-                }
-            }
-        }
-    }
-}
+private val DefaultPalette = listOf("#0e0e0e", "#a47836", "#e8e2d4", "#5a5a5a")
 
 @Composable
 private fun FieldRow(label: String, content: @Composable () -> Unit) {
@@ -507,4 +436,3 @@ private fun PillChip(label: String, selected: Boolean, onClick: () -> Unit) {
         )
     }
 }
-

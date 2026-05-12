@@ -62,6 +62,20 @@ fun AddRoute(
         }
     }
 
+    // Cycle 0031：录入页的局部返回栈优先级 — 自下而上：
+    //   photoPreview 打开 → 关 viewer；history 抽屉打开 → 关抽屉；
+    //   Preview 模式 → 退回 Chat。都不该把用户推到首页。
+    //   全闭 / Chat 模式时让出来给 MainScreen 的全局 BackHandler（→ 回首页）。
+    androidx.activity.compose.BackHandler(
+        enabled = photoPreview != null || historyOpen || mode == AddMode.Preview,
+    ) {
+        when {
+            photoPreview != null -> photoPreview = null
+            historyOpen -> historyOpen = false
+            mode == AddMode.Preview -> mode = AddMode.Chat
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(colors.paper)) {
         Box(
             modifier = Modifier
@@ -111,6 +125,7 @@ fun AddRoute(
                     onUpdateSpec = vm::updateDraftSpec,
                     onAddSpec = vm::addDraftSpec,
                     onRemoveSpec = vm::removeDraftSpec,
+                    onUpdateHistory = vm::setDraftHistory,
                     onConfirm = { status ->
                         vm.commitDraft(status = status) { id ->
                             vm.newConversation()

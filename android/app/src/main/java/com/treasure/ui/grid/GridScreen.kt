@@ -16,12 +16,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -84,9 +82,25 @@ fun GridScreen(
     onOpenItem: (String) -> Unit,
     onBack: () -> Unit,
     onOpenCategoryManager: () -> Unit,
-    onOpenSearch: () -> Unit,
+    onOpenSearch: () -> Unit,  // Cycle 0031 起没人用了 — 搜索改内联到 chip 条
 ) {
     val colors = LocalTreasureColors.current
+
+    // Cycle 0031：把搜索从全屏 push 路由折回页内 — 点 chip 条左侧的放大镜，
+    // 整条 chip 退场，原地换成圆角输入框；空 query + 点别处取消；非空时下
+    // 方 grid 直接换成命中结果。
+    var searchActive by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    var searchQuery by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf("")
+    }
+    val q = searchQuery.trim()
+    val displayItems = if (searchActive && q.isNotBlank()) {
+        state.allVisibleItems.filter { it.matchesQuery(q) }
+    } else {
+        state.itemsInCategory
+    }
 
     Box(
         modifier = Modifier
@@ -94,68 +108,215 @@ fun GridScreen(
             .background(colors.paper)
             .statusBarsPadding(),
     ) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
+        // Cycle 0031：从 LazyVerticalGrid 改成 LazyColumn + chunked(2) Row 渲染 —
+        // 为了让"同一行两张卡片中任一标题两行 → 两张都两行"的同步效果可控（vertical
+        // grid 没办法跨行同步行高）。每对卡的标题行数靠 TextMeasurer 预测算出。
+        androidx.compose.foundation.lazy.LazyColumn(
             contentPadding = PaddingValues(
                 start = 22.dp,
                 end = 22.dp,
                 top = 28.dp,
                 bottom = 110.dp,
             ),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
-            // Header occupies both columns
-            item(span = { GridItemSpan(2) }) { Header(state.totalCount) }
-            item(span = { GridItemSpan(2) }) { CategoryChips(state, onSelectCategory) }
-
-            items(state.itemsInCategory, key = { it.id }) { item ->
-                ItemCard(item = item, onClick = { onOpenItem(item.id) })
+            item {
+                Header(
+                    total = state.totalCount,
+                    onOpenCategoryManager = onOpenCategoryManager,
+                )
+            }
+            item {
+                if (searchActive) {
+                    SearchInputBar(
+                        query = searchQuery,
+                        onQueryChange = { searchQuery = it },
+                        onCancel = {
+                            searchActive = false
+                            searchQuery = ""
+                        },
+                    )
+                } else {
+                    CategoryChipsWithSearch(
+                        state = state,
+                        onSelectCategory = onSelectCategory,
+                        onStartSearch = { searchActive = true },
+                    )
+                }
             }
 
-            if (state.itemsInCategory.isEmpty()) {
-                item(span = { GridItemSpan(2) }) {
-                    val name = state.visibleCategories
-                        .firstOrNull { it.id == state.currentCategoryId }?.nameZh
-                    EmptyHint(name)
+            items(
+                items = displayItems.chunked(2),
+                key = { pair -> pair.joinToString(",") { it.id } },
+            ) { pair ->
+                ItemPairRow(pair = pair, onOpenItem = onOpenItem)
+            }
+
+            if (displayItems.isEmpty()) {
+                item {
+                    if (searchActive && q.isNotBlank()) {
+                        SearchEmptyHint(q)
+                    } else if (!searchActive) {
+                        val name = state.visibleCategories
+                            .firstOrNull { it.id == state.currentCategoryId }?.nameZh
+                        EmptyHint(name)
+                    }
                 }
             }
         }
+    }
+}
 
-        // 右上工具栏：搜索 icon + 小红点（分类管理）。两个 28dp 触控区。
-        // Cycle 0029 加搜索；cycle 0026 起小红点是分类管理入口。
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 24.dp, end = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 搜索 icon — 简笔放大镜：圆 + 短斜线手柄
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpenSearch),
-                contentAlignment = Alignment.Center,
-            ) {
-                SearchGlyph(color = colors.ink)
-            }
-            // 红点分类管理入口
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpenCategoryManager),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .clip(CircleShape)
-                        .background(androidx.compose.ui.graphics.Color(0xFFC5392E)),
+/**
+ * Cycle 0031：图鉴一行两张卡 — 用 TextMeasurer 预测两张卡标题各自需要的行
+ * 数，pair 内取 max（1 或 2）后传给每张卡当 minLines/maxLines，保证两张卡
+ * 标题区域同高，副标 oneLiner 永远在同一水平线对齐。
+ */
+@Composable
+private fun ItemPairRow(pair: List<Item>, onOpenItem: (String) -> Unit) {
+    val titleStyle = MaterialTheme.typography.bodyLarge
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
+    val cellWidthPx = remember(cfg.screenWidthDp) {
+        // contentPadding 22 + 22，cell 间距 16，所以一张卡 = (screen - 60) / 2
+        val cellDp = (cfg.screenWidthDp - 22 * 2 - 16) / 2
+        with(density) { cellDp.dp.toPx().toInt() }.coerceAtLeast(1)
+    }
+    val titleLines = remember(pair, cellWidthPx, titleStyle) {
+        pair.maxOfOrNull { item ->
+            val title = "${item.brand} ${item.model}".trim().ifBlank { item.nickname }
+            textMeasurer.measure(
+                text = androidx.compose.ui.text.AnnotatedString(title),
+                style = titleStyle,
+                constraints = androidx.compose.ui.unit.Constraints(maxWidth = cellWidthPx),
+                softWrap = true,
+            ).lineCount.coerceAtMost(2)
+        } ?: 1
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        pair.forEach { item ->
+            ItemCard(
+                item = item,
+                titleLines = titleLines,
+                onClick = { onOpenItem(item.id) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (pair.size == 1) Box(modifier = Modifier.weight(1f)) {}
+    }
+}
+
+private fun com.treasure.core.domain.Item.matchesQuery(q: String): Boolean {
+    val needle = q.lowercase()
+    return brand.lowercase().contains(needle) ||
+        model.lowercase().contains(needle) ||
+        nickname.lowercase().contains(needle)
+}
+
+@Composable
+private fun SearchEmptyHint(q: String) {
+    val colors = LocalTreasureColors.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 40.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "没有匹配 \"$q\" 的物品",
+            color = colors.sub,
+            style = MaterialTheme.typography.bodyMedium,
+            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+        )
+    }
+}
+
+@Composable
+private fun SearchInputBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    val focusRequester = androidx.compose.runtime.remember {
+        androidx.compose.ui.focus.FocusRequester()
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 14.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .border(0.5.dp, colors.line, RoundedCornerShape(999.dp))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        SearchGlyph(color = colors.sub)
+        Spacer(Modifier.size(8.dp))
+        Box(modifier = Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(
+                    text = "搜索 品牌 / 型号 / 昵称",
+                    color = colors.sub.copy(alpha = 0.5f),
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
+            androidx.compose.foundation.text.BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.terra),
+                textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
+                    color = colors.ink,
+                    fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+            )
+        }
+        // 取消：query 空时直接退出 search 态，非空时先清空 query。
+        Text(
+            text = if (query.isEmpty()) "取消" else "清空",
+            color = colors.terra,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable {
+                    if (query.isEmpty()) onCancel() else onQueryChange("")
+                }
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun CategoryChipsWithSearch(
+    state: GridUiState,
+    onSelectCategory: (String?) -> Unit,
+    onStartSearch: () -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+    ) {
+        // Cycle 0031：搜索 icon 移到 chip 条最左 — 之前是右上角全屏 push。
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .border(0.5.dp, colors.line, CircleShape)
+                .clickable(onClick = onStartSearch),
+            contentAlignment = Alignment.Center,
+        ) {
+            SearchGlyph(color = colors.ink)
+        }
+        Spacer(Modifier.size(8.dp))
+        Box(modifier = Modifier.weight(1f)) {
+            CategoryChips(state, onSelectCategory)
         }
     }
 }
@@ -194,14 +355,43 @@ private fun SearchGlyph(color: androidx.compose.ui.graphics.Color) {
 }
 
 @Composable
-private fun Header(total: Int) {
+private fun Header(total: Int, onOpenCategoryManager: () -> Unit) {
     val colors = LocalTreasureColors.current
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "Treasure",
-            color = colors.ink,
-            style = MaterialTheme.typography.titleLarge,
-        )
+        // Cycle 0031：标题行用 LastBaseline 把 Edit 小字 + 小红点 的基线对齐
+        // 到 "Treasure" 的文字基线 — 视觉上"贴底"一致。dot 不是 Text，包到
+        // 一个 fixed height Box 内让基线对齐落到 Box 底部。
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = "Treasure",
+                color = colors.ink,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable(onClick = onOpenCategoryManager)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = "Edit",
+                    color = colors.terra,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Spacer(Modifier.size(6.dp))
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(androidx.compose.ui.graphics.Color(0xFFC5392E)),
+                )
+            }
+        }
         Spacer(Modifier.height(6.dp))
         Text(
             text = "$total ITEMS",
@@ -233,9 +423,7 @@ private fun CategoryChips(
     }
     androidx.compose.foundation.lazy.LazyRow(
         state = listState,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 14.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         item {
@@ -320,11 +508,15 @@ private fun CategoryChip(
 }
 
 @Composable
-private fun ItemCard(item: Item, onClick: () -> Unit) {
+private fun ItemCard(
+    item: Item,
+    titleLines: Int = 1,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalTreasureColors.current
     Column(
-        modifier = Modifier
-            .clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
     ) {
         // Square hero plate
         Box(
@@ -349,7 +541,9 @@ private fun ItemCard(item: Item, onClick: () -> Unit) {
             text = "${item.brand} ${item.model}",
             color = colors.ink,
             style = MaterialTheme.typography.bodyLarge,
-            maxLines = 1,
+            maxLines = titleLines,
+            minLines = titleLines,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(2.dp))
         Text(
@@ -357,6 +551,7 @@ private fun ItemCard(item: Item, onClick: () -> Unit) {
             color = colors.sub,
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
     }
 }

@@ -5,6 +5,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.treasure.theme.TreasureTheme
 import com.treasure.ui.nav.TreasureNavHost
 
@@ -19,7 +22,13 @@ class MainActivity : ComponentActivity() {
         // 自动派给 AI。
         consumeShareIntent(intent)
         setContent {
-            TreasureTheme {
+            // Cycle 0031：主题来源 — 用户在 Settings 顶部 icon 设的强制覆盖优
+            // 先，没设就跟随系统。换主题不重启 Activity，靠 collectAsState 实
+            // 时 recompose。
+            val app = applicationContext as TreasureApp
+            val override by app.darkModeOverride.collectAsState()
+            val systemDark = isSystemInDarkTheme()
+            TreasureTheme(darkTheme = override ?: systemDark) {
                 TreasureNavHost()
             }
         }

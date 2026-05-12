@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,9 +28,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SheetValue
@@ -38,8 +39,13 @@ import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +71,6 @@ import com.treasure.illust.HeroIllustration
 import com.treasure.ui.components.HeroAvatar
 import com.treasure.theme.LocalTreasureColors
 import com.treasure.ui.components.BackArrow
-import com.treasure.ui.components.DotButton
 
 @Composable
 fun DetailRoute(
@@ -80,6 +85,8 @@ fun DetailRoute(
         onBack = onBack,
         onEdit = { state.item?.let { onEdit(it.id) } },
         onSetCallouts = vm::setCallouts,
+        onAddPhotos = vm::addPhotos,
+        onRemovePhoto = vm::removePhoto,
     )
 }
 
@@ -89,6 +96,8 @@ fun DetailScreen(
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onSetCallouts: (String, List<com.treasure.core.domain.PhotoCallout>) -> Unit = { _, _ -> },
+    onAddPhotos: (List<android.net.Uri>) -> Unit = {},
+    onRemovePhoto: (String) -> Unit = {},
 ) {
     val colors = LocalTreasureColors.current
     val item = state.item
@@ -123,13 +132,16 @@ fun DetailScreen(
         skipHiddenState = true,
     )
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
+    val expanded = sheetState.currentValue == SheetValue.Expanded
 
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
-        sheetPeekHeight = 40.dp,
+        sheetPeekHeight = 52.dp,
         sheetContainerColor = colors.paper,
         sheetContentColor = colors.ink,
-        sheetDragHandle = { BottomSheetDefaults.DragHandle(color = colors.sub) },
+        // Cycle 0031：替换默认 36dp 灰线把手 — 一行小字"↑ 上拖看详情"。
+        // 整块仍是 sheet 内置拖动响应区，竖向手势照旧工作。
+        sheetDragHandle = { DetailSheetHandle(isExpanded = expanded) },
         sheetShadowElevation = 8.dp,
         sheetTonalElevation = 0.dp,
         containerColor = colors.paper,
@@ -137,6 +149,8 @@ fun DetailScreen(
             DrawerContent(
                 item = item,
                 onOpenPhoto = { idx -> fullscreenIndex = idx },
+                onAddPhotos = onAddPhotos,
+                onRemovePhoto = onRemovePhoto,
             )
         },
     ) { innerPadding ->
@@ -151,12 +165,36 @@ fun DetailScreen(
     }
 
     fullscreenIndex?.let { idx ->
+        // Cycle 0031：全屏 viewer 打开时拦住 back — 先关 viewer，不要 pop 到 Main。
+        androidx.activity.compose.BackHandler { fullscreenIndex = null }
         com.treasure.ui.photo.FullscreenPhotoViewer(
             photos = item.photos,
             initialIndex = idx,
             callouts = item.callouts,
             onSetCallouts = onSetCallouts,
             onClose = { fullscreenIndex = null },
+        )
+    }
+}
+
+/**
+ * Cycle 0031：抽屉顶部把手区 — 一行小字提示"↑ 上拖看详情"（展开时变
+ * "↓ 下拖收起"）。高度跟之前一样 52dp，整块仍是 sheet 内置拖动响应区。
+ */
+@Composable
+private fun DetailSheetHandle(isExpanded: Boolean) {
+    val colors = LocalTreasureColors.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = if (isExpanded) "↓ 下拖收起" else "↑ 上拖看详情",
+            color = colors.sub,
+            style = MaterialTheme.typography.labelSmall,
+            fontStyle = FontStyle.Italic,
         )
     }
 }
@@ -189,7 +227,28 @@ private fun TopBar(onBack: () -> Unit, onEdit: () -> Unit) {
     ) {
         BackArrow(color = colors.ink, onClick = onBack)
         Spacer(Modifier.weight(1f))
-        DotButton(color = colors.terra, onClick = onEdit)
+        // Cycle 0031：和图鉴页右上 Edit + 小红点同款 — terra Edit 字 + 12dp
+        // 0xFFC5392E 红圆点 + 整行 clickable 进编辑。
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable(onClick = onEdit)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+        ) {
+            Text(
+                text = "Edit",
+                color = colors.terra,
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Spacer(Modifier.width(6.dp))
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(androidx.compose.ui.graphics.Color(0xFFC5392E)),
+            )
+        }
     }
 }
 
@@ -445,10 +504,16 @@ private enum class DrawerTab(val label: String) {
 private fun DrawerContent(
     item: Item,
     onOpenPhoto: (Int) -> Unit,
+    onAddPhotos: (List<android.net.Uri>) -> Unit,
+    onRemovePhoto: (String) -> Unit,
 ) {
-    var selected by remember { mutableStateOf(DrawerTab.History) }
     val configuration = LocalConfiguration.current
     val drawerHeight = (configuration.screenHeightDp * 0.78f).dp
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = 0,
+        pageCount = { 3 },
+    )
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -456,18 +521,32 @@ private fun DrawerContent(
             .height(drawerHeight),
     ) {
         TabRowBar(
-            selected = selected,
-            onSelect = { selected = it },
+            selected = DrawerTab.entries[pagerState.currentPage],
+            onSelect = { tab ->
+                scope.launch {
+                    pagerState.animateScrollToPage(tab.ordinal)
+                }
+            },
             historyCount = item.history.size,
             specsCount = item.specs.count { it.label.isNotBlank() },
             albumCount = item.photos.size,
         )
         Spacer(Modifier.height(8.dp))
-        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-            when (selected) {
+        // Cycle 0031：3 个 tab 改成 HorizontalPager — 左右滑切换 history /
+        // specs / album，跟主页 tab 同款触感。
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        ) { page ->
+            when (DrawerTab.entries[page]) {
                 DrawerTab.History -> HistoryList(item.history)
                 DrawerTab.Specs   -> SpecsList(item)
-                DrawerTab.Album   -> AlbumList(item.photos, onOpenPhoto)
+                DrawerTab.Album   -> AlbumList(
+                    photos = item.photos,
+                    onOpenPhoto = onOpenPhoto,
+                    onAddPhotos = onAddPhotos,
+                    onRemovePhoto = onRemovePhoto,
+                )
             }
         }
     }
@@ -533,41 +612,63 @@ private fun HistoryList(events: List<HistoryEvent>) {
             .padding(horizontal = 22.dp, vertical = 8.dp),
     ) {
         events.forEachIndexed { idx, e ->
+            // Cycle 0031：时间轴左轨改成 — 月日两行（"5/12" 大字 + "2026" 小字
+            // 在上方）+ 40dp 圆形 kind icon。右侧标题 titleMedium、备注下方独
+            // 立小字。比之前 "2026.05.12" 一行字更易读。
             Row(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(end = 14.dp),
+                    modifier = Modifier
+                        .width(72.dp)
+                        .padding(end = 14.dp),
                 ) {
-                    Text(
-                        text = e.date.replace("-", "."),
-                        color = colors.sub,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Spacer(Modifier.height(4.dp))
+                    val parsed = runCatching { java.time.LocalDate.parse(e.date) }.getOrNull()
+                    if (parsed != null) {
+                        Text(
+                            text = parsed.year.toString(),
+                            color = colors.sub.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = "${parsed.monthValue} / ${parsed.dayOfMonth}",
+                            color = colors.ink,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    } else {
+                        Text(
+                            text = e.date,
+                            color = colors.sub,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    // Cycle 0031：emoji 自带色，背景用 kindColor 淡填充 + 边框。
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(kindColor(e.kind, colors))
-                            .padding(2.dp),
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(kindColor(e.kind, colors).copy(alpha = 0.14f))
+                            .border(0.5.dp, kindColor(e.kind, colors).copy(alpha = 0.55f), CircleShape),
+                        contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             text = kindGlyph(e.kind),
-                            color = colors.paper,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 4.dp),
+                            style = MaterialTheme.typography.titleMedium,
                         )
                     }
                     if (idx != events.lastIndex) {
-                        Box(modifier = Modifier
-                            .padding(top = 4.dp)
-                            .height(36.dp)
-                            .width(0.5.dp)
-                            .background(colors.line))
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .height(36.dp)
+                                .width(0.5.dp)
+                                .background(colors.line),
+                        )
                     }
                 }
-                Column(modifier = Modifier.padding(bottom = 18.dp).weight(1f)) {
+                Column(modifier = Modifier.padding(top = 22.dp, bottom = 18.dp).weight(1f)) {
                     Text(
-                        text = e.title,
+                        text = e.title.ifBlank { kindLabelZh(e.kind) },
                         color = colors.ink,
                         style = MaterialTheme.typography.titleMedium,
                     )
@@ -584,12 +685,22 @@ private fun HistoryList(events: List<HistoryEvent>) {
     }
 }
 
+// Cycle 0031：跟 EditScreen 同一套 emoji glyph + 中文 label，Detail / Edit
+// 两边历史 row 视觉一致。
 private fun kindGlyph(kind: HistoryKind): String = when (kind) {
-    HistoryKind.ACQUIRED  -> "+"
-    HistoryKind.MILESTONE -> "★"
-    HistoryKind.MAINTAIN  -> "↻"
-    HistoryKind.MOD       -> "Δ"
-    HistoryKind.PARTED    -> "−"
+    HistoryKind.ACQUIRED  -> "🛒"
+    HistoryKind.MILESTONE -> "🏆"
+    HistoryKind.MAINTAIN  -> "🔧"
+    HistoryKind.MOD       -> "⚙️"
+    HistoryKind.PARTED    -> "👋"
+}
+
+private fun kindLabelZh(kind: HistoryKind): String = when (kind) {
+    HistoryKind.ACQUIRED  -> "购入"
+    HistoryKind.MILESTONE -> "里程碑"
+    HistoryKind.MAINTAIN  -> "保养"
+    HistoryKind.MOD       -> "改装"
+    HistoryKind.PARTED    -> "出手"
 }
 
 private fun kindColor(
@@ -663,42 +774,211 @@ private fun SpecRow(label: String, value: String) {
 }
 
 @Composable
-private fun AlbumList(photos: List<String>, onOpenPhoto: (Int) -> Unit) {
+private fun AlbumList(
+    photos: List<String>,
+    onOpenPhoto: (Int) -> Unit,
+    onAddPhotos: (List<android.net.Uri>) -> Unit,
+    onRemovePhoto: (String) -> Unit,
+) {
     val colors = LocalTreasureColors.current
-    if (photos.isEmpty()) { Empty("还没有实拍 · 点右上 · 编辑添加"); return }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 22.dp, vertical = 12.dp),
-    ) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().weight(1f),
+    var editMode by remember { mutableStateOf(false) }
+    val selected = remember { mutableStateListOf<String>() }
+    var confirmingDelete by remember { mutableStateOf(false) }
+
+    // Cycle 0031：影集进入编辑态后，关掉就清空 selection。
+    androidx.compose.runtime.LaunchedEffect(editMode) {
+        if (!editMode) selected.clear()
+    }
+
+    val pickPhotos = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts
+            .PickMultipleVisualMedia(maxItems = 9),
+    ) { uris ->
+        if (uris.isNotEmpty()) onAddPhotos(uris)
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 22.dp, vertical = 12.dp),
         ) {
-            itemsIndexed(items = photos, key = { _, p -> p }) { idx, path ->
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            ) {
+                // + 加号块（永远在第一格，非编辑态可点）
+                item {
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .background(colors.card.copy(alpha = 0.55f))
+                            .border(0.5.dp, colors.line)
+                            .then(
+                                if (!editMode) Modifier.clickable {
+                                    pickPhotos.launch(
+                                        androidx.activity.result.PickVisualMediaRequest(
+                                            androidx.activity.result.contract
+                                                .ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                        ),
+                                    )
+                                } else Modifier,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "+",
+                            color = if (editMode) colors.sub.copy(alpha = 0.4f) else colors.terra,
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                    }
+                }
+                itemsIndexed(items = photos, key = { _, p -> p }) { idx, path ->
+                    val isSelected = path in selected
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .background(colors.card)
+                            .border(
+                                if (isSelected) 1.5.dp else 0.5.dp,
+                                if (isSelected) colors.terra else colors.line,
+                            )
+                            .pointerInput(path, editMode) {
+                                detectTapGestures(
+                                    onTap = {
+                                        if (editMode) {
+                                            if (isSelected) selected.remove(path)
+                                            else selected.add(path)
+                                        } else onOpenPhoto(idx)
+                                    },
+                                    onLongPress = {
+                                        if (!editMode) {
+                                            editMode = true
+                                            selected.add(path)
+                                        }
+                                    },
+                                )
+                            },
+                    ) {
+                        AsyncImage(
+                            model = path,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                        if (editMode) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(6.dp)
+                                    .size(20.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(
+                                        if (isSelected) colors.terra
+                                        else colors.paper.copy(alpha = 0.7f),
+                                    )
+                                    .border(
+                                        0.5.dp,
+                                        if (isSelected) colors.terra else colors.line,
+                                        RoundedCornerShape(50),
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (isSelected) {
+                                    Text(
+                                        text = "✓",
+                                        color = colors.paper,
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = if (editMode) "${selected.size} 张已选 · 点完成退出编辑"
+                else "${photos.size} 张实拍 · 长按缩略图进入编辑态批量删除",
+                color = colors.sub,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            // 给底部删除条留位置
+            if (editMode) Spacer(Modifier.height(64.dp))
+        }
+        // 底部删除长条 — 编辑态出现
+        if (editMode) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(
                     modifier = Modifier
-                        .aspectRatio(1f)
-                        .background(colors.card)
-                        .border(0.5.dp, colors.line)
-                        .clickable { onOpenPhoto(idx) },
+                        .weight(0.4f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .border(0.5.dp, colors.line, RoundedCornerShape(6.dp))
+                        .clickable { editMode = false }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    AsyncImage(
-                        model = path,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
+                    Text("完成", color = colors.sub, style = MaterialTheme.typography.bodyMedium)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            if (selected.isEmpty()) colors.terra.copy(alpha = 0.25f)
+                            else colors.terra,
+                        )
+                        .clickable(enabled = selected.isNotEmpty()) {
+                            confirmingDelete = true
+                        }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "删除${if (selected.isNotEmpty()) " ${selected.size}" else ""}",
+                        color = colors.paper,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = "${photos.size} 张实拍 · 点击查看大图 / 长按加注",
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
+    }
+
+    if (confirmingDelete) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("删除 ${selected.size} 张照片？") },
+            text = {
+                Text(
+                    text = "选中的实拍照片会从图鉴里清掉，无法恢复。",
+                    color = colors.sub,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    selected.toList().forEach { onRemovePhoto(it) }
+                    selected.clear()
+                    editMode = false
+                    confirmingDelete = false
+                }) { Text("删除", color = colors.terra) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirmingDelete = false }) {
+                    Text("取消")
+                }
+            },
+            containerColor = colors.paper,
+            titleContentColor = colors.ink,
+            textContentColor = colors.sub,
         )
     }
 }

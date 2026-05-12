@@ -33,3 +33,6 @@ Thumbs.db
 # Generated
 **/generated/
 **/*.bin
+
+# Claude local agent state
+.claude/

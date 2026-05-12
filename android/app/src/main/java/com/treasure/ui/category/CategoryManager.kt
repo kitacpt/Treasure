@@ -3,16 +3,13 @@
 package com.treasure.ui.category
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -23,17 +20,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,20 +44,16 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.treasure.core.domain.CategoryInfo
-import com.treasure.core.domain.HeroVector
-import com.treasure.illust.HeroIllustration
 import com.treasure.theme.LocalTreasureColors
-import kotlin.math.roundToInt
 
 /**
- * Cycle 0026：分类管理抽屉。Cycle 0028 重构：
- *   - 去掉副标题"隐藏只是 ..."
- *   - 去掉每行 [隐藏 / 显示] pill 按钮，**用拖动取代**
- *   - 去掉底部 [完成] 按钮（实时生效）
- *   - "编辑 →" 文字换成右侧小红点（点开进编辑页）
- *   - 拖动逻辑：长按行的左边握把 → 上下拖；中间一条灰线分割"显示中 / 已隐
- *     藏"两段。拖到分割线另一侧 = 切换 hidden；同段拖动 = 改 sort_order。
- *     松手时一次性提交 reorder + setHidden 到仓库。
+ * Cycle 0026：分类管理抽屉。
+ * Cycle 0029：编辑 / 新建拆全屏路由。
+ * Cycle 0030：divider 占自己一个 row-height slot。
+ * Cycle 0031：拖动数学按"预览终态布局"算 — 每行（含 divider）拖动期间直接
+ *   跳到它在终态新布局里的 visualSlot。修两个问题：(a) 跨过分割线落点错一格
+ *   导致用户感觉"拖不下去"；(b) 分割线视觉不动 → 拖动到下面 hidden 行重叠
+ *   分割线感觉很怪。
  */
 @Composable
 fun CategoryManager(
@@ -80,8 +72,6 @@ fun CategoryManager(
         containerColor = colors.paper,
         contentColor = colors.ink,
     ) {
-        // Cycle 0029：编辑 / 新建都拆成全屏路由，Manager 只剩 List 模式。点击
-        // 时 onClose() 收抽屉再 navigate 过去，避免抽屉和全屏页同时存在。
         CategoryList(
             all = all,
             onEdit = { info ->
@@ -103,8 +93,6 @@ fun CategoryManager(
 // ─── List with drag-to-reorder ─────────────────────────────────────────
 
 private val ROW_HEIGHT = 60.dp
-// Cycle 0030：divider 跟 row 同高，作为一个 "块" 占用一个 slot —— 之前是
-// 单独 36dp 浮层，跟 drag 索引数学错位，导致拖到底部"看不到下面去"。
 
 @Composable
 private fun CategoryList(
@@ -115,32 +103,33 @@ private fun CategoryList(
 ) {
     val colors = LocalTreasureColors.current
 
-    // 本地"工作副本"：仓库一变化就 reset，但拖动期间所有移动都在这上面跑，
-    // 松手时一次性把最终 orderedIds + hiddenIds 提交回仓库。
-    var workVisible by remember(all) {
-        mutableStateOf(all.filter { !it.hidden })
-    }
-    var workHidden by remember(all) {
-        mutableStateOf(all.filter { it.hidden })
+    // 工作副本：cycle 0031 修订 — 只在分类**集合**变化（新增 / 删除）时再
+    // sync，单纯 reorder / hidden toggle 不要因为 Room 中间 emit 把本地优化
+    // 后状态覆盖掉。否则会出现"拖动后视觉先到新位、随后 sort_order 写一半
+    // 的中间 emit 反推 workVisible 重置回旧顺序"的弹回观感。
+    var workVisible by remember { mutableStateOf(all.filter { !it.hidden }) }
+    var workHidden by remember { mutableStateOf(all.filter { it.hidden }) }
+    val incomingIds = remember(all) { all.map { it.id }.toSet() }
+    LaunchedEffect(incomingIds) {
+        val localIds = (workVisible + workHidden).map { it.id }.toSet()
+        if (localIds != incomingIds) {
+            workVisible = all.filter { !it.hidden }
+            workHidden = all.filter { it.hidden }
+        }
     }
 
     val density = LocalDensity.current
     val rowPx = with(density) { ROW_HEIGHT.toPx() }
 
-    // 拖动状态。dragIndex 是 *合并后 combined* 里的逻辑索引（不含 divider）。
     var dragIndex by remember { mutableStateOf(-1) }
     var dragOffsetY by remember { mutableStateOf(0f) }
 
     val combined = workVisible + workHidden
     val visibleCount = workVisible.size
+    val totalSlots = combined.size + 1  // +1 给 divider
 
-    // Cycle 0030：divider 占用一个 row-height slot。视觉布局 (visualSlot):
-    //   [0..visibleCount-1]   = workVisible 各行
-    //   [visibleCount]        = divider slot（同高）
-    //   [visibleCount+1..N]   = workHidden 各行
-    // 总 slot 数 = combined.size + 1
+    // visualSlot 编号：visible 占 0..V-1，divider 占 V，hidden 占 V+1..N。
     fun combinedToVisual(i: Int): Int = if (i < visibleCount) i else i + 1
-    val totalSlots = combined.size + 1
 
     Column(
         modifier = Modifier
@@ -149,7 +138,6 @@ private fun CategoryList(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp),
     ) {
-        // 头：左 "分类管理"，右 "+ 新增分类"
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "分类管理",
@@ -169,89 +157,105 @@ private fun CategoryList(
         }
         Spacer(Modifier.height(14.dp))
 
-        // 渲染区。所有 slot（含 divider）等高 ROW_HEIGHT，drag 数学统一在
-        // visualSlot 域里跑。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(ROW_HEIGHT * totalSlots),
         ) {
-            // 计算被拖行的目标 visualSlot。坐标域：visualSlot 0..totalSlots-1
-            // dragOffsetY 是相对于原位的视觉偏移
-            val targetVisualSlot = if (dragIndex == -1) -1 else {
-                val originVisual = combinedToVisual(dragIndex)
-                val draggedCenterY = originVisual * rowPx + dragOffsetY + rowPx / 2f
-                (draggedCenterY / rowPx).toInt()
-                    .coerceIn(0, totalSlots - 1)
+            // 用户指尖中心当前所在 visualSlot
+            val originVisual = if (dragIndex < 0) -1 else combinedToVisual(dragIndex)
+            val targetVisualSlot = if (dragIndex < 0) -1 else {
+                val centerY = originVisual * rowPx + dragOffsetY + rowPx / 2f
+                (centerY / rowPx).toInt().coerceIn(0, totalSlots - 1)
             }
-            // divider visualSlot = visibleCount。drag 到 divider 上时按拖动
-            // 方向 snap 到邻近 row 那侧：从上拖来 → 落到 divider 上方；从下
-            // 拖来 → 落到 divider 下方。
-            val effectiveTargetSlot = when {
-                targetVisualSlot < 0 -> -1
-                targetVisualSlot == visibleCount -> {
-                    val originVisual = combinedToVisual(dragIndex)
-                    if (originVisual < visibleCount) visibleCount  // 从上来 → 落进 hidden 首位
-                    else visibleCount  // 从下来 → 也落进 hidden 首位（divider 上方是 visible 末，正好替换那个位置反而更直觉？此处按 dropMode 决定）
-                    // 实际更简单：dragging 行到 divider slot 表示用户希望
-                    // 跨段。从上来：行变 hidden，新 slot = visibleCount（divider 自身让位）
-                    //         从下来：行变 visible，新 slot = visibleCount - 1（divider 自身让位向下）
-                }
-                else -> targetVisualSlot
+
+            // 预览终态：拖动行将落进哪段、newVisibleCount 多少、插在 combined' 哪
+            // 个 idx。跟 commitDrag 用同一套公式 — 拖动手感与松手结果一致。
+            val originIsVisible = dragIndex in 0 until visibleCount
+            val previewTargetIsVisible = when {
+                dragIndex < 0 -> originIsVisible
+                targetVisualSlot < visibleCount -> true
+                targetVisualSlot > visibleCount -> false
+                else -> !originIsVisible  // 拖到 divider 槽 → 跨段去对侧
+            }
+            val previewNewVis = when {
+                dragIndex < 0 -> visibleCount
+                originIsVisible && previewTargetIsVisible -> visibleCount
+                originIsVisible && !previewTargetIsVisible -> visibleCount - 1
+                !originIsVisible && previewTargetIsVisible -> visibleCount + 1
+                else -> visibleCount
+            }
+            val previewNewCombinedIdx = if (dragIndex < 0) -1 else {
+                val raw = if (previewTargetIsVisible) targetVisualSlot else targetVisualSlot - 1
+                raw.coerceIn(0, combined.size - 1)
             }
 
             combined.forEachIndexed { idx, info ->
                 val isDragging = idx == dragIndex
-                val baseVisual = combinedToVisual(idx)
-                val baseY = baseVisual * rowPx
-
-                // make-room shift：dragging 的目标 visualSlot 决定其它行怎么让
-                // 自己跳过 divider slot — 把 divider 也算成"占位"。
-                val shift = computeShift(
-                    rowVisual = baseVisual,
-                    dragOriginVisual = if (dragIndex == -1) -1 else combinedToVisual(dragIndex),
-                    dragTargetVisual = effectiveTargetSlot,
-                    dividerVisual = visibleCount,
-                    rowPx = rowPx,
-                )
-                val translateY = if (isDragging) dragOffsetY else shift
+                val translateY: Float = when {
+                    isDragging -> combinedToVisual(idx) * rowPx + dragOffsetY
+                    dragIndex < 0 -> combinedToVisual(idx) * rowPx
+                    else -> {
+                        // 在 combined' (移除 dragging 行) 里这行的 idx
+                        val newI = if (idx < dragIndex) idx else idx - 1
+                        // 把 dragging 行插回后，这行最终的 combined idx
+                        val finalI = if (newI < previewNewCombinedIdx) newI else newI + 1
+                        // 终态 visualSlot：finalI < newVis 是 visible，否则跳过 divider 加 1
+                        val newVisual =
+                            if (finalI < previewNewVis) finalI else finalI + 1
+                        newVisual * rowPx
+                    }
+                }
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(ROW_HEIGHT)
                         .graphicsLayer {
-                            translationY = baseY + translateY
+                            translationY = translateY
                             if (isDragging) shadowElevation = 8.dp.toPx()
                         }
                         .zIndex(if (isDragging) 1f else 0f)
-                        .background(
-                            if (isDragging) colors.card else Color.Transparent,
-                        ),
+                        .background(if (isDragging) colors.card else Color.Transparent),
                 ) {
                     CategoryRow(
                         info = info,
                         onEdit = { onEdit(info) },
                         onDragStart = {
-                            dragIndex = idx
+                            // 用当前 combined 里 info.id 的位置当 dragIndex —
+                            // 不依赖外层闭包里捕获的 idx（commit 后重组、行序
+                            // 变了，旧 idx 就指向别的行）。
+                            dragIndex = combined.indexOfFirst { it.id == info.id }
                             dragOffsetY = 0f
                         },
                         onDrag = { dy -> dragOffsetY += dy },
                         onDragEnd = {
-                            commitDrag(
-                                combined = combined,
-                                visibleCount = visibleCount,
-                                dragIndex = dragIndex,
-                                targetVisualSlot = effectiveTargetSlot,
-                                onApply = { newCombined, newVisibleCount ->
-                                    workVisible = newCombined.take(newVisibleCount)
-                                    workHidden = newCombined.drop(newVisibleCount)
-                                    val orderedIds = newCombined.map { it.id }
-                                    val hiddenIds = newCombined.drop(newVisibleCount)
-                                        .map { it.id }.toSet()
-                                    onCommit(orderedIds, hiddenIds)
-                                },
-                            )
+                            // 用当前 state（不依赖 outer 闭包捕获）现算 target
+                            // 落点 — gesture 触发与重组之间存在一帧间隙，闭包
+                            // 捕获的 targetVisualSlot 可能是上一次 frame 的值。
+                            val d = dragIndex
+                            if (d >= 0) {
+                                val originVisualNow =
+                                    if (d < visibleCount) d else d + 1
+                                val centerY = originVisualNow * rowPx +
+                                    dragOffsetY + rowPx / 2f
+                                val target = (centerY / rowPx).toInt()
+                                    .coerceIn(0, totalSlots - 1)
+                                commitDrag(
+                                    combined = combined,
+                                    visibleCount = visibleCount,
+                                    dragIndex = d,
+                                    targetVisualSlot = target,
+                                    onApply = { newCombined, newVisibleCount ->
+                                        workVisible = newCombined.take(newVisibleCount)
+                                        workHidden = newCombined.drop(newVisibleCount)
+                                        val orderedIds = newCombined.map { it.id }
+                                        val hiddenIds = newCombined.drop(newVisibleCount)
+                                            .map { it.id }.toSet()
+                                        onCommit(orderedIds, hiddenIds)
+                                    },
+                                )
+                            }
                             dragIndex = -1
                             dragOffsetY = 0f
                         },
@@ -263,12 +267,15 @@ private fun CategoryList(
                 }
             }
 
-            // Divider slot — 占一个 row-height 的位置，里面是分割线 + 标签
+            // Divider slot — 跟着 previewNewVis 搬：跨段拖时它视觉滑到新位置，
+            // 让分割线始终在 visible / hidden 段交界处。
+            val dividerTranslate =
+                (if (dragIndex < 0) visibleCount else previewNewVis) * rowPx
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(ROW_HEIGHT)
-                    .graphicsLayer { translationY = visibleCount * rowPx },
+                    .graphicsLayer { translationY = dividerTranslate },
                 contentAlignment = Alignment.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -298,38 +305,20 @@ private fun CategoryList(
     }
 }
 
-/** Make-room shift：拖动期间，其它行让开 dragging 行原来的位置 / 把目标位
- *  让出来。Visual 坐标域，divider 占自己的 slot。 */
-private fun computeShift(
-    rowVisual: Int,
-    dragOriginVisual: Int,
-    dragTargetVisual: Int,
-    dividerVisual: Int,
-    rowPx: Float,
-): Float {
-    if (dragOriginVisual < 0 || dragTargetVisual < 0) return 0f
-    if (rowVisual == dragOriginVisual) return 0f
-    // 拖动行将移到 dragTargetVisual。其它行的 visualSlot 怎么变？
-    // 把"divider 不动"作为约束，dragging 行从 origin 移到 target，介于两者
-    // 之间的非 divider 行需要让位。
-    return when {
-        dragOriginVisual < dragTargetVisual -> {
-            // 向下拖。介于 (origin, target] 的行向上让 rowPx 一个 slot。
-            // 但 divider slot 不实际有内容，跳过它。
-            if (rowVisual in (dragOriginVisual + 1)..dragTargetVisual && rowVisual != dividerVisual) -rowPx
-            else 0f
-        }
-        dragOriginVisual > dragTargetVisual -> {
-            // 向上拖。介于 [target, origin) 的行向下让 rowPx 一个 slot。
-            if (rowVisual in dragTargetVisual until dragOriginVisual && rowVisual != dividerVisual) rowPx
-            else 0f
-        }
-        else -> 0f
-    }
-}
-
-/** drag end 提交。基于 dragging 行原索引 + visualSlot 目标，算出新的
- *  combined 列表 + 新 visibleCount。 */
+/**
+ * Cycle 0031：拖动落点 → 新 combined 列表 + newVisibleCount。
+ *
+ * 关键不变量：用户指尖 Y 与 visualSlot 一一对应（slot = Y / rowPx）。所以
+ * 用户希望拖动行在终态布局里的 visualSlot 就等于他松手时的 targetVisualSlot。
+ *
+ * 推导：
+ *   - 终态 newVis = 拖动行落进哪段决定的。
+ *   - 在终态布局里，combined idx k 的 visualSlot = k (if k < newVis) else k+1。
+ *     所以反推：要拖动行处在 visualSlot = t 上，它的 combined 终态 idx =
+ *       t       (if 目标 visible)
+ *       t - 1   (if 目标 hidden — 跳过 divider 占的那个 slot)
+ *   - 该 idx 就是把拖动行插进 combined'(去掉 dragIndex) 的位置。
+ */
 private fun commitDrag(
     combined: List<CategoryInfo>,
     visibleCount: Int,
@@ -341,48 +330,25 @@ private fun commitDrag(
     val originVisual = if (dragIndex < visibleCount) dragIndex else dragIndex + 1
     if (targetVisualSlot == originVisual) return  // 没动
 
-    // 1. 移除 dragging 行 → 中间态 combined
-    val withoutDragged = combined.toMutableList().also { it.removeAt(dragIndex) }
-    val newVisibleCountWithoutDragged =
-        if (dragIndex < visibleCount) visibleCount - 1 else visibleCount
-
-    // 2. 把 targetVisualSlot 换算成新 combined 的索引 + 是否 visible
-    //    在中间态里 visualSlot:
-    //      [0..newVis-1]   visible
-    //      [newVis]        divider
-    //      [newVis+1..N-1] hidden（N = withoutDragged.size + 1）
-    val newVis = newVisibleCountWithoutDragged
-    // targetVisualSlot 是用户期望的"落点"，但用户是基于"含 dragging 的原 visualSlot"
-    // 选的位置。在中间态里要补偿：如果 dragging 来自 visible 段，那段所有 slot 在
-    // 中间态里都往左 / 上移一格。
-    val adjustedTarget = if (originVisual < targetVisualSlot) targetVisualSlot - 1
-                         else targetVisualSlot
-
-    val (newCombinedIdx, newIsVisible) = when {
-        adjustedTarget < newVis -> Pair(adjustedTarget, true)
-        adjustedTarget == newVis -> {
-            // 落在 divider slot — 按拖动方向决定吸附
-            val droppedToHidden = originVisual < targetVisualSlot
-            if (droppedToHidden) Pair(newVis, false)  // 第一个 hidden 位
-            else Pair(newVis - 1, true)               // 最后一个 visible 位
-        }
-        else -> {
-            // adjustedTarget > newVis：hidden 段
-            val hiddenIdxOffset = adjustedTarget - newVis - 1
-            Pair(newVis + hiddenIdxOffset, false)
-        }
-    }
-
-    val newCombined = withoutDragged.toMutableList().also {
-        it.add(newCombinedIdx.coerceIn(0, it.size), combined[dragIndex])
+    val originIsVisible = dragIndex < visibleCount
+    val targetIsVisible = when {
+        targetVisualSlot < visibleCount -> true
+        targetVisualSlot > visibleCount -> false
+        else -> !originIsVisible  // 拖到 divider 槽 → 跨段去对侧
     }
     val newVisibleCount = when {
-        newIsVisible && dragIndex < visibleCount -> visibleCount  // visible → visible
-        newIsVisible && dragIndex >= visibleCount -> visibleCount + 1  // hidden → visible
-        !newIsVisible && dragIndex < visibleCount -> visibleCount - 1  // visible → hidden
-        else -> visibleCount  // hidden → hidden
-    }.coerceIn(0, newCombined.size)
+        originIsVisible && targetIsVisible -> visibleCount
+        originIsVisible && !targetIsVisible -> visibleCount - 1
+        !originIsVisible && targetIsVisible -> visibleCount + 1
+        else -> visibleCount
+    }
+    val newCombinedIdx = (if (targetIsVisible) targetVisualSlot else targetVisualSlot - 1)
+        .coerceIn(0, combined.size - 1)
 
+    val withoutDragged = combined.toMutableList().also { it.removeAt(dragIndex) }
+    val newCombined = withoutDragged.toMutableList().also {
+        it.add(newCombinedIdx, combined[dragIndex])
+    }
     onApply(newCombined, newVisibleCount)
 }
 
@@ -396,6 +362,16 @@ private fun CategoryRow(
     onDragCancel: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
+    // Cycle 0031 复修：pointerInput(key) 块的 closure 只在 key 变化时重新捕
+    // 获 — `info.id` 不变 → 块里抓住的是首次组合时那一份 lambda。父级 forEachIndexed
+    // 每次重组都生成新 lambda（捕获新的 idx）但永远进不来。结果第一次拖
+    // 动 OK，之后所有重组里 idx 都对不上，拖 B 实际改了 C 的位置 → 用户看到
+    // B 弹回去。用 rememberUpdatedState 把"最新"那份 lambda 注入到 gesture
+    // detector 的 closure 里。
+    val latestOnDragStart by rememberUpdatedState(onDragStart)
+    val latestOnDrag by rememberUpdatedState(onDrag)
+    val latestOnDragEnd by rememberUpdatedState(onDragEnd)
+    val latestOnDragCancel by rememberUpdatedState(onDragCancel)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -409,10 +385,10 @@ private fun CategoryRow(
                 .size(36.dp)
                 .pointerInput(info.id) {
                     detectDragGesturesAfterLongPress(
-                        onDragStart = { onDragStart() },
-                        onDragEnd = { onDragEnd() },
-                        onDragCancel = { onDragCancel() },
-                        onDrag = { _, drag -> onDrag(drag.y) },
+                        onDragStart = { latestOnDragStart() },
+                        onDragEnd = { latestOnDragEnd() },
+                        onDragCancel = { latestOnDragCancel() },
+                        onDrag = { _, drag -> latestOnDrag(drag.y) },
                     )
                 },
             contentAlignment = Alignment.Center,

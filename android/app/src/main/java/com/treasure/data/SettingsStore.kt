@@ -96,6 +96,25 @@ class SettingsStore(context: Context) {
             prefs.edit().putBoolean(KEY_LAST_TEST_PASSED, value).apply()
         }
 
+    /** Cycle 0031：用户手动选的主题。null = 跟随系统；true = 强制暗黑；
+     *  false = 强制明亮。 */
+    var darkMode: Boolean?
+        get() = when (prefs.getString(KEY_DARK_MODE, null)) {
+            "dark" -> true
+            "light" -> false
+            else -> null
+        }
+        set(value) {
+            prefs.edit().run {
+                when (value) {
+                    true -> putString(KEY_DARK_MODE, "dark")
+                    false -> putString(KEY_DARK_MODE, "light")
+                    null -> remove(KEY_DARK_MODE)
+                }
+                apply()
+            }
+        }
+
     fun hasKey(): Boolean = !apiKey.isNullOrBlank()
 
     fun clear() {
@@ -112,6 +131,7 @@ class SettingsStore(context: Context) {
         private const val KEY_TEMPERATURE = "temperature"
         private const val KEY_THINKING_ENABLED = "thinking_enabled"
         private const val KEY_LAST_TEST_PASSED = "last_test_passed"
+        private const val KEY_DARK_MODE = "dark_mode"
 
         fun defaultModelFor(provider: Provider): String = when (provider) {
             Provider.Anthropic -> AnthropicClient.DEFAULT_MODEL

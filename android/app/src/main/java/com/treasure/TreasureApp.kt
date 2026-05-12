@@ -45,6 +45,16 @@ class TreasureApp : Application() {
     val shareIntake: kotlinx.coroutines.flow.MutableStateFlow<String?> =
         kotlinx.coroutines.flow.MutableStateFlow(null)
 
+    /** Cycle 0031：用户手动选的主题 — null 跟随系统，true / false 强制覆盖。
+     *  MainActivity 读它 + isSystemInDarkTheme 推断实际 darkTheme。 */
+    val darkModeOverride: kotlinx.coroutines.flow.MutableStateFlow<Boolean?> =
+        kotlinx.coroutines.flow.MutableStateFlow(null)
+
+    fun setDarkModeOverride(value: Boolean?) {
+        settingsStore.darkMode = value
+        darkModeOverride.value = value
+    }
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
@@ -53,6 +63,7 @@ class TreasureApp : Application() {
         conversationRepository = RoomAddConversationRepository.create(this)
         categoryRepository = RoomCategoryRepository.create(this)
         settingsStore = SettingsStore(this)
+        darkModeOverride.value = settingsStore.darkMode
         appScope.launch { repository.ensureSeeded() }
     }
 

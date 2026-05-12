@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AlertDialog
@@ -38,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -308,7 +311,7 @@ fun EditScreen(
                 Spacer(Modifier.height(0.dp))
             }
 
-            item { Section("参数 · 拖动选前 4 作关键参数") }
+            item { Section("参数") }
             item {
                 ReorderableSpecs(
                     specs = specs,
@@ -321,23 +324,21 @@ fun EditScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Box(modifier = Modifier.padding(horizontal = 22.dp)) {
-                    AddRowButton(label = "+ 加一行 参数") { specs.add(HeroSpec("", "")) }
+                    AddRowButton(label = "+") { specs.add(HeroSpec("", "")) }
                 }
             }
 
             item { Section("历史") }
             item {
                 HistorySection(
-                    item = item,
+                    history = item.history,
                     onUpdateHistory = { history ->
                         onUpdate(item.copy(history = history.sortedBy { it.date }))
                     },
                 )
             }
 
-            // 实拍 section 整合进顶部头像选择器（cycle 0017）：
-            // 拍照 / 选照片 / 长按删都在那里。
-            item { Section("DANGER ZONE") }
+            item { Section("操作") }
             item { DangerZone(onDelete = onDelete) }
 
             item { Spacer(Modifier.height(60.dp)) }
@@ -398,6 +399,40 @@ internal fun LabeledField(
             }
             Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
         }
+    }
+}
+
+/**
+ * Cycle 0031：参数行专用 — 没有自带边框 / 背景，外层负责整组卡片视觉。
+ */
+@Composable
+internal fun BareField(
+    placeholder: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalTreasureColors.current
+    Box(modifier = modifier) {
+        if (value.isEmpty()) {
+            Text(
+                text = placeholder,
+                color = colors.sub.copy(alpha = 0.4f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            cursorBrush = SolidColor(colors.terra),
+            textStyle = LocalTextStyle.current.copy(
+                color = colors.ink,
+                fontFamily = MaterialTheme.typography.bodyMedium.fontFamily,
+                fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -497,6 +532,13 @@ internal fun AddRowButton(label: String, onClick: () -> Unit) {
 
 private val ROW_HEIGHT = 56.dp
 
+/**
+ * Cycle 0031 复修：用 CategoryManager 那套"预览终态布局"算法做 specs 拖动 —
+ * 每行（含 HERO/TAIL 分割线）按它在松手后新布局的 visualSlot 实时摆位，
+ * 拖到哪松手到哪、行 + 分割线一起平移、不再 swap divider 为 spacer。
+ * gesture callback 用 rememberUpdatedState 兜底（理论上 EditScreen 这边
+ * `pointerInput(idx)` 已经按 idx 重 key，但写得更稳）。
+ */
 @Composable
 private fun ReorderableSpecs(
     specs: List<HeroSpec>,
@@ -506,93 +548,203 @@ private fun ReorderableSpecs(
 ) {
     val colors = LocalTreasureColors.current
     val density = LocalDensity.current
-    val rowHeightPx = with(density) { ROW_HEIGHT.toPx() }
+    val rowPx = with(density) { ROW_HEIGHT.toPx() }
     var dragging by remember { mutableStateOf(-1) }
     var dragOffset by remember { mutableStateOf(0f) }
 
-    val draggedTarget = if (dragging != -1) {
-        (dragging + (dragOffset / rowHeightPx).roundToInt())
-            .coerceIn(0, specs.size - 1)
-    } else -1
+    val N = specs.size
+    val showDivider = N > Item.HERO_SPEC_COUNT
+    // 视觉布局 slot：
+    //   hero 段 idx 0..H-1   → visualSlot = idx
+    //   divider               → visualSlot = H（如果 showDivider）
+    //   tail 段 idx H..N-1   → visualSlot = idx + 1（如果 showDivider）否则 = idx
+    fun toVisual(i: Int): Int =
+        if (showDivider && i >= Item.HERO_SPEC_COUNT) i + 1 else i
+    val totalSlots = if (showDivider) N + 1 else N
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
-        specs.forEachIndexed { idx, spec ->
-            // Hero divider sits BEFORE row index HERO_COUNT (between hero and tail).
-            // 拖动时 make-room shift 只按 rowHeightPx 算，divider 自己的高度会让
-            // 视觉上相邻行错位 + 被拖动行盖住分割线。所以拖动期间换成同高 Spacer，
-            // 拖完再展示分割线 — 看起来才像上下换位。
-            if (idx == Item.HERO_SPEC_COUNT && specs.size > Item.HERO_SPEC_COUNT) {
-                if (dragging == -1) HeroDivider() else HeroDividerSpacer()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(ROW_HEIGHT * totalSlots),
+        ) {
+            // 用户指尖中心当前 visualSlot
+            val originVisual = if (dragging < 0) -1 else toVisual(dragging)
+            val targetVisualSlot = if (dragging < 0) -1 else {
+                val centerY = originVisual * rowPx + dragOffset + rowPx / 2f
+                (centerY / rowPx).toInt().coerceIn(0, totalSlots - 1)
+            }
+            // 预览：把 dragging 行的"终态 specs idx"算出来 — visualSlot 反推
+            // specs idx 时跳过 divider 那一格
+            val previewNewSpecsIdx = if (dragging < 0) -1 else {
+                val raw = if (showDivider && targetVisualSlot > Item.HERO_SPEC_COUNT)
+                    targetVisualSlot - 1
+                else if (showDivider && targetVisualSlot == Item.HERO_SPEC_COUNT) {
+                    // 落在 divider slot：按拖动方向决定 snap 边
+                    if (dragging < Item.HERO_SPEC_COUNT) Item.HERO_SPEC_COUNT - 1
+                    else Item.HERO_SPEC_COUNT
+                } else targetVisualSlot
+                raw.coerceIn(0, N - 1)
             }
 
-            val isDragging = dragging == idx
-            // Compute "make-room" shift for non-dragging rows
-            val shift = when {
-                dragging == -1 || idx == dragging -> 0f
-                dragging < idx && idx <= draggedTarget -> -rowHeightPx
-                dragging > idx && idx >= draggedTarget -> rowHeightPx
-                else -> 0f
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(ROW_HEIGHT)
-                    .graphicsLayer {
-                        translationY = if (isDragging) dragOffset else shift
-                        if (isDragging) shadowElevation = 6.dp.toPx()
+            specs.forEachIndexed { idx, spec ->
+                val isDragging = idx == dragging
+                val translateY: Float = when {
+                    isDragging -> toVisual(idx) * rowPx + dragOffset
+                    dragging < 0 -> toVisual(idx) * rowPx
+                    else -> {
+                        // 终态里这行的 specs idx
+                        val newI = if (idx < dragging) idx else idx - 1
+                        val finalI =
+                            if (newI < previewNewSpecsIdx) newI else newI + 1
+                        toVisual(finalI) * rowPx
                     }
-                    .zIndex(if (isDragging) 1f else 0f)
-                    .background(if (isDragging) colors.card else Color.Transparent),
-            ) {
-                Row(
+                }
+
+                val latestOnDragStart by rememberUpdatedState({
+                    dragging = specs.indexOfFirst { it === spec }
+                        .takeIf { it >= 0 } ?: idx
+                    dragOffset = 0f
+                })
+                val latestOnDragEnd by rememberUpdatedState({
+                    val d = dragging
+                    if (d >= 0) {
+                        val originV = toVisual(d)
+                        val centerY = originV * rowPx + dragOffset + rowPx / 2f
+                        val target = (centerY / rowPx).toInt()
+                            .coerceIn(0, totalSlots - 1)
+                        val newSpecsIdx =
+                            if (showDivider && target > Item.HERO_SPEC_COUNT) target - 1
+                            else if (showDivider && target == Item.HERO_SPEC_COUNT) {
+                                if (d < Item.HERO_SPEC_COUNT) Item.HERO_SPEC_COUNT - 1
+                                else Item.HERO_SPEC_COUNT
+                            } else target
+                        val clamped = newSpecsIdx.coerceIn(0, N - 1)
+                        if (clamped != d) onMove(d, clamped)
+                    }
+                    dragging = -1
+                    dragOffset = 0f
+                })
+                val latestOnDragCancel by rememberUpdatedState({
+                    dragging = -1
+                    dragOffset = 0f
+                })
+
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(ROW_HEIGHT)
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        .graphicsLayer {
+                            translationY = translateY
+                            if (isDragging) shadowElevation = 6.dp.toPx()
+                        }
+                        .zIndex(if (isDragging) 1f else 0f),
                 ) {
-                    InlineField(
-                        placeholder = if (idx < Item.HERO_SPEC_COUNT) "key (hero)" else "key",
-                        value = spec.label,
-                        onValueChange = { onChange(idx, HeroSpec(it, spec.value)) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    InlineField(
-                        placeholder = "value",
-                        value = spec.value,
-                        onValueChange = { onChange(idx, HeroSpec(spec.label, it)) },
-                        modifier = Modifier.weight(1.4f),
-                    )
-                    DragHandle(
+                    // Cycle 0031：参数行整体一个圆角卡 — key / value 共用同一
+                    // 个外框 + 中间 0.5dp 竖分隔；右侧贴一个握把 + 一个 ✕，没
+                    // 边框，跟卡片左边对齐。
+                    Row(
                         modifier = Modifier
-                            .size(36.dp)
-                            .pointerInput(idx) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = {
-                                        dragging = idx
-                                        dragOffset = 0f
-                                    },
-                                    onDragEnd = {
-                                        val target = (idx + (dragOffset / rowHeightPx)
-                                            .roundToInt()).coerceIn(0, specs.size - 1)
-                                        if (target != idx) onMove(idx, target)
-                                        dragging = -1
-                                        dragOffset = 0f
-                                    },
-                                    onDragCancel = {
-                                        dragging = -1
-                                        dragOffset = 0f
-                                    },
-                                    onDrag = { _, drag -> dragOffset += drag.y },
+                            .fillMaxWidth()
+                            .height(ROW_HEIGHT)
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (isDragging) colors.card else colors.card.copy(alpha = 0.55f),
                                 )
-                            },
-                    )
-                    DeleteIcon { onDelete(idx) }
+                                .border(0.5.dp, colors.line, RoundedCornerShape(6.dp)),
+                        ) {
+                            BareField(
+                                placeholder = if (idx < Item.HERO_SPEC_COUNT) "key" else "key",
+                                value = spec.label,
+                                onValueChange = { onChange(idx, HeroSpec(it, spec.value)) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .width(0.5.dp)
+                                    .fillMaxHeight()
+                                    .padding(vertical = 8.dp)
+                                    .background(colors.line),
+                            )
+                            BareField(
+                                placeholder = "value",
+                                value = spec.value,
+                                onValueChange = { onChange(idx, HeroSpec(spec.label, it)) },
+                                modifier = Modifier
+                                    .weight(1.4f)
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                            )
+                        }
+                        // 拖动握把：3 横纹，长按触发。
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .pointerInput(spec) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = { latestOnDragStart() },
+                                        onDragEnd = { latestOnDragEnd() },
+                                        onDragCancel = { latestOnDragCancel() },
+                                        onDrag = { _, drag -> dragOffset += drag.y },
+                                    )
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                repeat(3) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(14.dp)
+                                            .height(1.dp)
+                                            .background(colors.sub.copy(alpha = 0.55f)),
+                                    )
+                                }
+                            }
+                        }
+                        // 删除：极简 ✕，无边框
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { onDelete(idx) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "✕",
+                                color = colors.sub,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 分割线（HERO / TAIL）— 跟 row 同高单独占一个 visualSlot，固定位置
+            if (showDivider) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(ROW_HEIGHT)
+                        .graphicsLayer { translationY = Item.HERO_SPEC_COUNT * rowPx },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    HeroDividerInline()
                 }
             }
         }
+
         if (specs.isEmpty()) {
             Text(
                 text = "暂无参数 · 点下面 + 添加",
@@ -601,53 +753,25 @@ private fun ReorderableSpecs(
                 fontStyle = FontStyle.Italic,
                 modifier = Modifier.padding(vertical = 8.dp),
             )
-        } else {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "长按 ≡ 拖动重排 · 顶部 ${Item.HERO_SPEC_COUNT} 行作为关键参数显示",
-                color = colors.sub.copy(alpha = 0.7f),
-                style = MaterialTheme.typography.labelSmall,
-            )
         }
     }
 }
 
+/** Cycle 0031：关键 / 非关键 参数之间的提示行 — 只保留居中文案，两侧的
+ *  横线删掉（视觉太重，跟上下 spec 卡的边框叠在一起像 2-3 条线）。 */
 @Composable
-private fun HeroDivider() {
+private fun HeroDividerInline() {
     val colors = LocalTreasureColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(0.5.dp)
-                .background(colors.terra.copy(alpha = 0.5f)),
-        )
-        Spacer(Modifier.width(8.dp))
         Text(
-            text = "↑ 关键 ${Item.HERO_SPEC_COUNT} 项",
-            color = colors.terra.copy(alpha = 0.8f),
+            text = "↑ 拖动选前 ${Item.HERO_SPEC_COUNT} 作关键参数",
+            color = colors.terra.copy(alpha = 0.85f),
             style = MaterialTheme.typography.labelSmall,
         )
-        Spacer(Modifier.width(8.dp))
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(0.5.dp)
-                .background(colors.terra.copy(alpha = 0.5f)),
-        )
     }
-}
-
-/** 拖动时占位用的同高 spacer：跟 [HeroDivider] 视觉高度对齐
- *  (vertical padding 8dp × 2 + 0.5dp line ≈ 16.5dp)，避免 layout 跳动。 */
-@Composable
-private fun HeroDividerSpacer() {
-    Spacer(modifier = Modifier.fillMaxWidth().height(16.5.dp))
 }
 
 @Composable
@@ -665,9 +789,14 @@ private fun DragHandle(modifier: Modifier = Modifier) {
 
 // ── History section ─────────────────────────────────────────────────────
 
+/**
+ * Cycle 0031：内部公开，让 AddPreview 也能复用同一份历史时间轴 UI（用户
+ * 原话："草稿也要有历史栏，和编辑页逻辑一致"）。签名从 `item: Item` 改成
+ * 直接收 `history: List<HistoryEvent>`，跟具体宿主解耦。
+ */
 @Composable
-private fun HistorySection(
-    item: Item,
+internal fun HistorySection(
+    history: List<HistoryEvent>,
     onUpdateHistory: (List<HistoryEvent>) -> Unit,
 ) {
     val colors = LocalTreasureColors.current
@@ -675,7 +804,7 @@ private fun HistorySection(
     var deleting by remember { mutableStateOf<Int?>(null) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
-        if (item.history.isEmpty()) {
+        if (history.isEmpty()) {
             Text(
                 text = "还没有时间轴",
                 color = colors.sub,
@@ -684,7 +813,10 @@ private fun HistorySection(
                 modifier = Modifier.padding(vertical = 8.dp),
             )
         } else {
-            item.history.forEachIndexed { idx, e ->
+            history.forEachIndexed { idx, e ->
+                // Cycle 0031：每条历史一张小卡 — 左侧 36dp 圆 + kind glyph，中
+                // 间标题 + 备注，右侧完整日期。比之前的扁平 row 紧凑、视觉重
+                // 量好。整行 tap 编辑 / 长按删。
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -695,35 +827,38 @@ private fun HistorySection(
                                 onLongPress = { deleting = idx },
                             )
                         }
-                        .padding(vertical = 10.dp),
+                        .padding(vertical = 12.dp),
                 ) {
-                    Text(
-                        text = e.date.replace("-", "."),
-                        color = colors.sub,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.width(64.dp),
-                    )
+                    // Cycle 0031：emoji 自带色，背景用 kindColor 淡填充 + 边框，
+                    // emoji 摆中间，纸色不冲突。
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(kindColor(e.kind, colors))
-                            .padding(2.dp),
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(kindColor(e.kind, colors).copy(alpha = 0.14f))
+                            .border(0.5.dp, kindColor(e.kind, colors).copy(alpha = 0.55f), CircleShape),
+                        contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             text = kindGlyph(e.kind),
-                            color = colors.paper,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 4.dp),
+                            style = MaterialTheme.typography.titleSmall,
                         )
                     }
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = e.title,
+                            text = e.title.ifBlank { kindLabelZh(e.kind) },
                             color = colors.ink,
                             style = MaterialTheme.typography.bodyLarge,
                         )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = formatHistoryDate(e.date),
+                            color = colors.sub,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
                         if (e.note.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
                             Text(
                                 text = e.note,
                                 color = colors.sub,
@@ -732,7 +867,7 @@ private fun HistorySection(
                         }
                     }
                 }
-                if (idx != item.history.lastIndex) {
+                if (idx != history.lastIndex) {
                     Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
                 }
             }
@@ -744,7 +879,7 @@ private fun HistorySection(
             )
         }
         Spacer(Modifier.height(12.dp))
-        AddRowButton(label = "+ 加一条 历史") { editing = HistoryEditTarget.New }
+        AddRowButton(label = "+") { editing = HistoryEditTarget.New }
     }
 
     editing?.let { target ->
@@ -755,15 +890,15 @@ private fun HistorySection(
                 title = "",
                 note = "",
             )
-            is HistoryEditTarget.Existing -> item.history[target.index]
+            is HistoryEditTarget.Existing -> history[target.index]
         }
         HistoryEditDialog(
             initial = initial,
             onCancel = { editing = null },
             onSave = { e ->
                 val newHistory = when (target) {
-                    HistoryEditTarget.New -> item.history + e
-                    is HistoryEditTarget.Existing -> item.history.toMutableList().also { it[target.index] = e }
+                    HistoryEditTarget.New -> history + e
+                    is HistoryEditTarget.Existing -> history.toMutableList().also { it[target.index] = e }
                 }
                 onUpdateHistory(newHistory)
                 editing = null
@@ -775,10 +910,10 @@ private fun HistorySection(
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("删除这条历史？") },
-            text = { Text(item.history[idx].title) },
+            text = { Text(history[idx].title) },
             confirmButton = {
                 TextButton(onClick = {
-                    val newHistory = item.history.toMutableList().also { it.removeAt(idx) }
+                    val newHistory = history.toMutableList().also { it.removeAt(idx) }
                     onUpdateHistory(newHistory)
                     deleting = null
                 }) { Text("删除", color = colors.terra) }
@@ -793,13 +928,19 @@ private fun HistorySection(
     }
 }
 
-private sealed interface HistoryEditTarget {
+internal sealed interface HistoryEditTarget {
     data object New : HistoryEditTarget
     data class Existing(val index: Int) : HistoryEditTarget
 }
 
+/**
+ * Cycle 0031：历史新增/编辑改成 ModalBottomSheet — 跟历史抽屉 / 分类抽屉
+ * 同款上拖体验。日期用 Material DatePicker；类型选择改成顶部居中的圆形
+ * icon picker（5 个 HistoryKind 摆一行）。
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun HistoryEditDialog(
+internal fun HistoryEditDialog(
     initial: HistoryEvent,
     onCancel: () -> Unit,
     onSave: (HistoryEvent) -> Unit,
@@ -809,52 +950,155 @@ private fun HistoryEditDialog(
     var kind by remember { mutableStateOf(initial.kind) }
     var title by remember { mutableStateOf(initial.title) }
     var note by remember { mutableStateOf(initial.note) }
+    var pickingDate by remember { mutableStateOf(false) }
 
-    AlertDialog(
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+    )
+    androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onCancel,
-        title = { Text(if (initial.title.isBlank()) "新增历史" else "编辑历史") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                LabeledField("日期", date, { date = it }, hint = "YYYY-MM-DD")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FieldLabel("类型")
-                    Spacer(Modifier.width(LABEL_GAP))
-                    InlineDropdown(
-                        options = HistoryKind.entries,
-                        selected = kind,
-                        label = { kindLabelZh(it) },
-                        glyph = { kindGlyph(it) },
-                        onSelect = { kind = it },
+        sheetState = sheetState,
+        containerColor = colors.paper,
+        contentColor = colors.ink,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            // 顶部居中：5 个圆形 icon 选 HistoryKind
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                HistoryKind.entries.forEach { k ->
+                    val selected = k == kind
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 6.dp)
+                            .size(if (selected) 48.dp else 40.dp)
+                            .clip(CircleShape)
+                            .background(kindColor(k, colors).copy(alpha = if (selected) 0.30f else 0.14f))
+                            .border(
+                                if (selected) 1.2.dp else 0.5.dp,
+                                kindColor(k, colors).copy(alpha = if (selected) 0.9f else 0.55f),
+                                CircleShape,
+                            )
+                            .clickable { kind = k },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = kindGlyph(k),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                }
+            }
+            Text(
+                text = kindLabelZh(kind),
+                color = colors.sub,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            // 日期 — 点击调出 DatePicker
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FieldLabel("日期")
+                Spacer(Modifier.width(LABEL_GAP))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .border(0.5.dp, colors.line, RoundedCornerShape(6.dp))
+                        .clickable { pickingDate = true }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        text = if (date.isBlank()) "选择日期" else date,
+                        color = if (date.isBlank()) colors.sub.copy(alpha = 0.5f) else colors.ink,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "📅",
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
-                LabeledField("标题", title, { title = it })
-                LabeledField("备注", note, { note = it })
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onSave(HistoryEvent(date.trim(), kind, title.trim(), note.trim())) },
-                enabled = title.isNotBlank() && date.isNotBlank(),
-            ) { Text("保存", color = colors.terra) }
-        },
-        dismissButton = {
-            TextButton(onClick = onCancel) { Text("取消") }
-        },
-        containerColor = colors.paper,
-        titleContentColor = colors.ink,
-        textContentColor = colors.sub,
-    )
+            LabeledField("标题", title, { title = it })
+            LabeledField("备注", note, { note = it })
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onCancel) { Text("取消", color = colors.sub) }
+                Spacer(Modifier.width(8.dp))
+                TextButton(
+                    onClick = {
+                        onSave(HistoryEvent(date.trim(), kind, title.trim(), note.trim()))
+                    },
+                    enabled = title.isNotBlank() && date.isNotBlank(),
+                ) { Text("保存", color = colors.terra) }
+            }
+        }
+    }
+
+    if (pickingDate) {
+        val initialMillis = remember(date) {
+            runCatching {
+                val parsed = if (date.isNotBlank()) java.time.LocalDate.parse(date)
+                else java.time.LocalDate.now()
+                parsed.atStartOfDay(java.time.ZoneOffset.UTC)
+                    .toInstant().toEpochMilli()
+            }.getOrDefault(System.currentTimeMillis())
+        }
+        val dateState = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = initialMillis,
+        )
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { pickingDate = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    dateState.selectedDateMillis?.let { ms ->
+                        date = java.time.Instant.ofEpochMilli(ms)
+                            .atZone(java.time.ZoneOffset.UTC)
+                            .toLocalDate().toString()
+                    }
+                    pickingDate = false
+                }) { Text("确定", color = colors.terra) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pickingDate = false }) {
+                    Text("取消", color = colors.sub)
+                }
+            },
+            colors = androidx.compose.material3.DatePickerDefaults.colors(
+                containerColor = colors.paper,
+            ),
+        ) {
+            androidx.compose.material3.DatePicker(state = dateState)
+        }
+    }
 }
 
-private fun kindGlyph(kind: HistoryKind): String = when (kind) {
-    HistoryKind.ACQUIRED  -> "+"
-    HistoryKind.MILESTONE -> "★"
-    HistoryKind.MAINTAIN  -> "↻"
-    HistoryKind.MOD       -> "Δ"
-    HistoryKind.PARTED    -> "−"
+/** Cycle 0031 复修：HistoryKind 用 emoji — 系统字体自带 emoji 渲染，比单字
+ *  + 单色 ink 圆背景视觉重量更亲切。挑了 5 个广泛兼容的：购入🛒、里程碑🏆、
+ *  保养🔧、改装⚙️、出手👋。 */
+internal fun kindGlyph(kind: HistoryKind): String = when (kind) {
+    HistoryKind.ACQUIRED  -> "🛒"
+    HistoryKind.MILESTONE -> "🏆"
+    HistoryKind.MAINTAIN  -> "🔧"
+    HistoryKind.MOD       -> "⚙️"
+    HistoryKind.PARTED    -> "👋"
 }
 
-private fun kindLabelZh(kind: HistoryKind): String = when (kind) {
+internal fun kindLabelZh(kind: HistoryKind): String = when (kind) {
     HistoryKind.ACQUIRED  -> "购入"
     HistoryKind.MILESTONE -> "里程碑"
     HistoryKind.MAINTAIN  -> "保养"
@@ -862,7 +1106,14 @@ private fun kindLabelZh(kind: HistoryKind): String = when (kind) {
     HistoryKind.PARTED    -> "出手"
 }
 
-private fun kindColor(kind: HistoryKind, colors: TreasureColors): Color = when (kind) {
+/** Cycle 0031：ISO 日期 ("2026-05-12") → "2026 年 5 月 12 日"。解析失败时
+ *  原样回退。 */
+internal fun formatHistoryDate(iso: String): String = runCatching {
+    val d = java.time.LocalDate.parse(iso)
+    "${d.year} 年 ${d.monthValue} 月 ${d.dayOfMonth} 日"
+}.getOrDefault(iso)
+
+internal fun kindColor(kind: HistoryKind, colors: TreasureColors): Color = when (kind) {
     HistoryKind.ACQUIRED  -> colors.terra
     HistoryKind.MILESTONE -> colors.ink
     HistoryKind.MAINTAIN  -> colors.sub
@@ -903,19 +1154,13 @@ private fun DangerZone(onDelete: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "删除这件物品",
+                text = "删除",
                 color = colors.terra,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.weight(1f),
             )
             Text(text = "→", color = colors.terra, style = MaterialTheme.typography.bodyLarge)
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "记录会从图鉴里移除，不可恢复",
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
-        )
     }
     if (confirming) {
         AlertDialog(

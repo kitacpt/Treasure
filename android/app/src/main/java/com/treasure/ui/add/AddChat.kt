@@ -343,7 +343,7 @@ private fun ManualPill(onClick: () -> Unit) {
         ManualGlyph(colors.ink)
         Spacer(Modifier.width(5.dp))
         Text(
-            text = "手动",
+            text = "Draft",
             color = colors.ink,
             style = MaterialTheme.typography.labelMedium,
         )
@@ -636,12 +636,15 @@ private fun HistoryRow(
             )
         }
         Spacer(Modifier.width(6.dp))
+        // Cycle 0031：current row 用 colors.ink 让 ✎ / ✕ 在 card bg 上更显眼，
+        // 同时把按钮可点区扩到 36dp（之前 28dp 容易点到外面落到 row.onClick）。
+        val glyphColor = if (conv.current) colors.ink else colors.sub
         IconGlyphButton(onClick = onRename) {
-            Text("✎", color = colors.sub, style = MaterialTheme.typography.bodyMedium)
+            Text("✎", color = glyphColor, style = MaterialTheme.typography.bodyMedium)
         }
         Spacer(Modifier.width(2.dp))
         IconGlyphButton(onClick = onDelete) {
-            Text("✕", color = colors.sub, style = MaterialTheme.typography.bodyMedium)
+            Text("✕", color = glyphColor, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -650,7 +653,7 @@ private fun HistoryRow(
 private fun IconGlyphButton(onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
-            .size(28.dp)
+            .size(36.dp)
             .clip(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,

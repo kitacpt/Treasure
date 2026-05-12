@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -26,6 +27,17 @@ internal interface CategoryPrefDao {
 
     @Query("UPDATE category_prefs SET sort_order = :sortOrder WHERE id = :id")
     suspend fun setSortOrder(id: String, sortOrder: Int)
+
+    /** Cycle 0031：一次性写一批 sort_order — Room 把整个 @Transaction 方法
+     *  包成单个 SQLite 事务，InvalidationTracker 只触发一次 emit，避免拖动
+     *  commit 时 observeAll 中间态闪一下让 UI 错位。 */
+    @Transaction
+    suspend fun reorder(orderedIds: List<String>, hiddenIds: Set<String>) {
+        orderedIds.forEachIndexed { idx, id -> setSortOrder(id, idx) }
+        orderedIds.forEach { id ->
+            setHidden(id, if (id in hiddenIds) 1 else 0)
+        }
+    }
 
     /** 内建：只能改 hero_vector（用户挑插画），name_* 保留 enum 自带的中文 / 英文。 */
     @Query("UPDATE category_prefs SET hero_vector = :heroVector WHERE id = :id")

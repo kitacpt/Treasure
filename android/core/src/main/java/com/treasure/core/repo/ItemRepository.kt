@@ -28,6 +28,9 @@ class RoomItemRepository internal constructor(
         dao.observeById(id).map { it?.toDomain() }
 
     override suspend fun ensureSeeded() {
+        // Cycle 0031 复修：完全空 app 太冷清，恢复每个内建分类一条样例物品
+        // （6 条），用户随时可以删。只在 items 表完全为空时种 — 用户清掉
+        // 后不会再回来。
         if (dao.count() == 0) {
             dao.insertAll(SeedItems.all().map(ItemEntity::fromDomain))
         }

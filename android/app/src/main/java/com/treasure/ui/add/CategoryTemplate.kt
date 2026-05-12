@@ -29,15 +29,33 @@ fun heroVectorOptionsFor(category: Category): List<HeroVector> = when (category)
 }
 
 /**
+ * Cycle 0031：渲染时共享同一线描的 HeroVector，折回它的"代表项"。Picker
+ * 里只展示代表，避免 3/4、7/8、10/12 这种小圆看起来一模一样。
+ */
+fun HeroVector.canonical(): HeroVector = when (this) {
+    HeroVector.CAMERA_RANGEFINDER -> HeroVector.CAMERA_DSLR
+    HeroVector.CAR_SUV -> HeroVector.CAR_SEDAN
+    HeroVector.KINDLE -> HeroVector.TABLET
+    else -> this
+}
+
+/**
+ * Cycle 0031：去重后的 HeroVector 候选 — picker 默认展示这一组（自定义新建用）。
+ * 顺序跟 enum 一致，跳过被合并的 RANGEFINDER / SUV / KINDLE。
+ */
+val uniqueHeroVectors: List<HeroVector> =
+    HeroVector.entries.distinctBy { it.canonical() }
+
+/**
  * Cycle 0027：按 String id 查可选插画。命中内建走 [heroVectorOptionsFor]，
  * 未命中（自定义分类）回退到一份"所有插画 + GENERIC 兜底"列表，让用户随
- * 便挑。
+ * 便挑。Cycle 0031：返回前 distinctBy { canonical } 去重，picker 不会再
+ * 出现两个看上去一样的小圆。
  */
 fun heroVectorOptionsForId(id: String): List<HeroVector> {
     val builtIn = Category.entries.firstOrNull { it.id == id }
-    if (builtIn != null) return heroVectorOptionsFor(builtIn)
-    // 自定义分类：全套可选 + GENERIC 在末尾兜底
-    return HeroVector.entries
+    val raw = builtIn?.let { heroVectorOptionsFor(it) } ?: HeroVector.entries
+    return raw.distinctBy { it.canonical() }
 }
 
 /**
