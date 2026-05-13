@@ -236,7 +236,7 @@ class SettingsViewModel(private val store: SettingsStore) : ViewModel() {
                     thinkingEnabled = draft.thinkingEnabled,
                 )
             }
-            val result = client.extractItemDraft(text = "测试连接：随便编一个 AirPods Pro 2")
+            val result = client.extractItemDrafts(text = "测试连接：随便编一个 AirPods Pro 2")
             // 持久化：成功 → 绿灯；失败 → 不动（多半已经从 false 起步，
             // 但若之前是 true 这次失败，也降回 false）
             store.lastTestPassed = result.isSuccess

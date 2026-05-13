@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * Cycle 0026：[currentCategoryId] 改成 String? 通用 id（"badminton" / "tech" /
@@ -45,6 +46,43 @@ class GridViewModel(
     /** 传 null 切到 "全部" 聚合视图 */
     fun selectCategory(id: String?) {
         selected.value = id
+    }
+
+    // ─── Cycle 0033：编辑态 ────────────────────────────────────────────────
+    /** 是否在多选编辑态。长按图鉴某物品进入，顶部"完成"退出。 */
+    private val _selecting = MutableStateFlow(false)
+    val selecting: StateFlow<Boolean> = _selecting
+
+    /** 当前选中的 itemId 集合。退出编辑态时清空。 */
+    private val _selectedIds = MutableStateFlow<Set<String>>(emptySet())
+    val selectedIds: StateFlow<Set<String>> = _selectedIds
+
+    fun enterEditMode(seedId: String? = null) {
+        _selecting.value = true
+        _selectedIds.value = seedId?.let { setOf(it) } ?: emptySet()
+    }
+
+    fun exitEditMode() {
+        _selecting.value = false
+        _selectedIds.value = emptySet()
+    }
+
+    fun toggleSelection(id: String) {
+        val cur = _selectedIds.value
+        _selectedIds.value = if (id in cur) cur - id else cur + id
+    }
+
+    /** 删除选中物品，并退出编辑态。 */
+    fun deleteSelected() {
+        viewModelScope.launch {
+            _selectedIds.value.forEach { id -> repo.delete(id) }
+            exitEditMode()
+        }
+    }
+
+    /** 拖拽完成后用户给出的新次序 — 写回 sort_order。 */
+    fun reorder(orderedIds: List<String>) {
+        viewModelScope.launch { repo.reorder(orderedIds) }
     }
 
     val state: StateFlow<GridUiState> = combine(

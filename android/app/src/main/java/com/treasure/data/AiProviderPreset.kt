@@ -156,6 +156,10 @@ fun modelSupportsVision(model: String): Boolean {
     if (m.startsWith("gpt-4-vision")) return true
     if (m.startsWith("o4")) return true
 
+    // Cycle 0031：Moonshot kimi-k2.5 系列内置多模态（用户实测）。kimi-k2 /
+    // kimi-k2-turbo 仍是 text-only，不要笼统覆盖。
+    if (m == "kimi-k2.5" || m.startsWith("kimi-k2.5-")) return true
+
     // Qwen / 通义千问的 VL 系列已被上面的 vl 分支覆盖
     return false
 }

@@ -52,6 +52,14 @@ data class Item(
     val avatarPhotoPath: String? = null,
     val createdAt: Long,
     val updatedAt: Long,
+    /**
+     * Cycle 0033：图鉴里的显式排序权重。小的在前。
+     *
+     * 新物品 commit 时取"当前最小 - 1"，让它出现在列表最前；用户长按进入
+     * 编辑态拖动后改写这个值。updatedAt 不再参与排序 — 用户对一个物品的
+     * 编辑不会把它弹到列表前面（符合"后续改动不会影响排序"）。
+     */
+    val sortOrder: Long = -createdAt,
 ) {
     /** Convenience views — not persisted, computed from [specs]. */
     val heroSpecs: List<HeroSpec> get() = specs.take(HERO_SPEC_COUNT)

@@ -124,7 +124,61 @@ internal object Migrations {
         }
     }
 
+    /**
+     * Cycle 0031：一段录入会话不再只盯一个物品。新表 `conversation_items`
+     * 记录这段会话当前的"工作集"：每行一个候选物品，含 draft（待录入 / 新
+     * 修改）和 item_ref（已录入 / 新修改的 item id）+ status 三态。
+     */
+    val MIGRATION_10_11 = object : Migration(10, 11) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `conversation_items` (
+                    `id` TEXT NOT NULL PRIMARY KEY,
+                    `conversation_id` TEXT NOT NULL,
+                    `draft_json` TEXT,
+                    `item_ref` TEXT,
+                    `status` TEXT NOT NULL,
+                    `sort_order` INTEGER NOT NULL,
+                    `created_at` INTEGER NOT NULL,
+                    `updated_at` INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_conversation_items_conversation_id` " +
+                    "ON `conversation_items` (`conversation_id`)",
+            )
+        }
+    }
+
+    /**
+     * Cycle 0032：DraftCta 行带上 action 元数据 — `action_kind`(create/modify)
+     * 和 `target_id`（modify 时指向 conversation_items 里某行 ciId）。让会话
+     * 里"一次 AI 提议 N 条" 的每张卡片都能独立采用 / 不要，并在采用时知道
+     * 是新增还是改在哪一行。旧 draft_cta 行没这两列 → 当 create 处理。
+     */
+    val MIGRATION_11_12 = object : Migration(11, 12) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `add_messages` ADD COLUMN `action_kind` TEXT")
+            db.execSQL("ALTER TABLE `add_messages` ADD COLUMN `target_id` TEXT")
+        }
+    }
+
+    /**
+     * Cycle 0033：items 加 sort_order。回填 -created_at 让默认顺序 ASC = newest
+     * first；新物品 commit 时 VM 取"当前最小 sort_order - 1"，自然前置；用户
+     * 长按拖动后改写。
+     */
+    val MIGRATION_12_13 = object : Migration(12, 13) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `items` ADD COLUMN `sort_order` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("UPDATE `items` SET `sort_order` = -`created_at`")
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
-        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
+        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+        MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
     )
 }

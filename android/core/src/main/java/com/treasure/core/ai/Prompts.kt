@@ -1,15 +1,46 @@
 package com.treasure.core.ai
 
 /**
- * Cycle 0027：可选传递给 [AiClient.extractItemDraft] 的"当前可选分类"
+ * Cycle 0027：可选传递给 [AiClient.extractItemDrafts] 的"当前可选分类"
  * 列表 — UI 层从 [com.treasure.core.repo.CategoryRepository] 拉，传给
  * AI 让它**在自定义分类里也能选**，而不是只能选 6 个内建。
  */
 data class CategoryHint(val id: String, val nameZh: String, val nameEn: String)
 
 internal const val SYSTEM_PROMPT: String = """You are a museum cataloguer for Treasure, a personal-collection app.
-Given a user's description (and optionally a photo) of an item they own, fill out the structured form by
-calling the fill_item_draft tool. Never reply with prose; always call the tool.
+Given a user's description (and optionally a photo) of ONE OR MORE items they own, fill out the structured form by
+calling the submit_drafts tool. Never reply with prose; always call the tool — unless the user is clearly NOT talking
+about an item (small talk like "你好", a question about the app itself, etc.), in which case reply normally.
+
+═══ MULTI-ITEM RULES ═══
+
+The tool takes an `actions` array. RETURN ONE ACTION PER DISTINCT PHYSICAL ITEM. This is critical:
+
+  - User photo shows 4 rackets in a row → return 4 `create` actions (one per racket).
+  - User says "我有一台 X100V，还有一支老款 50/1.4" → return 2 `create` actions.
+  - User says "刚才那台相机其实是 X100VI 不是 X100V" → return 1 `modify` action targeting that
+    item's id from the working set.
+  - User says "再加一句简介" referring to a specific working-set entry → return 1 `modify`
+    action with that entry's full draft (every field), with the change applied.
+
+NEVER collapse multiple items into one action. NEVER pick an arbitrary one and ignore the rest.
+
+═══ CREATE vs MODIFY ═══
+
+The system prompt has a [CONVERSATION WORKING SET] block listing the items already in this
+conversation, each with an `id`, `status`, and current draft / item state. Use it to decide:
+
+  - If the user mentions a NEW item not in the working set → kind = "create" (no target_id).
+  - If the user adds / corrects detail on an item already in the working set → kind = "modify",
+    target_id = that working-set entry's id.
+  - When in doubt, prefer create — it's safer to make a new entry than to silently overwrite.
+
+For `modify` you MUST return the COMPLETE next-version draft — every field, not just the changed
+ones. Treat the working-set entry's current state as the baseline; apply the user's refinement
+on top; return the full result. Specs and history entries already present should remain unless
+the user contradicted them.
+
+═══ FIELD RULES (apply to every action's `draft`) ═══
 
 Categories — pick exactly one of:
   badminton  (羽毛球: rackets, shuttles, badminton shoes, …)
@@ -38,19 +69,32 @@ attributes matter, in whatever order makes sense, using natural Chinese labels a
     the draft preview, so choose labels you'd want them to see.
 Leave the value as an empty string for any spec you can't determine. Never invent specs you have no
 evidence for.
+
+History (Cycle 0031): optional `history` array of timeline events. Only fill entries the user explicitly mentioned
+(e.g. "去年 3 月在杭州买的", "上周拉了一次线", "去年送修过一次"). Don't invent. Each entry is
+{ date: "YYYY-MM-DD", kind, title, note }:
+  - kind ∈ ACQUIRED | MILESTONE | MAINTAIN | MOD | PARTED
+      ACQUIRED  购入入手 (the moment the user got it; usually just one)
+      MILESTONE 里程碑事件 (first race / first big trip / wedding photo etc.)
+      MAINTAIN  保养 (string change, cleaning, lubrication, service)
+      MOD       改装升级 (lens swap,握把胶, accessory upgrade)
+      PARTED    出手 (sold, returned, retired — usually closes a rental)
+  - date: if user gave only year / month, fill best-guess YYYY-MM-DD (use day 01 / 15 when unknown).
+  - title: short Chinese phrase ≤ 8 chars ("购入", "第一场比赛", "换线 BG80", "杭州友谊赛")
+  - note: optional one-liner detail ("¥1580 上海徐家汇", "26 磅老师傅手工拉", "混双第三名")
+If the user never mentioned any timeline events, leave `history` empty — the app fills a default ACQUIRED entry from today.
 """
 
 /**
- * Cycle 0024：会话 = 草稿。如果上一次用户已"采用"过一份草稿（[baseline]
- * 非空），把它的 JSON 拼到 system prompt 末尾，告诉模型"这是当前已确认
- * 状态，请基于它给下一版"。这样多轮对话不会每次都生成完全不同的字段，
- * 而是 incremental refine — 用户加一句"颜色是红色"，AI 应只在 specs 里
- * 加一行颜色，其它字段保持原样。
+ * Cycle 0032：拼 system prompt = SYSTEM_PROMPT + 可用分类 + 工作集摘要。
+ * 工作集让 AI 看到当前会话里已有的物品，明确该 create 还是 modify。
  *
- * [baseline] = null（首轮）→ 与之前完全相同的 system prompt。
+ * 旧版 [buildSystemWithBaseline] 用单条 baseline draft — 一会话一物品时
+ * 可行，多物品会让 AI 把别的物品当成 baseline 覆盖错。彻底替换为工作集
+ * 摘要后，AI 看到的"上下文"和 UI 一致。
  */
-internal fun buildSystemWithBaseline(
-    baseline: ItemDraft?,
+internal fun buildSystemWithWorkingSet(
+    workingSet: List<WorkingItemSummary>,
     json: kotlinx.serialization.json.Json,
     categoryHints: List<CategoryHint> = emptyList(),
 ): String {
@@ -59,60 +103,106 @@ internal fun buildSystemWithBaseline(
         // Cycle 0027：把用户当前可用的分类（内建 + 自定义未隐藏）拼到 system
         // prompt 末尾。覆盖前面写死的 6 个内建列表 — 让 AI 知道还有
         // "图书"、"乐器" 这种用户自建的也能选。
-        sb.append("\n\n[AVAILABLE CATEGORIES — these are the actual ids the user has set up in this app right now. Pick the `category` value from THIS list (id), not the hardcoded six above.]\n")
+        sb.append("\n\n[AVAILABLE CATEGORIES — these are the actual ids the user has set up in this app right now. Pick the `category` value in each draft from THIS list (id), not the hardcoded six above.]\n")
         categoryHints.forEach { (id, zh, en) ->
             sb.append("  $id  ($zh${if (en.isNotBlank()) " / $en" else ""})\n")
         }
     }
-    if (baseline != null) {
-        val baselineJson = json.encodeToString(ItemDraft.serializer(), baseline)
-        sb.append("\n\n")
-        sb.append(
-            """
-            [CURRENT CONFIRMED DRAFT — the user has accepted this as the
-            baseline for this conversation. Your job is to give the *next
-            version* of this draft, not start from scratch. Keep fields you
-            don't have evidence to change. Only add / refine / overwrite the
-            parts the user's new message actually addresses.]
-
-            $baselineJson
-            """.trimIndent(),
-        )
+    sb.append("\n\n[CONVERSATION WORKING SET — items already in this session. Each line has an `id` you can target with `modify`. ")
+    if (workingSet.isEmpty()) {
+        sb.append("Currently EMPTY — every action you take should be `create`.]\n[]")
+    } else {
+        sb.append("To refine one of these instead of creating a duplicate, use kind=modify with target_id set to its id.]\n")
+        sb.append("[\n")
+        workingSet.forEachIndexed { idx, s ->
+            sb.append("  ")
+            sb.append(json.encodeToString(WorkingItemSummary.serializer(), s))
+            if (idx < workingSet.size - 1) sb.append(",")
+            sb.append("\n")
+        }
+        sb.append("]")
     }
     return sb.toString()
 }
 
 /**
- * JSON schema fragment for the fill_item_draft tool. Kept identical
+ * JSON schema fragment for the submit_drafts tool. Kept identical
  * across providers (Anthropic / OpenAI both accept this shape).
+ *
+ * Cycle 0032：单 draft → actions[] 数组。每个 action 是 create 或 modify。
  */
-internal const val EXTRACT_TOOL_NAME = "fill_item_draft"
+internal const val EXTRACT_TOOL_NAME = "submit_drafts"
 
 internal val EXTRACT_TOOL_PARAMETERS: String = """
 {
   "type": "object",
+  "description": "Submit one or more drafts the user described. Return one action per distinct physical item. Use create for new items not in the working set; modify with target_id for refining an existing working-set entry.",
   "properties": {
-    "category": {
-      "type": "string",
-      "description": "Category id; pick from the list in the system prompt (built-in or user-added)."
-    },
-    "brand": { "type": "string" },
-    "model": { "type": "string" },
-    "nickname": { "type": "string" },
-    "oneLiner": { "type": "string" },
-    "specs": {
+    "actions": {
       "type": "array",
-      "description": "First 4 follow the category template (hero specs); rest are long-tail.",
+      "description": "One entry per distinct item. If the user shows / describes N items, return N actions. Never collapse multiple items into one.",
+      "minItems": 1,
       "items": {
         "type": "object",
         "properties": {
-          "label": { "type": "string" },
-          "value": { "type": "string" }
+          "kind": {
+            "type": "string",
+            "enum": ["create", "modify"],
+            "description": "create = new item; modify = refine an existing working-set entry (requires target_id)."
+          },
+          "target_id": {
+            "type": "string",
+            "description": "Required when kind=modify. Must be one of the ids in the [CONVERSATION WORKING SET] block of the system prompt."
+          },
+          "draft": {
+            "type": "object",
+            "description": "The complete next-version draft for this item. For modify, return every field — not just the changed ones.",
+            "properties": {
+              "category": {
+                "type": "string",
+                "description": "Category id; pick from the list in the system prompt (built-in or user-added)."
+              },
+              "brand": { "type": "string" },
+              "model": { "type": "string" },
+              "nickname": { "type": "string" },
+              "oneLiner": { "type": "string" },
+              "specs": {
+                "type": "array",
+                "description": "First 4 are hero specs; rest are long-tail. 4-10 entries total.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": { "type": "string" },
+                    "value": { "type": "string" }
+                  },
+                  "required": ["label", "value"]
+                }
+              },
+              "history": {
+                "type": "array",
+                "description": "Timeline events the user explicitly mentioned. Empty array if none.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "date": { "type": "string", "description": "YYYY-MM-DD" },
+                    "kind": {
+                      "type": "string",
+                      "enum": ["ACQUIRED", "MILESTONE", "MAINTAIN", "MOD", "PARTED"]
+                    },
+                    "title": { "type": "string" },
+                    "note": { "type": "string" }
+                  },
+                  "required": ["date", "kind", "title"]
+                }
+              }
+            },
+            "required": ["category", "brand", "model", "oneLiner", "specs"]
+          }
         },
-        "required": ["label", "value"]
+        "required": ["kind", "draft"]
       }
     }
   },
-  "required": ["category", "brand", "model", "oneLiner", "specs"]
+  "required": ["actions"]
 }
 """.trimIndent()

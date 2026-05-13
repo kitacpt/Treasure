@@ -1,6 +1,7 @@
 package com.treasure.core.ai
 
 import com.treasure.core.domain.HeroSpec
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -9,31 +10,70 @@ import kotlinx.serialization.Serializable
  * in this package — [AnthropicClient] for Claude, [OpenAiClient] for
  * OpenAI and OpenAI-compatible endpoints (e.g. self-hosted vLLM,
  * DeepSeek, etc).
+ *
+ * Cycle 0032：协议从单 draft 升级到多 action — 一段会话可以攒多件物品，
+ * AI 一次回复也能 [create] / [modify] 多条。AI 看见当前 working set
+ * （每行有 id + 当前 draft），明确区分"新建"与"修改"，不会再覆盖错。
  */
 interface AiClient {
     /**
-     * Given a user's text description, optional JPEG photo, and any
-     * earlier turns in the conversation, return a structured
-     * [ItemDraft] the UI can pre-fill the manual form with.
-     *
-     * 多轮：[priorTurns] 按时间顺序传入；最早在前。
-     */
-    /**
-     * @param baseline 上一次用户已"采用"的草稿。Cycle 0024：AI 不从零开
-     *  始 propose，而是基于这份基线给出"下一版" — 给 AI 一种"修订"语境，
-     *  避免每轮都生成完全不同的字段集。
+     * @param workingSet 这段会话当前的物品列表 — AI 用它判断该 create
+     *  还是 modify 现有条目（target_id 指向 working-set 行的 id）。空列
+     *  表 = 全新会话。
      * @param categoryHints Cycle 0027：当前用户可用的分类列表（内建 +
      *  未隐藏的自定义）。空时退回 SYSTEM_PROMPT 里的内建 6 个。非空时
      *  会拼到 system prompt 让 AI 选自定义 id（比如"custom-xxx"）。
      */
-    suspend fun extractItemDraft(
+    suspend fun extractItemDrafts(
         text: String,
         imageJpegBytes: ByteArray? = null,
         priorTurns: List<AiTurn> = emptyList(),
-        baseline: ItemDraft? = null,
+        workingSet: List<WorkingItemSummary> = emptyList(),
         categoryHints: List<CategoryHint> = emptyList(),
-    ): Result<ItemDraft>
+    ): Result<List<DraftAction>>
+
+    /** Cycle 0031：用户按 stop 时立刻掐掉正在飞的 HTTP 调用。impl 调
+     *  OkHttp dispatcher.cancelAll() — 同 instance 上所有 in-flight 全断。 */
+    fun cancel() {}
 }
+
+/**
+ * Cycle 0032：AI 通过 submit_drafts 工具返回一组 actions。每个 action
+ * 描述对工作集的一次变更。
+ *
+ * - kind = [ActionKind.CREATE]: 新物品。[targetId] 应为空；VM 会生成一个
+ *   新 ciId 并 upsert PENDING 行。
+ * - kind = [ActionKind.MODIFY]: 修改已有工作集行；[targetId] 必须是 system
+ *   prompt 里 [CONVERSATION WORKING SET] 中某行的 id。VM 根据原行 status
+ *   决定新 status — 原 PENDING / MODIFIED 保持，原 SAVED → MODIFIED。
+ */
+@Serializable
+data class DraftAction(
+    val kind: ActionKind,
+    @SerialName("target_id") val targetId: String? = null,
+    val draft: ItemDraft,
+)
+
+@Serializable
+enum class ActionKind {
+    @SerialName("create") CREATE,
+    @SerialName("modify") MODIFY,
+}
+
+/**
+ * Cycle 0032：喂给 AI 的工作集摘要 — 每条物品的 id + 当前状态 + 关键
+ * 字段。AI 据此判断是 create 新条目还是 modify 旧的。控制 token 上限
+ * （别把整张物品 photos / palette / history 全塞进去）。
+ */
+@Serializable
+data class WorkingItemSummary(
+    val id: String,
+    val status: String, // "PENDING" | "SAVED" | "MODIFIED"
+    val title: String,
+    val category: String? = null,
+    val oneLiner: String = "",
+    val specs: List<HeroSpec> = emptyList(),
+)
 
 enum class AiRole { USER, ASSISTANT }
 
@@ -106,4 +146,10 @@ data class ItemDraft(
      *  AI 不直接填这个字段；用户在 Refine 页手动加。commitDraft 把它带进
      *  最终 Item。 */
     val history: List<com.treasure.core.domain.HistoryEvent> = emptyList(),
+    /** Cycle 0033：草稿阶段就能管影集。绝对路径（filesDir/draft-photos/<convo>/<uuid>.jpg）
+     *  逐步累加；commitDraft 把它们带进 Item.photos。AI 不填。 */
+    val photos: List<String> = emptyList(),
+    /** Cycle 0033：用户在 Refine 里挑的头像（必须是 photos 里的一张）；不挑
+     *  则 commit 时 Item.avatarPhotoPath = null，列表回到线描插画。 */
+    val avatarPhotoPath: String? = null,
 )

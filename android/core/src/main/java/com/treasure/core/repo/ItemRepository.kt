@@ -14,6 +14,11 @@ interface ItemRepository {
     suspend fun ensureSeeded()
     suspend fun upsert(item: Item)
     suspend fun delete(id: String)
+    /** Cycle 0033：返回当前最小 sort_order，commit 新物品时取此值 - 1 让它前置。 */
+    suspend fun minSortOrder(): Long
+    /** Cycle 0033：批量重排 — orderedIds 按用户拖完的次序，从某个起点开始
+     *  顺序递增写 sort_order。同一批一次性生效（避免中途观察到中间态）。 */
+    suspend fun reorder(orderedIds: List<String>)
 }
 
 class RoomItemRepository internal constructor(
@@ -42,6 +47,18 @@ class RoomItemRepository internal constructor(
 
     override suspend fun delete(id: String) {
         dao.deleteById(id)
+    }
+
+    override suspend fun minSortOrder(): Long = dao.minSortOrder() ?: 0L
+
+    override suspend fun reorder(orderedIds: List<String>) {
+        if (orderedIds.isEmpty()) return
+        // 起点从当前最小往下 — 让新拍板的顺序整体落在原排序之上（newest-first 风格）。
+        var order = (dao.minSortOrder() ?: 0L) - 1L
+        orderedIds.forEach { id ->
+            dao.setSortOrder(id, order)
+            order += 1L
+        }
     }
 
     companion object {

@@ -22,14 +22,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ConversationEntity::class,
         ConversationMessageEntity::class,
         CategoryPrefEntity::class,
+        ConversationItemEntity::class,
     ],
-    version = 10,
+    version = 13,
     exportSchema = true,
 )
 internal abstract class TreasureDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
     abstract fun conversationDao(): ConversationDao
     abstract fun categoryPrefDao(): CategoryPrefDao
+    abstract fun conversationItemDao(): ConversationItemDao
 
     /**
      * Cycle 0031 复修：fresh-install 时给 category_prefs 补 6 个内建分类

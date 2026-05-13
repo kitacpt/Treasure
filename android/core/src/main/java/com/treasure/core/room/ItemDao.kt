@@ -9,7 +9,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 internal interface ItemDao {
-    @Query("SELECT * FROM items ORDER BY acquired DESC")
+    // Cycle 0033：默认排序 = sort_order ASC（小的在前）。新物品 sort_order =
+    // 当前最小 - 1，自然落在最前。用 acquired DESC 当 tie-breaker 维持老体感。
+    @Query("SELECT * FROM items ORDER BY sort_order ASC, acquired DESC")
     fun observeAll(): Flow<List<ItemEntity>>
 
     @Query("SELECT * FROM items WHERE id = :id LIMIT 1")
@@ -29,4 +31,11 @@ internal interface ItemDao {
 
     @Query("DELETE FROM items WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    /** Cycle 0033：取当前最小 sort_order，给"新物品在最前"逻辑用。 */
+    @Query("SELECT MIN(sort_order) FROM items")
+    suspend fun minSortOrder(): Long?
+
+    @Query("UPDATE items SET sort_order = :order WHERE id = :id")
+    suspend fun setSortOrder(id: String, order: Long)
 }

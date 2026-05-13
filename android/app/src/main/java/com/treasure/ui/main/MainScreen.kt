@@ -112,6 +112,11 @@ fun MainScreen(
                     onOpenItem = onOpenDetail,
                     onOpenCategoryManager = { categoryManagerOpen = true },
                     onOpenSearch = onOpenSearch,
+                    // Cycle 0033：编辑态点 [编辑] 把选中物品发到录入页起新会话。
+                    onSendToAdd = { ids ->
+                        app.gridIntake.value = ids
+                        scope.launch { pagerState.animateScrollToPage(PAGE_ADD) }
+                    },
                 )
                 PAGE_ADD -> AddRoute(
                     onSaved = onOpenDetail,

@@ -36,4 +36,8 @@ internal data class ConversationMessageEntity(
     @ColumnInfo(name = "draft_json") val draftJson: String?,
     @ColumnInfo(name = "field_count") val fieldCount: Int?,
     @ColumnInfo(name = "created_at") val createdAt: Long,
+    /** Cycle 0032：仅 draft_cta 用。"create" 或 "modify"，旧行 NULL 当 "create"。 */
+    @ColumnInfo(name = "action_kind") val actionKind: String? = null,
+    /** Cycle 0032：modify 行指向的 conversation_items.id；create 行 NULL。 */
+    @ColumnInfo(name = "target_id") val targetId: String? = null,
 )

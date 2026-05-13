@@ -45,6 +45,14 @@ class TreasureApp : Application() {
     val shareIntake: kotlinx.coroutines.flow.MutableStateFlow<String?> =
         kotlinx.coroutines.flow.MutableStateFlow(null)
 
+    /**
+     * Cycle 0033：图鉴页编辑态点 [编辑] → 把选中的 itemIds 投递到这里，并切
+     * 到 PAGE_ADD。AddRoute 监听 → 调 VM 建新会话 + 把这些物品作为 SAVED 行
+     * 加进工作集 + 切到那段会话。消费后清空。
+     */
+    val gridIntake: kotlinx.coroutines.flow.MutableStateFlow<List<String>?> =
+        kotlinx.coroutines.flow.MutableStateFlow(null)
+
     /** Cycle 0031：用户手动选的主题 — null 跟随系统，true / false 强制覆盖。
      *  MainActivity 读它 + isSystemInDarkTheme 推断实际 darkTheme。 */
     val darkModeOverride: kotlinx.coroutines.flow.MutableStateFlow<Boolean?> =

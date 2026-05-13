@@ -540,7 +540,7 @@ private val ROW_HEIGHT = 56.dp
  * `pointerInput(idx)` 已经按 idx 重 key，但写得更稳）。
  */
 @Composable
-private fun ReorderableSpecs(
+internal fun ReorderableSpecs(
     specs: List<HeroSpec>,
     onChange: (Int, HeroSpec) -> Unit,
     onDelete: (Int) -> Unit,

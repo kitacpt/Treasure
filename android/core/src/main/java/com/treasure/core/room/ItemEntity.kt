@@ -37,6 +37,9 @@ internal data class ItemEntity(
     @ColumnInfo(name = "avatar_photo_path") val avatarPhotoPath: String?,
     @ColumnInfo(name = "created_at") val createdAt: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    /** Cycle 0033：图鉴显式排序权重，小的在前。空 default 时由 migration 用
+     *  `-created_at` 回填，让默认 "newest first" 成立。 */
+    @ColumnInfo(name = "sort_order", defaultValue = "0") val sortOrder: Long = 0L,
 ) {
     fun toDomain(): Item = Item(
         id = id,
@@ -58,6 +61,7 @@ internal data class ItemEntity(
         avatarPhotoPath = avatarPhotoPath,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        sortOrder = sortOrder,
     )
 
     companion object {
@@ -80,6 +84,7 @@ internal data class ItemEntity(
             avatarPhotoPath = item.avatarPhotoPath,
             createdAt = item.createdAt,
             updatedAt = item.updatedAt,
+            sortOrder = item.sortOrder,
         )
     }
 }

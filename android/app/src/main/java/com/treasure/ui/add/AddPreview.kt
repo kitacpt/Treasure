@@ -70,8 +70,19 @@ fun AddPreview(
     onUpdateSpec: (Int, HeroSpec) -> Unit,
     onAddSpec: () -> Unit,
     onRemoveSpec: (Int) -> Unit,
+    onMoveSpec: (Int, Int) -> Unit = { _, _ -> },
     onUpdateHistory: (List<com.treasure.core.domain.HistoryEvent>) -> Unit = {},
     onConfirm: (ItemStatus) -> Unit,
+    /** Cycle 0031：proposal-preview 模式（user 点 DraftCta 卡片）。非 null 时
+     *  顶部 trailing 改成 "采用"；按下时 onAccept(当前编辑后的 draft)。 */
+    proposalMode: Boolean = false,
+    onAccept: () -> Unit = {},
+    /** Cycle 0033：影集管理 — 选 / 拍 / 删 / 设头像。proposalMode 下隐藏
+     *  （还没真正落到工作集里，没必要建文件）；正式 Refine 才开。 */
+    onPickPhoto: (() -> Unit)? = null,
+    onTakePhoto: (() -> Unit)? = null,
+    onRemovePhoto: ((String) -> Unit)? = null,
+    onSelectAvatar: ((String?) -> Unit)? = null,
 ) {
     val colors = LocalTreasureColors.current
     if (draft == null) {
@@ -122,7 +133,7 @@ fun AddPreview(
         ) {
             item {
                 EditPageHeader(
-                    title = "Refine",
+                    title = if (proposalMode) "Proposal" else "Refine",
                     subtitle = categoryDisplay,
                     leading = {
                         Text(
@@ -137,11 +148,14 @@ fun AddPreview(
                     },
                     trailing = {
                         Text(
-                            text = "确认收入",
+                            text = if (proposalMode) "采用" else "确认收入",
                             color = colors.terra,
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier
-                                .clickable { confirming = true }
+                                .clickable {
+                                    if (proposalMode) onAccept()
+                                    else confirming = true
+                                }
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                         )
                     },
@@ -155,6 +169,15 @@ fun AddPreview(
                     options = remember(template.category) { heroVectorOptionsFor(template.category) },
                     selected = template.heroVector,
                     onSelect = { /* read-only — 草稿页不让换插画 */ },
+                    // Cycle 0033：影集管理 — 拍 / 选 / 长按删 / 点头像选用。
+                    photoOptions = draft.photos,
+                    selectedPhoto = draft.avatarPhotoPath,
+                    onSelectPhoto = if (onSelectAvatar != null) {
+                        { path -> onSelectAvatar(path) }
+                    } else null,
+                    onTakePhoto = onTakePhoto,
+                    onPickPhotos = onPickPhoto,
+                    onRemovePhoto = onRemovePhoto,
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -234,14 +257,21 @@ fun AddPreview(
                 }
             }
 
-            item { SectionDivider("参数 · AI 填的字段") }
+            item { SectionDivider("参数") }
             item {
-                DraftSpecs(
+                // Cycle 0031：草稿页换成 Edit 同款 ReorderableSpecs — HERO/TAIL
+                // 分割线 + 拖动重排，跟图鉴编辑页一模一样。AI 已经按重要性给
+                // 出过排序，但用户能微调 hero 4 项。
+                com.treasure.ui.edit.ReorderableSpecs(
                     specs = draft.specs,
                     onChange = onUpdateSpec,
                     onDelete = onRemoveSpec,
-                    onAdd = onAddSpec,
+                    onMove = onMoveSpec,
                 )
+                Spacer(Modifier.height(8.dp))
+                Box(modifier = Modifier.padding(horizontal = 22.dp)) {
+                    AddRowButton(label = "+", onClick = onAddSpec)
+                }
             }
 
             // Cycle 0031：草稿页加历史栏，跟物品 Edit 页同一份 UI（HistorySection
@@ -291,54 +321,4 @@ fun AddPreview(
 
 private val LABEL_GAP = 12.dp
 
-/**
- * 比 Edit 页的 ReorderableSpecs 简化：草稿页不做拖动重排（AI 已经按重要性
- * 排好了，用户要细调可以在 Detail / Edit 页继续）。只支持 inline 改 label /
- * value、删除单行、加新行。
- */
-@Composable
-private fun DraftSpecs(
-    specs: List<HeroSpec>,
-    onChange: (Int, HeroSpec) -> Unit,
-    onDelete: (Int) -> Unit,
-    onAdd: () -> Unit,
-) {
-    val colors = LocalTreasureColors.current
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
-        if (specs.isEmpty()) {
-            Text(
-                text = "AI 没填参数 · 点下面 + 自己加",
-                color = colors.sub.copy(alpha = 0.6f),
-                style = MaterialTheme.typography.bodyMedium,
-                fontStyle = FontStyle.Italic,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-        } else {
-            specs.forEachIndexed { idx, spec ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    InlineField(
-                        placeholder = "label",
-                        value = spec.label,
-                        onValueChange = { onChange(idx, HeroSpec(it, spec.value)) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    InlineField(
-                        placeholder = "value",
-                        value = spec.value,
-                        onValueChange = { onChange(idx, HeroSpec(spec.label, it)) },
-                        modifier = Modifier.weight(1.4f),
-                    )
-                    DeleteIcon { onDelete(idx) }
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        AddRowButton(label = "+ 加一行参数", onClick = onAdd)
-    }
-}
+// Cycle 0031：DraftSpecs 退役，AddPreview 改用 EditScreen.ReorderableSpecs。

@@ -40,15 +40,20 @@ class AnthropicClient(
     )
     private val json = Json { ignoreUnknownKeys = true }
 
-    override suspend fun extractItemDraft(
+    /** Cycle 0031：用户按 stop 时调；掐掉这个 client 上所有 in-flight 请求。 */
+    override fun cancel() {
+        client.dispatcher.cancelAll()
+    }
+
+    override suspend fun extractItemDrafts(
         text: String,
         imageJpegBytes: ByteArray?,
         priorTurns: List<AiTurn>,
-        baseline: ItemDraft?,
+        workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
-    ): Result<ItemDraft> = withContext(Dispatchers.IO) {
+    ): Result<List<DraftAction>> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = buildPayload(text, imageJpegBytes, priorTurns, baseline, categoryHints)
+            val payload = buildPayload(text, imageJpegBytes, priorTurns, workingSet, categoryHints)
             val response = client.newCall(
                 Request.Builder()
                     .url("$baseUrl/v1/messages")
@@ -64,7 +69,7 @@ class AnthropicClient(
                 if (!resp.isSuccessful) {
                     throw IllegalStateException("HTTP ${resp.code}: ${body.take(500)}")
                 }
-                parseDraft(body)
+                parseDrafts(body)
             }
         }
     }
@@ -73,14 +78,16 @@ class AnthropicClient(
         text: String,
         image: ByteArray?,
         priorTurns: List<AiTurn>,
-        baseline: ItemDraft?,
+        workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
     ): String {
         val toolSchema = json.parseToJsonElement(EXTRACT_TOOL_PARAMETERS).jsonObject
         val payload = buildJsonObject {
             put("model", model)
-            put("max_tokens", if (thinkingEnabled) 4096 else 1024)
-            put("system", buildSystemWithBaseline(baseline, json, categoryHints))
+            // Cycle 0032：多 action 时 tool call 体积变大（4 件物品 × 8 specs
+            // ≈ 700 token）；max_tokens 上调一档，留 4096 给 thinking。
+            put("max_tokens", if (thinkingEnabled) 8192 else 4096)
+            put("system", buildSystemWithWorkingSet(workingSet, json, categoryHints))
             temperature?.let { put("temperature", it) }
             if (thinkingEnabled) {
                 putJsonObject("thinking") {
@@ -141,7 +148,7 @@ class AnthropicClient(
         return json.encodeToString(JsonObject.serializer(), payload)
     }
 
-    private fun parseDraft(body: String): ItemDraft {
+    private fun parseDrafts(body: String): List<DraftAction> {
         val response = json.parseToJsonElement(body).jsonObject
         val content = response["content"]?.jsonArray
             ?: throw IllegalStateException("response missing 'content'")
@@ -152,7 +159,7 @@ class AnthropicClient(
         if (toolUse != null) {
             val input = toolUse["input"]?.jsonObject
                 ?: throw IllegalStateException("tool_use missing 'input'")
-            return json.decodeFromJsonElement(ItemDraft.serializer(), input)
+            return parseActionsObject(input)
         }
         // 回退：thinking 模式 + tool_choice=auto 时，模型可能把 JSON 直接写
         // 在 text block 里。抓不到 JSON 就当用户没提物品 — 模型聊天回复 surface
@@ -163,9 +170,18 @@ class AnthropicClient(
             ?: throw IllegalStateException("response had no tool_use or text block")
         val jsonChunk = extractFirstJsonObject(textBlock)
         if (jsonChunk != null) {
-            return json.decodeFromString(ItemDraft.serializer(), jsonChunk)
+            val parsed = json.parseToJsonElement(jsonChunk).jsonObject
+            return parseActionsObject(parsed)
         }
         throw ChatOnlyResponseException(textBlock.trim())
+    }
+
+    private fun parseActionsObject(obj: JsonObject): List<DraftAction> {
+        val actionsArr = obj["actions"]?.jsonArray
+            ?: throw IllegalStateException("tool response missing 'actions'")
+        return actionsArr.map { el ->
+            json.decodeFromJsonElement(DraftAction.serializer(), el)
+        }
     }
 
     companion object {
@@ -176,7 +192,9 @@ class AnthropicClient(
             // OkHttp 默认 readTimeout = 10s。thinking 模型第一个 byte 可能
             // 30-180s 之后才到，不抬高这条 callTimeout 调多大都救不了。
             .readTimeout(callTimeoutSec, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
+            // Cycle 0031 复修：writeTimeout 之前固定 60s — 大图 base64 后请
+            // 求体 1-3 MB，慢网传不完 60s 就 abort。跟 callTimeout 同档。
+            .writeTimeout(callTimeoutSec, TimeUnit.SECONDS)
             .callTimeout(callTimeoutSec, TimeUnit.SECONDS)
             .build()
     }

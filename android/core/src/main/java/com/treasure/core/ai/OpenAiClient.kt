@@ -75,15 +75,20 @@ class OpenAiClient(
     )
     private val json = Json { ignoreUnknownKeys = true }
 
-    override suspend fun extractItemDraft(
+    /** Cycle 0031：用户按 stop 时调；掐掉这个 client 上所有 in-flight 请求。 */
+    override fun cancel() {
+        client.dispatcher.cancelAll()
+    }
+
+    override suspend fun extractItemDrafts(
         text: String,
         imageJpegBytes: ByteArray?,
         priorTurns: List<AiTurn>,
-        baseline: ItemDraft?,
+        workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
-    ): Result<ItemDraft> = withContext(Dispatchers.IO) {
+    ): Result<List<DraftAction>> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = buildPayload(text, imageJpegBytes, priorTurns, baseline, categoryHints)
+            val payload = buildPayload(text, imageJpegBytes, priorTurns, workingSet, categoryHints)
             val response = client.newCall(
                 Request.Builder()
                     .url(buildUrl())
@@ -98,7 +103,7 @@ class OpenAiClient(
                 if (!resp.isSuccessful) {
                     throw IllegalStateException("HTTP ${resp.code}: ${body.take(500)}")
                 }
-                parseDraft(body)
+                parseDrafts(body)
             }
         }
     }
@@ -120,13 +125,16 @@ class OpenAiClient(
         text: String,
         image: ByteArray?,
         priorTurns: List<AiTurn>,
-        baseline: ItemDraft?,
+        workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
     ): String {
         val toolSchema = json.parseToJsonElement(EXTRACT_TOOL_PARAMETERS).jsonObject
         val payload = buildJsonObject {
             put("model", model)
             temperature?.let { put("temperature", it) }
+            // Cycle 0032：多 action 时 tool call 体积变大；max_tokens 给充足
+            // 余量，否则 OpenAI 默认 1024 容易在第 3-4 件物品中段截断 JSON。
+            put("max_tokens", if (effectiveThinking) 8192 else 4096)
             // 仅 Qwen / 智谱这种把 enable_thinking 暴露成顶层字段的厂商需要发；
             // OpenAI / Kimi / DeepSeek 走模型名隐式 thinking，发了反而可能炸
             if (effectiveThinking && supportsEnableThinkingFlag) {
@@ -135,7 +143,7 @@ class OpenAiClient(
             putJsonArray("messages") {
                 add(buildJsonObject {
                     put("role", "system")
-                    put("content", buildSystemWithBaseline(baseline, json, categoryHints))
+                    put("content", buildSystemWithWorkingSet(workingSet, json, categoryHints))
                 })
                 priorTurns.forEach { turn ->
                     add(buildJsonObject {
@@ -189,7 +197,7 @@ class OpenAiClient(
         return json.encodeToString(JsonObject.serializer(), payload)
     }
 
-    private fun parseDraft(body: String): ItemDraft {
+    private fun parseDrafts(body: String): List<DraftAction> {
         val response = json.parseToJsonElement(body).jsonObject
         val choices = response["choices"]?.jsonArray
             ?: throw IllegalStateException("response missing 'choices'")
@@ -204,7 +212,8 @@ class OpenAiClient(
             ?.get("function")?.jsonObject
             ?.get("arguments")?.jsonPrimitive?.content
         if (toolArgs != null) {
-            return json.decodeFromString(ItemDraft.serializer(), toolArgs)
+            val parsed = json.parseToJsonElement(toolArgs).jsonObject
+            return parseActionsObject(parsed)
         }
 
         // 回退：thinking + tool_choice=auto 时模型可能直接把 JSON 写进 content。
@@ -214,9 +223,18 @@ class OpenAiClient(
             ?: throw IllegalStateException("no tool_calls and no content — empty response")
         val jsonChunk = extractFirstJsonObject(contentText)
         if (jsonChunk != null) {
-            return json.decodeFromString(ItemDraft.serializer(), jsonChunk)
+            val parsed = json.parseToJsonElement(jsonChunk).jsonObject
+            return parseActionsObject(parsed)
         }
         throw ChatOnlyResponseException(contentText.trim())
+    }
+
+    private fun parseActionsObject(obj: JsonObject): List<DraftAction> {
+        val actionsArr = obj["actions"]?.jsonArray
+            ?: throw IllegalStateException("tool response missing 'actions'")
+        return actionsArr.map { el ->
+            json.decodeFromJsonElement(DraftAction.serializer(), el)
+        }
     }
 
     companion object {
@@ -238,7 +256,11 @@ class OpenAiClient(
             // 可能要 30-180s 思考；不抬高 readTimeout 的话，callTimeout 调多
             // 大都没用 — read 会先在 10s 超时把连接干掉。和 callTimeout 同档。
             .readTimeout(callTimeoutSec, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
+            // Cycle 0031 复修：writeTimeout 之前固定 60s — 多模态请求里
+            // base64 图片把请求体撑到 1-3 MB，慢网下传 60+ 秒，触发
+            // "Software caused connection abort"。抬到 callTimeout 同档（最多
+            // 360s）。压缩在 AddViewModel 那一侧已经做了 —— 这是兜底。
+            .writeTimeout(callTimeoutSec, TimeUnit.SECONDS)
             .callTimeout(callTimeoutSec, TimeUnit.SECONDS)
             .build()
     }

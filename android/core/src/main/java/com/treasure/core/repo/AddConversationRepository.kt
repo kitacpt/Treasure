@@ -18,6 +18,9 @@ import kotlinx.serialization.json.Json
  */
 enum class DraftCtaStatus { Pending, Accepted, Rejected }
 
+/** Cycle 0032：一张 DraftCta 卡片对应的 action — 新增 or 修改某行。 */
+enum class DraftCtaActionKind { Create, Modify }
+
 /** 录入页对话的领域级 message —— 对应 UI 层 AddMessage。 */
 sealed interface AddConversationMessage {
     val id: String
@@ -33,12 +36,24 @@ sealed interface AddConversationMessage {
         val fieldCount: Int,
         val status: DraftCtaStatus,
         override val createdAt: Long,
+        /** Cycle 0032：[DraftCtaActionKind.Create] = 新增；[Modify] = 修改既有
+         *  conversation_items 行（[targetCiId] 指向它）。 */
+        val actionKind: DraftCtaActionKind = DraftCtaActionKind.Create,
+        val targetCiId: String? = null,
     ) : AddConversationMessage
     /** Cycle 0024：用户 "采用" 后写下的快照，等价于"这一刻起，会话草稿是这样"。 */
     data class DraftConfirmed(
         override val id: String,
         val draft: ItemDraft,
         val fieldCount: Int,
+        override val createdAt: Long,
+    ) : AddConversationMessage
+    /** Cycle 0031：用户点 "确认收入" 把草稿固化成 Item 后写的标记 — 会话从
+     *  此封存。[savedItemId] 是落到图鉴里的 Item id，未来加"打开图鉴查看
+     *  这条"按钮可以指过去。 */
+    data class Committed(
+        override val id: String,
+        val savedItemId: String,
         override val createdAt: Long,
     ) : AddConversationMessage
 }
@@ -50,6 +65,27 @@ data class AddConversation(
     val updatedAt: Long,
 )
 
+/** Cycle 0031：一段会话的"工作集"里每条物品的三态。 */
+enum class ConversationItemStatus { PENDING, SAVED, MODIFIED }
+
+/**
+ * Cycle 0031：会话工作集里的一行。
+ *
+ * - [draft] PENDING / MODIFIED 时是当前待审的草稿；SAVED 时为 null。
+ * - [itemRef] SAVED / MODIFIED 时指向 items 表里的真物品；PENDING 时为 null。
+ * - [status] 三态决定列表里胶囊按钮颜色（红/绿/黄）+ 点击行为。
+ */
+data class ConversationItem(
+    val id: String,
+    val conversationId: String,
+    val draft: ItemDraft?,
+    val itemRef: String?,
+    val status: ConversationItemStatus,
+    val sortOrder: Int,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
 interface AddConversationRepository {
     fun observeRecent(limit: Int = 20): Flow<List<AddConversation>>
     suspend fun upsert(conversation: AddConversation)
@@ -57,13 +93,40 @@ interface AddConversationRepository {
     suspend fun loadMessages(conversationId: String): List<AddConversationMessage>
     suspend fun appendMessage(conversationId: String, message: AddConversationMessage)
     suspend fun replaceMessages(conversationId: String, messages: List<AddConversationMessage>)
+
+    /** Cycle 0031：会话工作集相关。 */
+    fun observeItems(conversationId: String): Flow<List<ConversationItem>>
+    suspend fun loadItems(conversationId: String): List<ConversationItem>
+    suspend fun upsertItem(item: ConversationItem)
+    suspend fun deleteItem(itemId: String)
+    suspend fun nextSortOrder(conversationId: String): Int
 }
 
 class RoomAddConversationRepository internal constructor(
     db: TreasureDatabase,
 ) : AddConversationRepository {
     private val dao = db.conversationDao()
+    private val itemDao = db.conversationItemDao()
     private val json = Json { ignoreUnknownKeys = true }
+
+    override fun observeItems(conversationId: String): Flow<List<ConversationItem>> =
+        itemDao.observeForConversation(conversationId).map { rows ->
+            rows.map { it.toDomain(json) }
+        }
+
+    override suspend fun loadItems(conversationId: String): List<ConversationItem> =
+        itemDao.loadForConversation(conversationId).map { it.toDomain(json) }
+
+    override suspend fun upsertItem(item: ConversationItem) {
+        itemDao.upsert(item.toEntity(json))
+    }
+
+    override suspend fun deleteItem(itemId: String) {
+        itemDao.delete(itemId)
+    }
+
+    override suspend fun nextSortOrder(conversationId: String): Int =
+        itemDao.maxSortOrder(conversationId) + 1
 
     override fun observeRecent(limit: Int): Flow<List<AddConversation>> =
         dao.observeConversations(limit).map { rows ->
@@ -129,7 +192,16 @@ private fun ConversationMessageEntity.toDomain(json: Json): AddConversationMessa
             "rejected" -> DraftCtaStatus.Rejected
             else -> DraftCtaStatus.Pending
         }
-        AddConversationMessage.DraftCta(id, draft, fieldCount ?: 0, status, createdAt)
+        // Cycle 0032：旧 draft_cta 行 actionKind = null → 退化为 Create。
+        val kind = when (actionKind?.lowercase()) {
+            "modify" -> DraftCtaActionKind.Modify
+            else -> DraftCtaActionKind.Create
+        }
+        AddConversationMessage.DraftCta(
+            id, draft, fieldCount ?: 0, status, createdAt,
+            actionKind = kind,
+            targetCiId = targetId,
+        )
     }
     "draft_confirmed" -> {
         val draft = draftJson?.let {
@@ -137,6 +209,8 @@ private fun ConversationMessageEntity.toDomain(json: Json): AddConversationMessa
         } ?: ItemDraft()
         AddConversationMessage.DraftConfirmed(id, draft, fieldCount ?: 0, createdAt)
     }
+    // Cycle 0031：commit 把草稿落到图鉴后写的封存标记 — saved item id 存 text。
+    "committed" -> AddConversationMessage.Committed(id, text.orEmpty(), createdAt)
     else -> AddConversationMessage.Assistant(id, text.orEmpty(), createdAt)
 }
 
@@ -170,6 +244,11 @@ private fun AddConversationMessage.toEntity(
         photoUri = null, voiceDuration = null,
         draftJson = json.encodeToString(draft),
         fieldCount = fieldCount, createdAt = createdAt,
+        actionKind = when (actionKind) {
+            DraftCtaActionKind.Create -> "create"
+            DraftCtaActionKind.Modify -> "modify"
+        },
+        targetId = targetCiId,
     )
     is AddConversationMessage.DraftConfirmed -> ConversationMessageEntity(
         id = id, conversationId = conversationId, role = "draft_confirmed",
@@ -177,4 +256,42 @@ private fun AddConversationMessage.toEntity(
         draftJson = json.encodeToString(draft),
         fieldCount = fieldCount, createdAt = createdAt,
     )
+    is AddConversationMessage.Committed -> ConversationMessageEntity(
+        id = id, conversationId = conversationId, role = "committed",
+        text = savedItemId, photoUri = null, voiceDuration = null,
+        draftJson = null, fieldCount = null, createdAt = createdAt,
+    )
 }
+
+private fun com.treasure.core.room.ConversationItemEntity.toDomain(json: Json): ConversationItem {
+    val draft = draftJson?.let {
+        runCatching { json.decodeFromString(ItemDraft.serializer(), it) }.getOrNull()
+    }
+    val parsedStatus = when (status.lowercase()) {
+        "saved" -> ConversationItemStatus.SAVED
+        "modified" -> ConversationItemStatus.MODIFIED
+        else -> ConversationItemStatus.PENDING
+    }
+    return ConversationItem(
+        id = id,
+        conversationId = conversationId,
+        draft = draft,
+        itemRef = itemRef,
+        status = parsedStatus,
+        sortOrder = sortOrder,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+    )
+}
+
+private fun ConversationItem.toEntity(json: Json): com.treasure.core.room.ConversationItemEntity =
+    com.treasure.core.room.ConversationItemEntity(
+        id = id,
+        conversationId = conversationId,
+        draftJson = draft?.let { json.encodeToString(ItemDraft.serializer(), it) },
+        itemRef = itemRef,
+        status = status.name.lowercase(),
+        sortOrder = sortOrder,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+    )

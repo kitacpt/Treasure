@@ -8,6 +8,18 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- Cycle 0031：AI 调用熄屏保活。
+         WAKE_LOCK 配合 service 持 PARTIAL_WAKE_LOCK，CPU 不睡 →
+         OkHttp socket 不会断。
+         FOREGROUND_SERVICE + FOREGROUND_SERVICE_DATA_SYNC：在 vivo / 华为 /
+         OPPO 这种"激进省电"系统上，AI 调用期间 app 进了后台依然不会被秒杀。
+         POST_NOTIFICATIONS：Android 13+ 前台 service 通知需要它（运行时申请）；
+         没拿到也只是没图标，service 还能跑。 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <uses-feature
         android:name="android.hardware.camera.any"
         android:required="false" />
@@ -55,6 +67,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Cycle 0031：AI 调用期间起一个前台 service 顶住进程，熄屏 / 切后台
+             都不会被 OEM 激进省电策略秒杀。type=dataSync 对应"app 内同步数据"，
+             符合 AI 抽屉 / refine 场景。 -->
+        <service
+            android:name=".background.AiKeepAliveService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
 </manifest>
