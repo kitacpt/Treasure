@@ -179,6 +179,33 @@ fun AddPreview(
                     onPickPhotos = onPickPhoto,
                     onRemovePhoto = onRemovePhoto,
                 )
+                // Cycle 0033 v2：直接在头像下方放一个常驻 "+ 添加照片" 入口 —
+                // 之前要"点头像 · 换插画 / 用照片"展开 chip 才看得到，太隐蔽。
+                if (onPickPhoto != null && !proposalMode) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 60.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(colors.card)
+                                .border(0.5.dp, colors.terra.copy(alpha = 0.6f), RoundedCornerShape(999.dp))
+                                .clickable(onClick = onPickPhoto)
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "+ 添加照片",
+                                color = colors.terra,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
             }
 

@@ -68,8 +68,23 @@ fun AddRoute(
     var photoPreview by remember { mutableStateOf<ChatPhotoPreview?>(null) }
     // Cycle 0033：刚选 / 拍出的照片先送 CropScreen 让用户裁一刀，确定后才落
     // 到 draft.photos。null = 没有挂起的裁剪。
-    var cropSource by remember { mutableStateOf<android.net.Uri?>(null) }
+    // Cycle 0033 v2：state 升到 rememberSaveable + Uri 用 String 保存，picker
+    // 引发的 ON_PAUSE/ON_RESUME 也不丢；hoist 出 `when (mode)` 避免 launcher
+    // 注册点不稳。
+    var cropSourceStr by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+    val cropSource = cropSourceStr?.let { android.net.Uri.parse(it) }
     val cropScope = androidx.compose.runtime.rememberCoroutineScope()
+    // Cycle 0033 v2：picker launcher hoist 到 AddRoute 顶部 — 之前嵌在
+    // `when (mode) AddMode.Preview -> else { ... }` 里，mode 切换会让 launcher
+    // 重新注册，配合 PickVisualMedia 的 result 派发偶尔会拿不到回调。这里挂
+    // 在最外层只随 conversationId / lifecycle 重组，更稳定。
+    val pickPhotoLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) cropSourceStr = uri.toString()
+    }
     // Cycle 0031：用户点 DraftCta 卡片进 proposal-preview。proposalCta 非 null
     // 时 AddPreview 渲染 cta.draft（用户可微改），trailing 改成 [采用]。
     var proposalCta by remember { mutableStateOf<AddMessage.DraftCta?>(null) }
@@ -258,9 +273,7 @@ fun AddRoute(
                         // Manual Refine：编辑 confirmedDraft，[确认收入] 入图鉴。
                         // Cycle 0033：Refine 页开始管理影集 — picker / camera
                         // 走 CropScreen 后落到 draft.photos。
-                        val pickPhotoLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-                            androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
-                        ) { uri -> if (uri != null) cropSource = uri }
+                        // launcher 用的是 AddRoute 顶部的 pickPhotoLauncher（hoisted）。
                         AddPreview(
                             draft = state.confirmedDraft,
                             categories = categories,
@@ -324,12 +337,12 @@ fun AddRoute(
         cropSource?.let { src ->
             com.treasure.ui.photo.CropScreen(
                 source = src,
-                onCancel = { cropSource = null },
+                onCancel = { cropSourceStr = null },
                 onConfirm = { rect ->
                     cropScope.launch {
                         vm.persistDraftPhoto(src, rect)
                     }
-                    cropSource = null
+                    cropSourceStr = null
                 },
             )
         }

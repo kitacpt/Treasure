@@ -87,14 +87,19 @@ fun CropScreen(
             )
             Spacer(Modifier.weight(1f))
             TextButton(onClick = {
-                val c = crop ?: return@TextButton onCancel()
-                val b = imageBounds ?: return@TextButton onCancel()
+                val c = crop
+                val b = imageBounds
+                // Cycle 0033 v2：图还没解码完用户就点确定 — 不要取消（=丢图），
+                // 直接用整图当裁剪结果，保证选了的照片一定落进影集。
+                if (c == null || b == null) {
+                    onConfirm(Rect(0f, 0f, 1f, 1f))
+                    return@TextButton
+                }
                 val left = ((c.left - b.left) / b.width).coerceIn(0f, 1f)
                 val top = ((c.top - b.top) / b.height).coerceIn(0f, 1f)
                 val right = ((c.right - b.left) / b.width).coerceIn(0f, 1f)
                 val bottom = ((c.bottom - b.top) / b.height).coerceIn(0f, 1f)
                 if (right - left < 0.02f || bottom - top < 0.02f) {
-                    // 矩形太小，认为用户没意图裁 — 直接用整图
                     onConfirm(Rect(0f, 0f, 1f, 1f))
                 } else {
                     onConfirm(Rect(left, top, right, bottom))
@@ -140,6 +145,19 @@ fun CropScreen(
                     onChange = { crop = it },
                     minSizePx = with(density) { 60.dp.toPx() },
                 )
+            } else {
+                // Cycle 0033 v2：图还没解码完时给个明确提示，免得用户以为
+                // 卡死立刻退出。
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "正在加载图片…",
+                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
         }
 
