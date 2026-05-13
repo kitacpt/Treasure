@@ -100,6 +100,7 @@ fun EditRoute(
         onUpdate = vm::update,
         onAddPhoto = vm::addPhoto,
         onAddPhotos = vm::addPhotos,
+        onAddCroppedPhoto = vm::addCroppedPhoto,
         onRemovePhoto = vm::removePhoto,
         onDelete = { vm.delete(onDone) },
     )
@@ -113,6 +114,10 @@ fun EditScreen(
     onUpdate: (Item) -> Unit,
     onAddPhoto: (android.net.Uri) -> Unit,
     onAddPhotos: (List<android.net.Uri>) -> Unit,
+    /** Cycle 0033：picker 出来的 source URI + CropScreen 给的归一化 rect。
+     *  目前 EditScreen 内部所有 +选照片 / +拍照 都走这条裁剪流程；旧的
+     *  [onAddPhoto] / [onAddPhotos] 留着兼容外部调用方（同包内 DetailScreen 没用）。 */
+    onAddCroppedPhoto: (android.net.Uri, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
     onRemovePhoto: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -165,15 +170,25 @@ fun EditScreen(
     // 然后把 onTakePhoto / onPickPhotos 当回调传给头像选择器。
     val context = androidx.compose.ui.platform.LocalContext.current
     var pendingCaptureUri by remember { mutableStateOf<android.net.Uri?>(null) }
-    val pickMultiple = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 9),
-    ) { uris -> if (uris.isNotEmpty()) onAddPhotos(uris) }
+    // Cycle 0033：选图 / 拍照都先放到 cropSource，弹 CropScreen 让用户裁，
+    // 确认后 onAddCroppedPhoto 拿到 (uri, rect) 自己做 BitmapFactory 裁剪 +
+    // 落 photos/<itemId>/<uuid>.jpg。saveable<String?> 让裁剪态跨 ON_PAUSE/
+    // ON_RESUME（picker 拉起活动暂停）不丢。
+    var cropSourceStr by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+    val cropSource = cropSourceStr?.let { android.net.Uri.parse(it) }
+    // 单图 picker（替换原 PickMultipleVisualMedia — 多图同时裁剪 UX 复杂，
+    // 一次一张更清晰；用户想加多张就连点几次）。
+    val pickPhoto = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> if (uri != null) cropSourceStr = uri.toString() }
     val takePicture = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture(),
     ) { success ->
         val uri = pendingCaptureUri
         pendingCaptureUri = null
-        if (success && uri != null) onAddPhoto(uri)
+        if (success && uri != null) cropSourceStr = uri.toString()
     }
     val cameraPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -191,7 +206,7 @@ fun EditScreen(
         }
     }
     val pickPhotos: () -> Unit = {
-        pickMultiple.launch(
+        pickPhoto.launch(
             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
         )
     }
@@ -342,6 +357,19 @@ fun EditScreen(
             item { DangerZone(onDelete = onDelete) }
 
             item { Spacer(Modifier.height(60.dp)) }
+        }
+
+        // Cycle 0033：裁剪界面覆在最上面 — picker / camera 返回都触发它，
+        // 用户确认后把 (uri, rect) 给 VM 真正落盘到 photos/<itemId>/。
+        cropSource?.let { src ->
+            com.treasure.ui.photo.CropScreen(
+                source = src,
+                onCancel = { cropSourceStr = null },
+                onConfirm = { rect ->
+                    onAddCroppedPhoto(src, rect)
+                    cropSourceStr = null
+                },
+            )
         }
     }
 }

@@ -177,17 +177,31 @@ private fun CropOverlay(
 ) {
     val handleSize = with(LocalDensity.current) { 24.dp.toPx() }
     val edgeHit = with(LocalDensity.current) { 18.dp.toPx() }
+    // Cycle 0033 v2：bug 复修 — 之前 pointerInput(bounds) 里 onDrag 闭包捕获
+    // 的是 `crop` 参数在 launch 时的值，crop 一更新（用户拖第一个 dp）后续
+    // 帧的 onDrag 还在用初始 crop，结果矩形"拖一帧又回弹"看起来动不了。
+    // 改成 gesture 本地状态：drag start 锁住 startCrop / mode，每帧累加 drag
+    // 总位移 accDrag，applyDrag(startCrop, mode, accDrag) 算绝对终点。这样
+    // 即使外层 crop 被 setState 异步刷新过，gesture 内部仍稳定。
+    val latestCrop by androidx.compose.runtime.rememberUpdatedState(crop)
 
     androidx.compose.foundation.Canvas(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(bounds) {
+                var startCrop = latestCrop
+                var mode: DragMode = DragMode.None
+                var accDrag = Offset.Zero
                 detectDragGestures(
-                    onDragStart = { /* mode picked on first move via state below */ },
+                    onDragStart = { offset ->
+                        startCrop = latestCrop
+                        mode = pickMode(offset, startCrop, edgeHit)
+                        accDrag = Offset.Zero
+                    },
                     onDrag = { change, drag ->
-                        val pos = change.position
-                        val mode = pickMode(pos, crop, edgeHit)
-                        onChange(applyDrag(crop, bounds, mode, drag, minSizePx))
+                        change.consume()
+                        accDrag += drag
+                        onChange(applyDrag(startCrop, bounds, mode, accDrag, minSizePx))
                     },
                 )
             },
