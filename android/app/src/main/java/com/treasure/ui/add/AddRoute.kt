@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -236,6 +237,12 @@ fun AddRoute(
                         photoPreview = ChatPhotoPreview(uris, idx.coerceIn(0, uris.lastIndex))
                     },
                     onAcceptProposal = vm::acceptProposal,
+                    onAcceptAndCommitProposal = { ctaId ->
+                        vm.acceptAndCommitProposal(ctaId) { itemId ->
+                            // 单条直接录入 → 跳 Detail（跟手动 commit 行为对齐）
+                            onSaved(itemId)
+                        }
+                    },
                     onRejectProposal = vm::rejectProposal,
                     // Cycle 0031：DraftCta 卡点击 → 切到 proposal-preview，
                     // AddPreview 用 cta.draft 当起手，用户可微改后 [采用]。
@@ -278,10 +285,10 @@ fun AddRoute(
                     onAddExistingItem = vm::addExistingItem,
                     onRemoveWorkingItem = vm::removeWorkingItem,
                     onCommitAllPending = {
-                        vm.commitAllPendingWorkingItems { savedIds ->
-                            // 录入完跳到第一个新物品的 Detail；空就留在原地。
-                            savedIds.firstOrNull()?.let { onSaved(it) }
-                        }
+                        // Cycle 0034 v7：一键录入完成后不跳 Detail —
+                        // 用户是批量入库，让他们留在录入页继续干。Drawer 会
+                        // 自动刷新显示新 SAVED 状态。单条 commit 才跳 Detail。
+                        vm.commitAllPendingWorkingItems { _ -> }
                     },
                 )
                 AddMode.Preview -> {
@@ -297,10 +304,10 @@ fun AddRoute(
                         // 直接像 Manual Refine 那样工作 — 选 / 删 / 双击预览
                         // 全是一致交互。
                         androidx.compose.runtime.LaunchedEffect(cta.id) {
-                            if (proposalDraft == null || proposalDraft?.photos.isNullOrEmpty()) {
+                            if (proposalDraft == null) {
                                 val ass = cta.photoAssignments
-                                val photos = ass.map { it.sourceUri }
-                                val crops: Map<String, com.treasure.core.domain.PhotoCrop> = ass
+                                val assignmentPhotos = ass.map { it.sourceUri }
+                                val assignmentCrops: Map<String, com.treasure.core.domain.PhotoCrop> = ass
                                     .mapNotNull { pa ->
                                         val isFull = pa.cropW > 0.999f && pa.cropH > 0.999f &&
                                             pa.cropX < 0.001f && pa.cropY < 0.001f
@@ -308,11 +315,35 @@ fun AddRoute(
                                             x = pa.cropX, y = pa.cropY, w = pa.cropW, h = pa.cropH,
                                         )
                                     }.toMap()
-                                val avatar = ass.firstOrNull { it.isAvatar }?.sourceUri
-                                proposalDraft = cta.draft.copy(
-                                    photos = photos,
-                                    photoCrops = crops,
-                                    avatarPhotoPath = avatar,
+                                val assignmentAvatar = ass.firstOrNull { it.isAvatar }?.sourceUri
+
+                                // Cycle 0034 v7：MODIFY 卡的 cta.draft 只是 AI
+                                // 的增量；如果 target 是 SAVED 工作集行，先把它
+                                // merge 到对应 Item 的 baseline 上，才不会把已有
+                                // 影集 / specs / history "覆盖成空白"。CREATE 卡
+                                // 没 baseline，直接用 cta.draft。
+                                val targetCi = cta.targetCiId?.let { id ->
+                                    state.items.firstOrNull { it.id == id }
+                                }
+                                val refItem = targetCi?.itemRef?.let { ref ->
+                                    runCatching { app.repository.observeById(ref).first() }.getOrNull()
+                                }
+                                val mergedDraft = if (
+                                    refItem != null &&
+                                    cta.actionKind == com.treasure.core.repo.DraftCtaActionKind.Modify
+                                ) {
+                                    vm.mergeDraftOntoItem(cta.draft, refItem)
+                                } else cta.draft
+
+                                // photo_assignments 在 merged 之上 append（不覆盖
+                                // 已有 photos）。avatar：assignment 给的优先 →
+                                // merged 里的 → 空。
+                                proposalDraft = mergedDraft.copy(
+                                    photos = mergedDraft.photos + assignmentPhotos.filter {
+                                        it !in mergedDraft.photos
+                                    },
+                                    photoCrops = mergedDraft.photoCrops + assignmentCrops,
+                                    avatarPhotoPath = assignmentAvatar ?: mergedDraft.avatarPhotoPath,
                                 )
                             }
                         }

@@ -1056,7 +1056,77 @@ class AddViewModel(
                 it is AddMessage.DraftCta && it.id == ctaId
             } as AddMessage.DraftCta?
             accepted?.let { upsertCtaStatus(it) }
-            applyAcceptedCta(cta, cta.draft)
+            // Cycle 0034 v7：直接从卡片采用（没走 preview），MODIFY 卡的
+            // cta.draft 是 AI 的 delta。如果 target 是 SAVED 工作集行，先把
+            // delta merge 到原 Item，再 upsert，影集 / specs / history 才不会
+            // 被清空。CREATE 卡照常直接用 cta.draft。
+            val mergedDraft = mergeForDirectAccept(cta)
+            applyAcceptedCta(cta, mergedDraft)
+        }
+    }
+
+    /** Cycle 0034 v7：直接从卡片采用时，把 cta.draft 在必要时 merge 到 baseline。 */
+    private suspend fun mergeForDirectAccept(cta: AddMessage.DraftCta): ItemDraft {
+        if (cta.actionKind != com.treasure.core.repo.DraftCtaActionKind.Modify) return cta.draft
+        val targetCi = cta.targetCiId?.let { id ->
+            _state.value.items.firstOrNull { it.id == id }
+        } ?: return cta.draft
+        val refItem = targetCi.itemRef?.let { ref ->
+            runCatching { repo.observeById(ref).first() }.getOrNull()
+        } ?: return cta.draft
+        return mergeDraftOntoItem(cta.draft, refItem)
+    }
+
+    /**
+     * Cycle 0034 v7：卡片 [直接录入] — 等价于先采用、再立刻录入到图鉴。
+     * 跳过 Refine 步骤。MODIFY 走 merge 路径，影集不丢。
+     */
+    fun acceptAndCommitProposal(
+        ctaId: String,
+        status: ItemStatus = ItemStatus.OWNED,
+        onSaved: (String) -> Unit = {},
+    ) {
+        val current = _state.value
+        val cta = current.messages.firstOrNull {
+            it is AddMessage.DraftCta && it.id == ctaId
+        } as AddMessage.DraftCta? ?: return
+        val newMessages = current.messages.map { m ->
+            if (m is AddMessage.DraftCta && m.id == ctaId) {
+                m.copy(status = DraftCtaStatus.Accepted)
+            } else m
+        }
+        _state.update { it.copy(messages = newMessages) }
+        viewModelScope.launch {
+            val accepted = newMessages.firstOrNull {
+                it is AddMessage.DraftCta && it.id == ctaId
+            } as AddMessage.DraftCta?
+            accepted?.let { upsertCtaStatus(it) }
+            val mergedDraft = mergeForDirectAccept(cta)
+            val ciId = applyAcceptedCta(cta, mergedDraft)
+            if (ciId == null) return@launch
+            // 找到刚 upsert 的 ConversationItem，commit 成 Item，标记 SAVED。
+            val convoId = _state.value.conversationId
+            val ci = conversations.loadItems(convoId).firstOrNull { it.id == ciId } ?: return@launch
+            val draft = ci.draft ?: return@launch
+            val refItem: Item? = ci.itemRef?.let { ref ->
+                runCatching { repo.observeById(ref).first() }.getOrNull()
+            }
+            val itemId = buildAndSaveItem(draft, refItem, status)
+            conversations.upsertItem(
+                ci.copy(
+                    draft = null,
+                    itemRef = itemId,
+                    status = com.treasure.core.repo.ConversationItemStatus.SAVED,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+            val committed = AddMessage.Committed(
+                id = UUID.randomUUID().toString(),
+                savedItemId = itemId,
+            )
+            _state.update { it.copy(messages = it.messages + committed) }
+            persist(committed)
+            onSaved(itemId)
         }
     }
 
@@ -1165,8 +1235,8 @@ class AddViewModel(
     private suspend fun applyAcceptedCta(
         cta: AddMessage.DraftCta,
         draft: ItemDraft,
-    ) {
-        val convoId = _state.value.conversationId.ifBlank { return }
+    ): String? {
+        val convoId = _state.value.conversationId.ifBlank { return null }
         val now = System.currentTimeMillis()
         // Cycle 0034：先把 AI 分配的图按 crop 抄到 filesDir/draft-photos/<convo>/，
         // 拿到本端 file:// 路径，merge 进 draft.photos / avatarPhotoPath。这步
@@ -1187,7 +1257,7 @@ class AddViewModel(
         }
         val existing = conversations.loadItems(convoId).associateBy { it.id }
         val target = cta.targetCiId?.let { existing[it] }
-        if (cta.actionKind == com.treasure.core.repo.DraftCtaActionKind.Modify && target != null) {
+        return if (cta.actionKind == com.treasure.core.repo.DraftCtaActionKind.Modify && target != null) {
             val newStatus = when (target.status) {
                 com.treasure.core.repo.ConversationItemStatus.SAVED ->
                     com.treasure.core.repo.ConversationItemStatus.MODIFIED
@@ -1199,11 +1269,13 @@ class AddViewModel(
             conversations.upsertItem(
                 target.copy(draft = draftWithPhotos, status = newStatus, updatedAt = now),
             )
+            target.id
         } else {
             val order = conversations.nextSortOrder(convoId)
+            val newId = UUID.randomUUID().toString()
             conversations.upsertItem(
                 com.treasure.core.repo.ConversationItem(
-                    id = UUID.randomUUID().toString(),
+                    id = newId,
                     conversationId = convoId,
                     draft = draftWithPhotos,
                     itemRef = null,
@@ -1213,6 +1285,7 @@ class AddViewModel(
                     updatedAt = now,
                 ),
             )
+            newId
         }
     }
 
@@ -1421,6 +1494,43 @@ class AddViewModel(
             confirmedDraft = current.copy(photoCrops = newCrops),
         )
         scheduleDraftAutoSave()
+    }
+
+    /**
+     * Cycle 0034 v7：把 AI 给的 MODIFY delta 应用到一个已有 Item，得到一份
+     * "增量 + baseline" 的完整 ItemDraft。
+     *
+     *  - 空字段 / 空数组 = 不变（沿用 base）
+     *  - 非空 brand/model/nickname/oneLiner/category/heroVector = 覆盖 base
+     *  - specs：按 label 合并 — diff 里的 label 覆盖；base 里有但 diff 没列
+     *    的 label 保留
+     *  - history：base + diff append（AI 这一轮新提的事件叠到老历史末尾）
+     *  - photos / photoCrops / avatarPhotoPath：始终沿用 base（AI 通过
+     *    photo_assignments 而不是 draft 来动影集；在外层另算）
+     *
+     *  这条逻辑修复 cycle 0034 v6 的"MODIFY 后影集消失"bug：AI 默认只发增量，
+     *  之前代码直接拿 cta.draft 当全量用，photos / specs / history 都被清空。
+     */
+    internal fun mergeDraftOntoItem(diff: ItemDraft, base: Item): ItemDraft {
+        val diffSpecsByLabel = diff.specs.filter { it.label.isNotBlank() }.associateBy { it.label }
+        val mergedSpecs = base.specs.map { existing ->
+            diffSpecsByLabel[existing.label] ?: existing
+        } + diff.specs.filter { d ->
+            d.label.isNotBlank() && d.label !in base.specs.map { it.label }
+        }
+        return ItemDraft(
+            category = diff.category?.takeIf { it.isNotBlank() } ?: base.category,
+            brand = diff.brand.ifBlank { base.brand },
+            model = diff.model.ifBlank { base.model },
+            nickname = diff.nickname.ifBlank { base.nickname },
+            oneLiner = diff.oneLiner.ifBlank { base.oneLiner },
+            specs = mergedSpecs,
+            history = base.history + diff.history,
+            photos = base.photos,
+            photoCrops = base.photoCrops,
+            avatarPhotoPath = base.avatarPhotoPath,
+            heroVector = diff.heroVector ?: base.heroVector,
+        )
     }
 
     /** Cycle 0034 v5：用户选了一个"预制插画"做头像 — 写进 draft.heroVector，

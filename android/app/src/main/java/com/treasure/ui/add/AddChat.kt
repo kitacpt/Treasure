@@ -94,6 +94,7 @@ fun AddChat(
     onPreviewPhoto: (android.net.Uri) -> Unit,
     onPreviewPendingPhoto: (uris: List<String>, initialIndex: Int) -> Unit,
     onAcceptProposal: (String) -> Unit,
+    onAcceptAndCommitProposal: (String) -> Unit,
     onRejectProposal: (String) -> Unit,
     onPreviewProposal: (AddMessage.DraftCta) -> Unit,
     onStopExtract: () -> Unit,
@@ -213,6 +214,7 @@ fun AddChat(
                             onPreviewProposal = onPreviewProposal,
                             onPreviewPhoto = onPreviewPhoto,
                             onAcceptProposal = onAcceptProposal,
+                            onAcceptAndCommitProposal = onAcceptAndCommitProposal,
                             onRejectProposal = onRejectProposal,
                         )
                     }
@@ -814,6 +816,7 @@ private fun MessageRow(
     onPreviewProposal: (AddMessage.DraftCta) -> Unit,
     onPreviewPhoto: (android.net.Uri) -> Unit,
     onAcceptProposal: (String) -> Unit,
+    onAcceptAndCommitProposal: (String) -> Unit,
     onRejectProposal: (String) -> Unit,
 ) {
     when (message) {
@@ -832,6 +835,7 @@ private fun MessageRow(
             message = message,
             onOpen = { onPreviewProposal(message) },
             onAccept = { onAcceptProposal(message.id) },
+            onAcceptAndCommit = { onAcceptAndCommitProposal(message.id) },
             onReject = { onRejectProposal(message.id) },
         )
         is AddMessage.DraftConfirmed -> DraftConfirmedRow(text = "✓ 已采用 · ${message.fieldCount} 个字段")
@@ -1018,6 +1022,7 @@ private fun DraftCtaCard(
     message: AddMessage.DraftCta,
     onOpen: () -> Unit,
     onAccept: () -> Unit,
+    onAcceptAndCommit: () -> Unit,
     onReject: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
@@ -1197,7 +1202,8 @@ private fun DraftCtaCard(
             }
         }
         if (isPending) {
-            // 采用 / 不要 按钮：右下角，与 cycle 0021 起的 footer 一致风格
+            // Cycle 0034 v7：按钮三态 — [不要] (灰) / [保存草稿] (terra 12% 底)
+            // / [直接录入] (terra 实底，强调"一锤子录入")
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1216,14 +1222,25 @@ private fun DraftCtaCard(
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = "采用",
+                    text = "保存草稿",
                     color = colors.terra,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(colors.terra.copy(alpha = 0.12f))
                         .clickable(onClick = onAccept)
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = "直接录入",
+                    color = colors.paper,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(colors.terra)
+                        .clickable(onClick = onAcceptAndCommit)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
         }

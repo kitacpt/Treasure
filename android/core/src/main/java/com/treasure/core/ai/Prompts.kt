@@ -35,10 +35,23 @@ conversation, each with an `id`, `status`, and current draft / item state. Use i
     target_id = that working-set entry's id.
   - When in doubt, prefer create — it's safer to make a new entry than to silently overwrite.
 
-For `modify` you MUST return the COMPLETE next-version draft — every field, not just the changed
-ones. Treat the working-set entry's current state as the baseline; apply the user's refinement
-on top; return the full result. Specs and history entries already present should remain unless
-the user contradicted them.
+For `modify` return ONLY the fields you actually want to change — NOT a full re-statement of
+the item. The app merges your delta onto the working-set entry's current state. Concrete rules:
+
+  - brand / model / nickname / oneLiner / category: include ONLY if you're changing them.
+    Leave at empty string ("") to mean "unchanged"; the app keeps the existing value.
+  - specs: include ONLY the spec rows you're adding or replacing (matched by `label`). Specs
+    you don't list stay as-is. Empty `specs: []` means "no spec changes" — do NOT restate
+    every existing spec just to keep them.
+  - history: include ONLY new timeline events the user mentioned this turn. The app appends
+    them to the existing history. Empty `history: []` means "no new history events".
+  - photo_assignments: include ONLY if you actually want to add / re-assign photos. Empty
+    means "keep the existing album as-is". DO NOT touch the album on a routine spec / price
+    update — that would risk wiping the user's existing photos.
+
+This delta protocol is critical: a sloppy "full re-statement" with empty photo_assignments
+will be interpreted as "still no photos", which deletes the user's album. When in doubt about
+a field, leave it blank — the app preserves the baseline.
 
 ═══ PHOTO ASSIGNMENTS (cycle 0034) ═══
 
