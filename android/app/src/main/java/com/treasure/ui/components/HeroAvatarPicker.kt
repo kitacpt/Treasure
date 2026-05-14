@@ -72,6 +72,9 @@ fun HeroAvatarPicker(
      *  传 (photoOptions, tappedIndex)。null 表示不支持预览（行为仍保留 single
      *  tap 选 + long-press 删）。 */
     onPreviewPhoto: ((sourceUris: List<String>, initialIndex: Int) -> Unit)? = null,
+    /** Cycle 0034 v4：每张影集图的归一化裁剪 — 缩略图按 rect 渲染（"显示截图
+     *  后的区域"），原图字节不变。空 map / 未匹配 = 整图。 */
+    photoCrops: Map<String, com.treasure.core.domain.PhotoCrop> = emptyMap(),
 ) {
     val colors = LocalTreasureColors.current
     var open by remember { mutableStateOf(false) }
@@ -93,12 +96,21 @@ fun HeroAvatarPicker(
             contentAlignment = Alignment.Center,
         ) {
             if (showingPhoto) {
-                AsyncImage(
-                    model = selectedPhoto,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
+                val crop = photoCrops[selectedPhoto]
+                if (crop != null && !crop.isFullImage) {
+                    com.treasure.ui.photo.CroppedPhoto(
+                        model = selectedPhoto,
+                        crop = crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    AsyncImage(
+                        model = selectedPhoto,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
             } else {
                 Box(modifier = Modifier.padding(14.dp).fillMaxSize()) {
                     HeroIllustration(
@@ -167,12 +179,22 @@ fun HeroAvatarPicker(
                                 )
                             },
                     ) {
-                        AsyncImage(
-                            model = path,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                        )
+                        // Cycle 0034 v4：缩略图按归一化 crop 渲染
+                        val crop = photoCrops[path]
+                        if (crop != null && !crop.isFullImage) {
+                            com.treasure.ui.photo.CroppedPhoto(
+                                model = path,
+                                crop = crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            AsyncImage(
+                                model = path,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
                     }
                 }
                 if (photoOptions.isNotEmpty()) {

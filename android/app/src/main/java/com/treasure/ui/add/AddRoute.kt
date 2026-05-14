@@ -75,6 +75,14 @@ fun AddRoute(
         mutableStateOf<String?>(null)
     }
     val cropSource = cropSourceStr?.let { android.net.Uri.parse(it) }
+    // Cycle 0034 v4：viewer 里点 "调整裁剪" → 进 CropScreen 重新框选；不再 add
+    // 新图，只更新已有 photoCrops。状态包括 path 和当前 rect。
+    var editCropPath by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+    var editCropInitial by remember {
+        mutableStateOf<com.treasure.core.domain.PhotoCrop?>(null)
+    }
     val cropScope = androidx.compose.runtime.rememberCoroutineScope()
     // Cycle 0033 v2：picker launcher hoist 到 AddRoute 顶部 — 之前嵌在
     // `when (mode) AddMode.Preview -> else { ... }` 里，mode 切换会让 launcher
@@ -262,6 +270,32 @@ fun AddRoute(
                         // Proposal preview mode：编辑本地 proposalDraft，跟
                         // vm.confirmedDraft 完全隔离。[采用] 才把 proposalDraft
                         // 升格成 confirmedDraft。
+                        //
+                        // Cycle 0034 v4：第一次进 proposal preview 时把 cta 上
+                        // 的 photo_assignments 预填进 proposalDraft（photos /
+                        // photoCrops / avatarPhotoPath），让 HeroAvatarPicker
+                        // 直接像 Manual Refine 那样工作 — 选 / 删 / 双击预览
+                        // 全是一致交互。
+                        androidx.compose.runtime.LaunchedEffect(cta.id) {
+                            if (proposalDraft == null || proposalDraft?.photos.isNullOrEmpty()) {
+                                val ass = cta.photoAssignments
+                                val photos = ass.map { it.sourceUri }
+                                val crops: Map<String, com.treasure.core.domain.PhotoCrop> = ass
+                                    .mapNotNull { pa ->
+                                        val isFull = pa.cropW > 0.999f && pa.cropH > 0.999f &&
+                                            pa.cropX < 0.001f && pa.cropY < 0.001f
+                                        if (isFull) null else pa.sourceUri to com.treasure.core.domain.PhotoCrop(
+                                            x = pa.cropX, y = pa.cropY, w = pa.cropW, h = pa.cropH,
+                                        )
+                                    }.toMap()
+                                val avatar = ass.firstOrNull { it.isAvatar }?.sourceUri
+                                proposalDraft = cta.draft.copy(
+                                    photos = photos,
+                                    photoCrops = crops,
+                                    avatarPhotoPath = avatar,
+                                )
+                            }
+                        }
                         val d = proposalDraft ?: cta.draft
                         AddPreview(
                             draft = d,
@@ -306,10 +340,20 @@ fun AddRoute(
                                 proposalDraft = null
                                 mode = AddMode.Chat
                             },
-                            // Cycle 0034 v3：把 cta 上 AI 给的 photo_assignments
-                            // 缩略图条也带进 Refine 预览页，让用户在采用前一眼
-                            // 看清"AI 分了哪几张图、哪张当头像"。
-                            proposalPhotoAssignments = cta.photoAssignments,
+                            // Cycle 0034 v4：HeroAvatarPicker 同款交互 — 选头像
+                            // / 删 / 双击预览都改 proposalDraft，跟 Manual Refine
+                            // 行为一致；add / 拍照本回不通（avoid 复杂的临时文件
+                            // 生命周期），用户想加图就先接受再回 Refine。
+                            onSelectAvatar = { p ->
+                                proposalDraft = d.copy(avatarPhotoPath = p?.takeIf { it in d.photos })
+                            },
+                            onRemovePhoto = { p ->
+                                proposalDraft = d.copy(
+                                    photos = d.photos - p,
+                                    photoCrops = d.photoCrops - p,
+                                    avatarPhotoPath = d.avatarPhotoPath?.takeIf { it != p },
+                                )
+                            },
                             onPreviewProposalPhoto = { uris, idx ->
                                 photoPreview = ChatPhotoPreview(uris, idx.coerceIn(0, uris.lastIndex))
                             },
@@ -371,12 +415,26 @@ fun AddRoute(
         // [FullscreenPhotoViewer]，但 callout 这里没存（chat 图就是临时 hint
         // 给 AI 用），所以传空 map + no-op 写回。多张图自动可横滑。
         photoPreview?.let { p ->
+            // Cycle 0034 v4：当前正在编辑的草稿 — 用来回答"viewer 显示的这张
+            // 图属于草稿影集吗"，是的话才暴露 "调整裁剪"。proposalDraft 优先
+            // （proposal-preview 模式），其次 confirmedDraft（Manual Refine 模
+            // 式）。如果 viewer 里的 path 不在 draft.photos 里（比如 chat 里
+            // 的临时图、Composer 待发送图）就不显示按钮。
+            val draftForCrop = proposalDraft ?: state.confirmedDraft
+            val canEditCrop = draftForCrop != null &&
+                p.photos.getOrNull(p.initialIndex) in (draftForCrop.photos)
             com.treasure.ui.photo.FullscreenPhotoViewer(
                 photos = p.photos,
                 initialIndex = p.initialIndex,
                 callouts = emptyMap(),
                 onSetCallouts = { _, _ -> /* chat 图不存 callout */ },
                 onClose = { photoPreview = null },
+                photoCrops = draftForCrop?.photoCrops ?: emptyMap(),
+                onEditCrop = if (!canEditCrop) null else { path, current ->
+                    editCropInitial = current
+                    editCropPath = path
+                    photoPreview = null
+                },
             )
         }
 
@@ -403,6 +461,43 @@ fun AddRoute(
                         vm.persistDraftPhoto(src, rect)
                     }
                     cropSourceStr = null
+                },
+            )
+        }
+
+        // Cycle 0034 v4：从 viewer "调整裁剪" 进来的 re-crop — 不 add 新图，
+        // 只更新 photoCrops 映射。proposalDraft 优先（proposal-preview 上下文），
+        // 否则写到 confirmedDraft（Manual Refine 上下文）。
+        val editPath = editCropPath
+        if (editPath != null) {
+            val initialRect = editCropInitial?.let { c ->
+                androidx.compose.ui.geometry.Rect(
+                    left = c.x, top = c.y, right = c.x + c.w, bottom = c.y + c.h,
+                )
+            }
+            com.treasure.ui.photo.CropScreen(
+                source = android.net.Uri.parse(editPath),
+                initialCrop = initialRect,
+                onCancel = {
+                    editCropPath = null
+                    editCropInitial = null
+                },
+                onConfirm = { rect ->
+                    val newCrop = com.treasure.core.domain.PhotoCrop(
+                        x = rect.left, y = rect.top,
+                        w = rect.right - rect.left, h = rect.bottom - rect.top,
+                    )
+                    val pd = proposalDraft
+                    if (pd != null && editPath in pd.photos) {
+                        // proposal-preview 路径 — 本地 state
+                        val newMap = if (newCrop.isFullImage) pd.photoCrops - editPath
+                            else pd.photoCrops + (editPath to newCrop)
+                        proposalDraft = pd.copy(photoCrops = newMap)
+                    } else {
+                        vm.setDraftPhotoCrop(editPath, newCrop)
+                    }
+                    editCropPath = null
+                    editCropInitial = null
                 },
             )
         }

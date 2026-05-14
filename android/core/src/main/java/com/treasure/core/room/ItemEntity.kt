@@ -40,6 +40,8 @@ internal data class ItemEntity(
     /** Cycle 0033：图鉴显式排序权重，小的在前。空 default 时由 migration 用
      *  `-created_at` 回填，让默认 "newest first" 成立。 */
     @ColumnInfo(name = "sort_order", defaultValue = "0") val sortOrder: Long = 0L,
+    /** Cycle 0034 v4：JSON `Map<path, PhotoCrop>`。NULL / 空对象 = 整图。 */
+    @ColumnInfo(name = "photo_crops_json") val photoCropsJson: String? = null,
 ) {
     fun toDomain(): Item = Item(
         id = id,
@@ -62,6 +64,7 @@ internal data class ItemEntity(
         createdAt = createdAt,
         updatedAt = updatedAt,
         sortOrder = sortOrder,
+        photoCrops = JsonCodec.decodePhotoCrops(photoCropsJson),
     )
 
     companion object {
@@ -85,6 +88,8 @@ internal data class ItemEntity(
             createdAt = item.createdAt,
             updatedAt = item.updatedAt,
             sortOrder = item.sortOrder,
+            photoCropsJson = if (item.photoCrops.isEmpty()) null
+            else JsonCodec.encodePhotoCrops(item.photoCrops),
         )
     }
 }
@@ -112,4 +117,13 @@ internal object JsonCodec {
         json.encodeToString(calloutsSerializer, value)
     fun decodeCallouts(text: String): Map<String, List<PhotoCallout>> =
         if (text.isBlank()) emptyMap() else json.decodeFromString(calloutsSerializer, text)
+
+    private val photoCropsSerializer = MapSerializer(
+        String.serializer(),
+        com.treasure.core.domain.PhotoCrop.serializer(),
+    )
+    fun encodePhotoCrops(value: Map<String, com.treasure.core.domain.PhotoCrop>): String =
+        json.encodeToString(photoCropsSerializer, value)
+    fun decodePhotoCrops(text: String?): Map<String, com.treasure.core.domain.PhotoCrop> =
+        if (text.isNullOrBlank()) emptyMap() else json.decodeFromString(photoCropsSerializer, text)
 }

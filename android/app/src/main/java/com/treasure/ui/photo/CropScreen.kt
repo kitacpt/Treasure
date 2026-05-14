@@ -55,6 +55,9 @@ fun CropScreen(
     source: Uri,
     onCancel: () -> Unit,
     onConfirm: (Rect) -> Unit,
+    /** Cycle 0034 v4：预填的归一化裁剪矩形 — 用户从 viewer 点 "调整裁剪"
+     *  进来时取上次保存的 rect。null = 默认 centered 85%。 */
+    initialCrop: Rect? = null,
 ) {
     val colors = LocalTreasureColors.current
     val density = LocalDensity.current
@@ -115,7 +118,15 @@ fun CropScreen(
                     viewportSize = sz
                     if (aspect > 0f && sz.width > 0 && sz.height > 0) {
                         imageBounds = computeContainBounds(sz, aspect)
-                        crop = imageBounds?.let { centeredCrop(it) }
+                        crop = imageBounds?.let { b ->
+                            // Cycle 0034 v4：有预填 rect 就把它转 viewport 坐标
+                            if (initialCrop != null) Rect(
+                                left = b.left + initialCrop.left * b.width,
+                                top = b.top + initialCrop.top * b.height,
+                                right = b.left + initialCrop.right * b.width,
+                                bottom = b.top + initialCrop.bottom * b.height,
+                            ) else centeredCrop(b)
+                        }
                     }
                 },
         ) {
@@ -131,7 +142,15 @@ fun CropScreen(
                         aspect = w.toFloat() / h.toFloat()
                         if (viewportSize.width > 0 && viewportSize.height > 0) {
                             imageBounds = computeContainBounds(viewportSize, aspect)
-                            crop = imageBounds?.let { centeredCrop(it) }
+                            crop = imageBounds?.let { b ->
+                            // Cycle 0034 v4：有预填 rect 就把它转 viewport 坐标
+                            if (initialCrop != null) Rect(
+                                left = b.left + initialCrop.left * b.width,
+                                top = b.top + initialCrop.top * b.height,
+                                right = b.left + initialCrop.right * b.width,
+                                bottom = b.top + initialCrop.bottom * b.height,
+                            ) else centeredCrop(b)
+                        }
                         }
                     }
                 },

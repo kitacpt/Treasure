@@ -1029,11 +1029,27 @@ private fun DraftCtaCard(
     // 卡片上的小图。注意：这里还没真正落盘裁好，所以展示的是源图全幅；点
     // 采用后 applyAcceptedCta 会把按 crop 裁好的副本写进 draft.photos /
     // avatarPhotoPath，工作集 / 图鉴里看到的就是裁过的版。
-    val previewAvatar = remember(message.photoAssignments) {
-        message.photoAssignments.firstOrNull { it.isAvatar }?.sourceUri
-            ?: message.photoAssignments.firstOrNull()?.sourceUri
+    // Cycle 0034 v4：从 photo_assignments 里挑一条做卡片头像（标了 isAvatar
+    // 的优先，没有就第一条），并把它的 crop rect 也带上 — HeroAvatar 会读
+    // photoCrops[avatarPhotoPath] 应用裁剪，所以卡片直接显示"裁剪后的效果"。
+    val previewAssignment = remember(message.photoAssignments) {
+        message.photoAssignments.firstOrNull { it.isAvatar }
+            ?: message.photoAssignments.firstOrNull()
     }
-    val previewItem = remember(message.draft, template, previewAvatar) {
+    val previewAvatar = previewAssignment?.sourceUri
+    val previewCropMap = remember(previewAssignment) {
+        if (previewAssignment != null && previewAvatar != null) {
+            mapOf(
+                previewAvatar to com.treasure.core.domain.PhotoCrop(
+                    x = previewAssignment.cropX,
+                    y = previewAssignment.cropY,
+                    w = previewAssignment.cropW,
+                    h = previewAssignment.cropH,
+                ),
+            )
+        } else emptyMap()
+    }
+    val previewItem = remember(message.draft, template, previewAvatar, previewCropMap) {
         com.treasure.core.domain.Item(
             id = "preview",
             category = template.category.id,
@@ -1050,6 +1066,7 @@ private fun DraftCtaCard(
             history = emptyList(),
             photos = listOfNotNull(previewAvatar),
             avatarPhotoPath = previewAvatar,
+            photoCrops = previewCropMap,
             createdAt = 0L,
             updatedAt = 0L,
         )
@@ -1144,12 +1161,24 @@ private fun DraftCtaCard(
                             .background(colors.paper)
                             .border(0.5.dp, colors.line, RoundedCornerShape(6.dp)),
                     ) {
-                        AsyncImage(
-                            model = pa.sourceUri,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                        )
+                        // Cycle 0034 v4：缩略图直接显示 crop 后的区域；不再用
+                        // ✂ 角标 — 用户能直接看到 AI 给的裁剪结果。
+                        if (cropped) {
+                            com.treasure.ui.photo.CroppedPhoto(
+                                model = pa.sourceUri,
+                                crop = com.treasure.core.domain.PhotoCrop(
+                                    x = pa.cropX, y = pa.cropY, w = pa.cropW, h = pa.cropH,
+                                ),
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            AsyncImage(
+                                model = pa.sourceUri,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
                         if (pa.isAvatar) {
                             Text(
                                 text = "★",
@@ -1158,19 +1187,6 @@ private fun DraftCtaCard(
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
                                     .padding(2.dp),
-                            )
-                        }
-                        if (cropped) {
-                            Text(
-                                text = "✂",
-                                color = colors.paper,
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(2.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(colors.ink.copy(alpha = 0.6f))
-                                    .padding(horizontal = 3.dp),
                             )
                         }
                     }

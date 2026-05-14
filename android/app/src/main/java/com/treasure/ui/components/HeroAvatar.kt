@@ -18,12 +18,23 @@ import com.treasure.illust.HeroIllustration
 fun HeroAvatar(item: Item?, modifier: Modifier = Modifier) {
     val photoPath = item?.avatarPhotoPath
     if (item != null && !photoPath.isNullOrBlank()) {
-        AsyncImage(
-            model = photoPath,
-            contentDescription = null,
-            modifier = modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-        )
+        // Cycle 0034 v4：影集存全图、显示裁剪。Item.photoCrops[path] 非空时
+        // 走 CroppedPhoto 在 UI 上裁出物品区域；没 crop 元数据就退化整图 Crop。
+        val crop = item.photoCrops[photoPath]
+        if (crop != null && !crop.isFullImage) {
+            com.treasure.ui.photo.CroppedPhoto(
+                model = photoPath,
+                crop = crop,
+                modifier = modifier.fillMaxSize(),
+            )
+        } else {
+            AsyncImage(
+                model = photoPath,
+                contentDescription = null,
+                modifier = modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
     } else {
         HeroIllustration(item = item, modifier = modifier)
     }

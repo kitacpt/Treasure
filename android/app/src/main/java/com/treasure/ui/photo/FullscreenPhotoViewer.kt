@@ -73,6 +73,11 @@ fun FullscreenPhotoViewer(
     callouts: Map<String, List<PhotoCallout>>,
     onSetCallouts: (path: String, callouts: List<PhotoCallout>) -> Unit,
     onClose: () -> Unit,
+    /** Cycle 0034 v4：viewer 里点 "调整裁剪" 时回调，传 (path, 当前 rect)；
+     *  调用方负责弹 CropScreen + 拿新 rect 写回。null = 不显示这颗按钮。 */
+    onEditCrop: ((path: String, current: com.treasure.core.domain.PhotoCrop) -> Unit)? = null,
+    /** 已有的裁剪映射 — viewer 显示原图，但 "调整裁剪" 默认 rect 取这里。 */
+    photoCrops: Map<String, com.treasure.core.domain.PhotoCrop> = emptyMap(),
 ) {
     if (photos.isEmpty()) {
         onClose()
@@ -136,6 +141,25 @@ fun FullscreenPhotoViewer(
                 color = Color(0xFFF4F1EA).copy(alpha = 0.7f),
                 style = MaterialTheme.typography.labelSmall,
             )
+            // Cycle 0034 v4：右上 "调整裁剪" — 把当前页 path + 已有 rect（或
+            // 整图 default）抛给调用方让它弹 CropScreen 拿新 rect。
+            if (onEditCrop != null) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "调整裁剪",
+                    color = Color(0xFFE8E2D4),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable {
+                            val path = photos[pagerState.currentPage]
+                            val current = photoCrops[path]
+                                ?: com.treasure.core.domain.PhotoCrop.Full
+                            onEditCrop(path, current)
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
 
         // hint

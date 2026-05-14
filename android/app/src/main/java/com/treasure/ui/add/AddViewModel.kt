@@ -1171,8 +1171,15 @@ class AddViewModel(
         // Cycle 0034：先把 AI 分配的图按 crop 抄到 filesDir/draft-photos/<convo>/，
         // 拿到本端 file:// 路径，merge 进 draft.photos / avatarPhotoPath。这步
         // 在 upsertItem 之前做完，让落到工作集的就是终态。
-        val draftWithPhotos = if (cta.photoAssignments.isEmpty()) draft
-        else applyPhotoAssignmentsToDraft(draft, cta.photoAssignments)
+        // Cycle 0034 v4：proposal-preview 路径 — 用户已经在 preview 里把 cta
+        // 的 photo_assignments 预填进 proposalDraft 并可能 select 头像 / 删了
+        // 几张；这时 draft.photos 非空，跳过 applyPhotoAssignmentsToDraft
+        // （否则把 conversation-photos 路径再复制一次 + crop 元数据丢）。
+        val draftWithPhotos = when {
+            draft.photos.isNotEmpty() -> draft
+            cta.photoAssignments.isNotEmpty() -> applyPhotoAssignmentsToDraft(draft, cta.photoAssignments)
+            else -> draft
+        }
         val existing = conversations.loadItems(convoId).associateBy { it.id }
         val target = cta.targetCiId?.let { existing[it] }
         if (cta.actionKind == com.treasure.core.repo.DraftCtaActionKind.Modify && target != null) {
@@ -1205,11 +1212,13 @@ class AddViewModel(
     }
 
     /**
-     * Cycle 0034：把已 resolve 的 photo 分配应用到 draft。
-     *  - 每条分配解码 sourceUri，按归一化 crop 切出子 bitmap，落 jpg 到
-     *    filesDir/draft-photos/<convoId>/<uuid>.jpg
-     *  - append 到 draft.photos
-     *  - 第一条 isAvatar=true 的设为 draft.avatarPhotoPath
+     * Cycle 0034 v4：非破坏式 — AI 给的图原封不动复制一份到 draft-photos/，
+     * 把它在 draft.photos 里登记，把归一化 crop 记到 draft.photoCrops。原图
+     * 字节完整保留；任何时候用户都能从全屏 viewer 重新拖框调整。
+     *
+     * 之所以仍要 copy 一次而不是直接复用 conversation-photos 路径：commit 阶
+     * 段会把 draft-photos 整体迁到 photos/<itemId>/，让"删会话不丢物品图"成
+     * 立；如果直接引用 conversation 路径，会话删了文件就没了。
      */
     private suspend fun applyPhotoAssignmentsToDraft(
         draft: ItemDraft,
@@ -1219,32 +1228,39 @@ class AddViewModel(
         val app = getApplication<TreasureApp>()
         val dir = java.io.File(app.filesDir, "draft-photos/$convoId").apply { mkdirs() }
         val addedPhotos = mutableListOf<String>()
+        val addedCrops = mutableMapOf<String, com.treasure.core.domain.PhotoCrop>()
         var newAvatar: String? = null
         for (a in assignments) {
             val savedPath = runCatching {
-                val src = app.contentResolver.openInputStream(android.net.Uri.parse(a.sourceUri))?.use {
-                    android.graphics.BitmapFactory.decodeStream(it)
-                } ?: return@runCatching null
-                val w = src.width
-                val h = src.height
-                val left = (a.cropX * w).toInt().coerceIn(0, w - 1)
-                val top = (a.cropY * h).toInt().coerceIn(0, h - 1)
-                val right = ((a.cropX + a.cropW) * w).toInt().coerceIn(left + 1, w)
-                val bottom = ((a.cropY + a.cropH) * h).toInt().coerceIn(top + 1, h)
-                val cropped = android.graphics.Bitmap.createBitmap(src, left, top, right - left, bottom - top)
-                if (cropped !== src) src.recycle()
+                val srcUri = android.net.Uri.parse(a.sourceUri)
+                val srcFile = if ("file".equals(srcUri.scheme, ignoreCase = true)) {
+                    java.io.File(srcUri.path ?: return@runCatching null)
+                } else null
                 val dest = java.io.File(dir, "${UUID.randomUUID()}.jpg")
-                dest.outputStream().use { out ->
-                    cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, out)
+                if (srcFile != null && srcFile.exists()) {
+                    srcFile.inputStream().use { input ->
+                        dest.outputStream().use { out -> input.copyTo(out) }
+                    }
+                } else {
+                    app.contentResolver.openInputStream(srcUri)?.use { input ->
+                        dest.outputStream().use { out -> input.copyTo(out) }
+                    } ?: return@runCatching null
                 }
-                cropped.recycle()
                 if (dest.exists() && dest.length() > 0) dest.absolutePath else null
             }.getOrNull() ?: continue
             addedPhotos += savedPath
+            val isCropped = a.cropW < 0.999f || a.cropH < 0.999f ||
+                a.cropX > 0.001f || a.cropY > 0.001f
+            if (isCropped) {
+                addedCrops[savedPath] = com.treasure.core.domain.PhotoCrop(
+                    x = a.cropX, y = a.cropY, w = a.cropW, h = a.cropH,
+                )
+            }
             if (a.isAvatar && newAvatar == null) newAvatar = savedPath
         }
         draft.copy(
             photos = draft.photos + addedPhotos,
+            photoCrops = draft.photoCrops + addedCrops,
             avatarPhotoPath = newAvatar ?: draft.avatarPhotoPath,
         )
     }
@@ -1256,11 +1272,18 @@ class AddViewModel(
      *
      * 不删源文件 — 会话删除时一并清理（暂未实现），或留在磁盘做软备份。
      */
+    private data class PhotoMigration(
+        val photos: List<String>,
+        val avatar: String?,
+        val crops: Map<String, com.treasure.core.domain.PhotoCrop>,
+    )
+
     private suspend fun migratePhotosToItemOwned(
         itemId: String,
         draftPhotos: List<String>,
         draftAvatar: String?,
-    ): Pair<List<String>, String?> = withContext(Dispatchers.IO) {
+        draftCrops: Map<String, com.treasure.core.domain.PhotoCrop>,
+    ): PhotoMigration = withContext(Dispatchers.IO) {
         val app = getApplication<TreasureApp>()
         val targetDir = java.io.File(app.filesDir, "photos/$itemId").apply { mkdirs() }
         val targetPath = targetDir.absolutePath + java.io.File.separator
@@ -1282,7 +1305,13 @@ class AddViewModel(
         }
         val migratedPhotos = draftPhotos.mapNotNull { mapping[it] }
         val migratedAvatar = draftAvatar?.let { mapping[it] ?: if (it.startsWith(targetPath)) it else null }
-        migratedPhotos to migratedAvatar
+        // Cycle 0034 v4：crop 映射跟着 path 一起搬家。
+        val migratedCrops = mutableMapOf<String, com.treasure.core.domain.PhotoCrop>()
+        draftCrops.forEach { (oldPath, rect) ->
+            val newPath = mapping[oldPath] ?: if (oldPath.startsWith(targetPath)) oldPath else null
+            if (newPath != null && !rect.isFullImage) migratedCrops[newPath] = rect
+        }
+        PhotoMigration(migratedPhotos, migratedAvatar, migratedCrops)
     }
 
     /** Cycle 0031：草稿页历史时间轴整段替换。AddPreview 加 / 改 / 删一行
@@ -1305,6 +1334,18 @@ class AddViewModel(
         if (path.isBlank() || path in current.photos) return
         _state.value = _state.value.copy(
             confirmedDraft = current.copy(photos = current.photos + path),
+        )
+        scheduleDraftAutoSave()
+    }
+
+    /** Cycle 0034 v4：用户在 viewer 里调过裁剪 → 写回 draft.photoCrops。
+     *  rect = PhotoCrop.Full（或全画幅）时直接抹掉这条 mapping，等价整图。 */
+    fun setDraftPhotoCrop(path: String, rect: com.treasure.core.domain.PhotoCrop) {
+        val current = _state.value.confirmedDraft ?: return
+        val newCrops = if (rect.isFullImage) current.photoCrops - path
+            else current.photoCrops + (path to rect)
+        _state.value = _state.value.copy(
+            confirmedDraft = current.copy(photoCrops = newCrops),
         )
         scheduleDraftAutoSave()
     }
@@ -1475,11 +1516,20 @@ class AddViewModel(
             // 寿命独立存在 — 用户删除会话不再丢图。已在 photos/<itemId>/ 下
             // 的（MODIFY 情况下从原 item 继承的）原样保留。
             val draftPhotosRaw = draft.photos.ifEmpty { refItem?.photos ?: emptyList() }
-            val (itemPhotos, itemAvatar) = migratePhotosToItemOwned(
+            // Cycle 0034 v4：crop 元数据继承 — 优先 draft.photoCrops（用户在
+            // 草稿阶段调过），空就退回 refItem 的（MODIFY 没动相册的情形）。
+            val draftCropsRaw: Map<String, com.treasure.core.domain.PhotoCrop> =
+                if (draft.photoCrops.isNotEmpty()) draft.photoCrops
+                else refItem?.photoCrops ?: emptyMap()
+            val migrated = migratePhotosToItemOwned(
                 itemId = id,
                 draftPhotos = draftPhotosRaw,
                 draftAvatar = draft.avatarPhotoPath ?: refItem?.avatarPhotoPath,
+                draftCrops = draftCropsRaw,
             )
+            val itemPhotos = migrated.photos
+            val itemAvatar = migrated.avatar
+            val itemPhotoCrops = migrated.crops
             val item = Item(
                 id = id,
                 category = categoryId,
@@ -1500,6 +1550,7 @@ class AddViewModel(
                 },
                 photos = itemPhotos,
                 avatarPhotoPath = itemAvatar,
+                photoCrops = itemPhotoCrops,
                 createdAt = refItem?.createdAt ?: now,
                 updatedAt = now,
                 // Cycle 0033：新物品 sortOrder = 当前最小 - 1 → 默认浮到图鉴

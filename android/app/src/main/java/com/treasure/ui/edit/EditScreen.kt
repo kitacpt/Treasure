@@ -136,6 +136,9 @@ fun EditScreen(
     val specs = remember(item.id) {
         mutableStateListOf<HeroSpec>().apply { addAll(item.specs) }
     }
+    // Cycle 0034 v4：本地维护一份 photoCrops 工作副本，re-crop 时即时反映，
+    // commit 时跟其他字段一起写回。
+    var photoCropsState by remember(item.id) { mutableStateOf(item.photoCrops) }
 
     val dirty = brand != item.brand ||
         model != item.model ||
@@ -147,7 +150,8 @@ fun EditScreen(
         category != item.category ||
         heroVector != item.heroVector ||
         avatarPhoto != item.avatarPhotoPath ||
-        specs.toList() != item.specs
+        specs.toList() != item.specs ||
+        photoCropsState != item.photoCrops
 
     fun commit() {
         onUpdate(item.copy(
@@ -163,6 +167,7 @@ fun EditScreen(
             avatarPhotoPath = avatarPhoto,
             specs = specs.toList()
                 .filter { it.label.isNotBlank() || it.value.isNotBlank() },
+            photoCrops = photoCropsState,
         ))
     }
 
@@ -180,6 +185,11 @@ fun EditScreen(
     val cropSource = cropSourceStr?.let { android.net.Uri.parse(it) }
     // Cycle 0034 v3：双击影集缩略图 → 全屏 FullscreenPhotoViewer 预览
     var previewPhotos by remember { mutableStateOf<Pair<List<String>, Int>?>(null) }
+    // Cycle 0034 v4：viewer 里 "调整裁剪" 进来的 re-crop
+    var editCropPath by remember { mutableStateOf<String?>(null) }
+    var editCropInitial by remember {
+        mutableStateOf<com.treasure.core.domain.PhotoCrop?>(null)
+    }
     // 单图 picker（替换原 PickMultipleVisualMedia — 多图同时裁剪 UX 复杂，
     // 一次一张更清晰；用户想加多张就连点几次）。
     val pickPhoto = rememberLauncherForActivityResult(
@@ -269,6 +279,7 @@ fun EditScreen(
                     onPreviewPhoto = { uris, idx ->
                         previewPhotos = uris to idx.coerceIn(0, uris.lastIndex)
                     },
+                    photoCrops = photoCropsState,
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -384,6 +395,35 @@ fun EditScreen(
                 callouts = item.callouts,
                 onSetCallouts = { _, _ -> /* 编辑页里只是看大图，callout 在 Detail 抽屉 */ },
                 onClose = { previewPhotos = null },
+                photoCrops = photoCropsState,
+                onEditCrop = { path, current ->
+                    editCropInitial = current
+                    editCropPath = path
+                    previewPhotos = null
+                },
+            )
+        }
+        // Cycle 0034 v4：viewer "调整裁剪" 进来的 re-crop
+        editCropPath?.let { path ->
+            val initialRect = editCropInitial?.let { c ->
+                androidx.compose.ui.geometry.Rect(
+                    left = c.x, top = c.y, right = c.x + c.w, bottom = c.y + c.h,
+                )
+            }
+            com.treasure.ui.photo.CropScreen(
+                source = android.net.Uri.parse(path),
+                initialCrop = initialRect,
+                onCancel = { editCropPath = null; editCropInitial = null },
+                onConfirm = { rect ->
+                    val newCrop = com.treasure.core.domain.PhotoCrop(
+                        x = rect.left, y = rect.top,
+                        w = rect.right - rect.left, h = rect.bottom - rect.top,
+                    )
+                    photoCropsState = if (newCrop.isFullImage) photoCropsState - path
+                        else photoCropsState + (path to newCrop)
+                    editCropPath = null
+                    editCropInitial = null
+                },
             )
         }
     }

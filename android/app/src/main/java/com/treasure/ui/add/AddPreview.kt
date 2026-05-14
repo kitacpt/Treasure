@@ -185,66 +185,8 @@ fun AddPreview(
                     onPickPhotos = onPickPhoto,
                     onRemovePhoto = onRemovePhoto,
                     onPreviewPhoto = onPreviewProposalPhoto,
+                    photoCrops = draft.photoCrops,
                 )
-                // Cycle 0034 v3：proposalMode 下，AI 分给本卡的图缩略图条 —
-                // 跟 chat 里 DraftCtaCard 底下那条一样的视觉。让用户在预览页
-                // 也能一眼看清"AI 分了哪几张图、哪张当头像"，点缩略图全屏看。
-                if (proposalMode && proposalPhotoAssignments.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    val sources = proposalPhotoAssignments.map { it.sourceUri }
-                    androidx.compose.foundation.lazy.LazyRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 22.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(proposalPhotoAssignments.size) { idx ->
-                            val pa = proposalPhotoAssignments[idx]
-                            val cropped = pa.cropW < 0.999f || pa.cropH < 0.999f ||
-                                pa.cropX > 0.001f || pa.cropY > 0.001f
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(colors.paper)
-                                    .border(0.5.dp, colors.line, RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        onPreviewProposalPhoto?.invoke(sources, idx)
-                                    },
-                            ) {
-                                coil.compose.AsyncImage(
-                                    model = pa.sourceUri,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                )
-                                if (pa.isAvatar) {
-                                    Text(
-                                        "★",
-                                        color = colors.terra,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .padding(2.dp),
-                                    )
-                                }
-                                if (cropped) {
-                                    Text(
-                                        "✂",
-                                        color = colors.paper,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .padding(2.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(colors.ink.copy(alpha = 0.6f))
-                                            .padding(horizontal = 3.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
                 // Cycle 0033 v2：直接在头像下方放一个常驻 "+ 添加照片" 入口 —
                 // 之前要"点头像 · 换插画 / 用照片"展开 chip 才看得到，太隐蔽。
                 if (onPickPhoto != null && !proposalMode) {

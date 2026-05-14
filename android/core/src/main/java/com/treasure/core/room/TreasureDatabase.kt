@@ -24,7 +24,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CategoryPrefEntity::class,
         ConversationItemEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = true,
 )
 internal abstract class TreasureDatabase : RoomDatabase() {

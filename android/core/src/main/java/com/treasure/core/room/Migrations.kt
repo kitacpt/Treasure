@@ -199,9 +199,19 @@ internal object Migrations {
         }
     }
 
+    /**
+     * Cycle 0034 v4：影集存全图、显示裁剪。items 加 photo_crops_json 列，
+     * 形如 `{"<path>": {"x":0.1,"y":0,"w":0.5,"h":1}}`。默认 NULL = 整图。
+     */
+    val MIGRATION_15_16 = object : Migration(15, 16) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `items` ADD COLUMN `photo_crops_json` TEXT")
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
         MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-        MIGRATION_13_14, MIGRATION_14_15,
+        MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16,
     )
 }

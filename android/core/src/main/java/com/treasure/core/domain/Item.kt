@@ -60,6 +60,13 @@ data class Item(
      * 编辑不会把它弹到列表前面（符合"后续改动不会影响排序"）。
      */
     val sortOrder: Long = -createdAt,
+    /**
+     * Cycle 0034 v4：每张影集照片的归一化裁剪矩形（x, y, w, h 都 0..1）。
+     * 默认空 map = 整图显示。设计目标："存全图，显示裁剪后区域，可重裁"。
+     * 显示层（HeroAvatar / 缩略图 / 全屏 viewer 预览）按这个 rect 在 UI 上
+     * 应用 crop；原图字节始终完整。
+     */
+    val photoCrops: Map<String, PhotoCrop> = emptyMap(),
 ) {
     /** Convenience views — not persisted, computed from [specs]. */
     val heroSpecs: List<HeroSpec> get() = specs.take(HERO_SPEC_COUNT)
@@ -67,5 +74,24 @@ data class Item(
 
     companion object {
         const val HERO_SPEC_COUNT: Int = 4
+    }
+}
+
+/**
+ * Cycle 0034 v4：归一化裁剪矩形。(0,0,1,1) = 整图。所有维度都是 0..1，相对
+ * 原图本身。AI 给出的 [com.treasure.core.ai.NormalizedRect] 也用同样语义；
+ * domain 这边的副本是为了不让 core/domain 反向依赖 core/ai。
+ */
+@kotlinx.serialization.Serializable
+data class PhotoCrop(
+    val x: Float,
+    val y: Float,
+    val w: Float,
+    val h: Float,
+) {
+    val isFullImage: Boolean get() = x < 0.001f && y < 0.001f && w > 0.999f && h > 0.999f
+
+    companion object {
+        val Full = PhotoCrop(0f, 0f, 1f, 1f)
     }
 }

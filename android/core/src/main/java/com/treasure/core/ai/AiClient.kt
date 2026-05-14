@@ -187,4 +187,10 @@ data class ItemDraft(
     /** Cycle 0033：用户在 Refine 里挑的头像（必须是 photos 里的一张）；不挑
      *  则 commit 时 Item.avatarPhotoPath = null，列表回到线描插画。 */
     val avatarPhotoPath: String? = null,
+    /**
+     * Cycle 0034 v4：每张草稿影集照片的归一化裁剪矩形。跟 Item.photoCrops
+     * 同语义 — 存全图，显示裁剪。AI 给的 photo_assignments.crop 落到这里。
+     * commit 时透传到 Item.photoCrops。
+     */
+    val photoCrops: Map<String, com.treasure.core.domain.PhotoCrop> = emptyMap(),
 )
