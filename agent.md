@@ -2,13 +2,13 @@
 
 每次工作结束更新这一份。新人 / 新一轮 agent 进来先读它。
 
-## 当前状态 · 2026-05-13
+## 当前状态 · 2026-05-14
 
-**cycle 0001 → 0033 全部落地。**
+**cycle 0001 → 0034 全部落地。v1.0 出 release。**
 
-- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v0.33.0 候选，debug 签名）
-- GitHub：<https://github.com/kitacpt/Treasure>（main 分支）
-- Schema：**v13**（cycle 0033 加 `items.sort_order`；cycle 0032 加 `add_messages.action_kind/target_id`；cycle 0031 加 `conversation_items` 表；cycle 0030 加 `hero_photo_path`；v5→v13 全程 `addMigrations`，没再 destructive）
+- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v1.0.0，debug 签名，13.8 MB）
+- GitHub：<https://github.com/kitacpt/Treasure>（main 分支） + Release v1.0
+- Schema：**v16**（cycle 0034 加 `items.photo_crops_json`；cycle 0034 加 `add_messages.voice_path`；cycle 0034 加 `add_messages.photo_assignments_json`；cycle 0033 加 `items.sort_order`；cycle 0032 加 `add_messages.action_kind/target_id`；cycle 0031 加 `conversation_items` 表；cycle 0030 加 `hero_photo_path`；v5→v16 全程 `addMigrations`，没再 destructive）
 - Seeds：6 物品（每内建分类 1 条样例）+ 6 内建分类。fresh install 经 `SeedCategoriesCallback` 写分类、`ItemRepository.ensureSeeded` 写物品；老升级用户经 Migration_8_9。用户清掉后不会再生
 - 测试设备：vivo X200 Pro mini（Android 15）
 
@@ -271,6 +271,7 @@ treasure/
 | 0028 | 隐藏真生效（Grid/Portal "全部"/total/latest 都过 visibleItems）· Portal LATEST ENTRY 标签居中两边加 ✦ + 全空状态 + "去分类管理 →" 链接 · Portal doorway 永远用 `info.heroVector`（"基础图" 不跟物品） · Manager 重写：删副标题 + 删 [隐藏/显示] pill + 删 [完成]、"编辑"→小红点、左侧三横纹握把长按拖动 + 跨分割线 toggle hidden · Editor 顶部 112dp Avatar + 插画必填 + 内建锁定 · Category enum 加 `defaultHeroVector`，repo override 内建 heroVector（修 cycle 0026 种子的 'GENERIC' bug） | done |
 | 0029 | BackHandler：非 Portal tab 返回回 Portal（之前各处直接退出应用）· Manager 抽屉只剩 List（删 inline Editor + 删底部 italic 提示）· CategoryEditor 拆全屏路由 `category/{new\|edit/{id}}`，复用 EditPageHeader + BackArrow 与物品 Edit 页同款 · 图鉴右上工具栏从 [小红点] 变 [🔍][小红点] · 新 SearchRoute：BackArrow + 圆角搜索框（自动 focus 弹 IME）+ 实时过滤 brand/model/nickname + 命中段 terra 高亮 + 2 列 grid 结果 | done |
 | 0030 | Manager 拖动重写（divider 当 row-height 块占一个 visualSlot，"拖到最底"能跨过分割线了；新 computeShift / commitDrag 纯函数）· Schema v10 加 `hero_photo_path` 列 · CategoryEditor 插画改 PickVisualMedia 相册 picker（自定义新建必填、内建可覆盖默认插画）；AvatarHero 优先 AsyncImage 显示 photo；删 HeroVectorRow + heroLabel · Search 加 visibleIds 过滤 · GridViewModel：当前 chip 分类被隐藏后 effectiveSelectedId fallback null · Portal GrandTitle 还原 cycle 0023 大字 displayLarge + 英文 tagline + 底部 Ornament 补回（cycle 0026 重写时改坏了，本次还原） | done |
+| 0034 | 大 cycle 9 个 patch（v1-v9）— **多模态 + 多物品 + 非破坏式裁剪 + 草稿合并** 的总集成：v1 多图 + AI photo_assignments 协议（每 action 一组 `{source_index, crop?, set_as_avatar}`）+ commit 时 `migratePhotosToItemOwned` 拷到 `photos/<itemId>/` 让影集"删会话不丢"；v2 语音录制 + 播放 + 本地缓存（`VoiceRecorder` AAC m4a / `VoicePlayer` MediaPlayer / `RecordingOverlay` 长按全屏页）+ Anthropic `audio` block / OpenAI `input_audio` block（provider 接不接受让它 400）；v3 头像 / 缩略图 / DraftCta thumb 全走 `HeroAvatar`，AI 失败下加重试按钮（`AddUiState.retryAvailable` + `lastFailedExtract`），Composer 待发送缩略图单击 → `FullscreenPhotoViewer` 预览（左右滑切换），Refine 页 proposalMode 加 photo 缩略条 + 双击预览；v4 **非破坏式 crop** — `Item.photoCrops: Map<String, PhotoCrop>` + schema v16，`CroppedPhoto` 用 `graphicsLayer` 在显示时叠 rect，原图字节始终完整，`FullscreenPhotoViewer` 加 "调整裁剪" → CropScreen 预填当前 rect；v5 录入页一键录入（Drawer 右上 "一键录入 (N)"），影集丢失 bug 修（`materializeDraftPhotos` 正规化 file:// URI），proposal-preview 影集管理统一到 HeroAvatarPicker，Grid 编辑态保持 2-列 + 长按拖（`GridDragState` 用 `onGloballyPositioned` 上报 rect，drop 时按落点找命中卡）；v6 CropScreen 拖动 fix（在 PointerEventPass.Initial 抢在 Pager 之前），CroppedPhoto 等比缩放修变形（Crop / Fit 双语义），前台保活加劲（API 34 `startForeground(type=DATA_SYNC)` + `IMPORTANCE_DEFAULT` 通知 + 运行时 POST_NOTIFICATIONS 申请 + WakeLock 10 分钟）；v7 prompt 把 MODIFY 改成 **delta-only**（之前要求 AI 重述全字段，导致影集被空覆盖），`mergeDraftOntoItem` 合并 delta 到 baseline，Card 按钮 "采用" 改 "保存草稿" + 新 "直接录入"（`acceptAndCommitProposal` 一锤子录），一键录入完不再跳 Detail；v8 卡片缩略条移除，proposal-preview 开"+ 添加照片"（`saveDraftPhotoFile` 纯 I/O + saveable `cropTargetDraft` 标志位 dispatch），`mergeDraftOntoDraft` 处理 PENDING/MODIFIED baseline，Grid 编辑态长按拖修（`combinedClickable.onLongClick = null` 让出长按给 drag detector）；v9 **MODIFY merge 提前到 `runExtract.onSuccess`** — 卡片标题 / 字段数 / 影集直接显示"修改后是什么样"，下游 acceptProposal / proposal-preview 全部简化无再 merge，Detail 抽屉 tab 改 参数 → 历史 → 影集，展示参数表去掉 hero / tail terra 分割线 | done |
 | 0033 | (a) 录入页编辑/草稿入口接入影集管理 — `ItemDraft.photos`/`avatarPhotoPath` + `addDraftPhoto/setDraftAvatar/removeDraftPhoto/persistDraftPhoto`，`AddPreview` 的 `HeroAvatarPicker` 接 photo callbacks；(b) 拍 / 选照片走新 `CropScreen` 做基础裁剪（free-form 矩形 + 4 角 / 4 边 drag）后落 `filesDir/draft-photos/<convoId>/<uuid>.jpg`；(c) commitDraft 把 draft.photos / avatar 带进 Item，MODIFIED 行 commit 时保留原 item id / createdAt / photos；(d) Drawer flash 修复 — SAVED 行点击 / Refine 进入时显式 `itemDrawerOpen = false`，跨导航用 `reopenDrawerOnResume` 配合 `Lifecycle.Event.ON_RESUME` 回来重开；(e) Grid 长按 → 编辑态：`GridViewModel.selecting/selectedIds/enterEditMode/exitEditMode/toggleSelection/deleteSelected/reorder`、`EditHeader` 替换 [Edit + 红点] 为 `[完成] · 已选 N · [删除(N)] [编辑(N)]`、1-列 `EditReorderableList` 长按拖把手调序；(f) Schema v13 — `items.sort_order`（默认回填 `-created_at`、`ItemDao` 排序改 `sort_order ASC, acquired DESC`、新物品 commit 取 `min - 1`、MODIFY commit 保持原 sortOrder）；(g) 新 `gridIntake: MutableStateFlow<List<String>?>` + `AddViewModel.startConversationFromItems` — 编辑态 [编辑] 把选中物品扔到 AddRoute 起新会话，自动开 drawer | done |
 | 0032 | 多 action 录入协议（核心修复用户报的"4 件物品 AI 只录入一件 + 覆盖上一个草稿"）：(a) 协议从 `extractItemDraft` 改 `extractItemDrafts` 返 `List<DraftAction>`，tool 名 `submit_drafts`、actions[]、kind=create/modify、target_id；(b) system prompt 加 `[CONVERSATION WORKING SET]` 块（每行 id + status + 标题 + category + oneLiner + specs），AI 据此判断 create vs modify；(c) 中间形态 v1：AI 一回复就把所有 actions 落工作集（drawer 直接刷 N 件）；(d) v2 复修：用户要求"先逐张确认"——一个 action 对应一张 DraftCta 卡，accept 才落到工作集（[applyAcceptedCta](android/app/src/main/java/com/treasure/ui/add/AddViewModel.kt)）；(e) Schema v12 — `add_messages` 加 `action_kind` / `target_id` 两列（旧行 NULL → Create）；(f) DraftCta 卡片渲染 "修改 ·" / "新增" 标签；(g) max_tokens 1024 → 4096（thinking 8192），原 1024 在 4 件物品 × 8 specs 时 JSON 截断；(h) drawer `rememberSaveable` + drawer 状态点 SAVED 行不主动收（AddChat 整体隐藏 = drawer 跟着隐，回 Chat 自动复现）；(i) ItemListDrawer 长按胶囊弹删除二次确认 — SAVED 只从工作集移除（不动物品）/ PENDING+MODIFIED 丢草稿；(j) ListIcon 替换 Draft 胶囊 + 工作集计数小红点 | done |
 | 0031 | 长 cycle，多轮迭代：(a) 返回栈优先级 — AddRoute / SettingsScreen / DetailScreen 各自局部 BackHandler 拦截子层；(b) 拖动数学复修 — CategoryManager 按"预览终态布局"渲染 + `rememberUpdatedState` 兜 stale lambda + `indexOfFirst(info.id)` + DAO `@Transaction reorder(orderedIds, hiddenIds)` 单事务避免中间态 emit；(c) HeroVector 去重 — `canonical()` + `uniqueHeroVectors`，picker 不再 3/4、7/8、10/12 重复；(d) 历史对话删 current 改 resume 上一段不再 spawn 空壳 + ✎/✕ 36dp visibility；(e) Theme 切换 — `darkModeOverride: MutableStateFlow` 在 Settings header `☀/☾` icon；(f) Portal 空态新 [Door](android/app/.../illust/Door.kt) 大门 + "点开大门，展示你的专属 treasure"；(g) Detail 抽屉 3 页 `HorizontalPager` + 影集 + tile + 长按多选 + 底部删除条 + 二次确认 + drag-handle hint 文字 + 抽屉删书签；(h) Grid 标题动态两行（`TextMeasurer` 同行同步）+ 搜索按钮挪到 chip 条最左、点击原地变 `SearchInputBar` 实时过滤 + Edit + 红点 跟 Treasure 标题 baseline 对齐；(i) Edit 页大美化 — "参数" / "操作" 区名，"+" 单字号按钮，spec 行卡片化（key+value 共框 + 中间竖分隔 + 握把/✕ 不带框），DANGER ZONE 注释删，divider 提示行去掉两侧横线；(j) 历史 add/edit 抽屉化 — `ModalBottomSheet` + 顶部 emoji icon picker（🛒🏆🔧⚙️👋）+ Material3 `DatePicker` + 中文长日期 `2026 年 5 月 12 日`；(k) `ItemDraft.history` + `setDraftHistory` + AddPreview 复用 `HistorySection`（提为 internal）；(l) AddChat "手动" → "Draft"；(m) Schema 不变；(n) `SeedCategoriesCallback` 补 fresh-install 分类种子（cycle 0026 那 migration 只覆盖升级用户）；(o) 物品种子 8 → 6（每个内建分类 1 条，新增咖啡 MaraX + 酒水 Margaux 2015） | done |
@@ -290,21 +291,21 @@ treasure/
 7. [`docs/adr/`](docs/adr/) — 6 份决策记录
 8. [`openspec/`](openspec/) — cycle 0001-0031 提案 / 规格 / 笔记
 
-## 下一刀候选（cycle 0034）
+## 下一刀候选（cycle 0035）
 
-1. **专用拍照 launcher**：cycle 0033 的 Refine 拍照 / 选图都退到 PickVisualMedia 一条路；vivo 系统 picker 多数已带拍照入口，但单拍意图用 `ActivityResultContracts.TakePicture` + `FileProvider` 走更顺
-2. **裁剪页旋转 / aspect lock**：现在只 free-form 矩形；用户若反馈"旋转一下"再补
-3. **Detail / EditScreen 的影集 add 也走裁剪**：cycle 0033 只接到了 Refine 一侧；Edit 页 add photo 还是裸 PickVisualMedia
-4. **死代码清理**：CategoryForm.kt / ManualCategoryPicker / AddViewModel.saveManual 自 cycle 0024 起没人调
-5. **撤销采用 / 撤销 commit**：DraftCta accept 后想反悔，目前要靠 drawer 长按删；想要在 chat 卡片侧加 "撤销" 也行
-6. **AI prompt 的 hero spec 模板提示按自定义分类适配** — 现在只有内建 6 个 example；如用户反馈"图书的 hero specs 太离谱"再做
-7. **PageFetcher headless 渲染**：被 detectBlock 拦下的拼多多 / 重 SPA 页面 fall back 到本地 WebView 真渲染一次拿 DOM
-8. **流式输出**（如果 forced tool-use 也能拆 SSE delta；目前明确推迟）
-8. **云端 STT (OpenAI Whisper) 兜底 + 麦克风按钮回归** — cycle 0017 暂去掉的麦克风
-9. **多轮 refine 的图片 vision context**
-10. **AI 生成博物馆插画**
-11. **Settings preset 校准** — Xiaomi MiLM 没公开端点
-12. **MigrationTest CI**
+1. **专用拍照 launcher**：当前 Refine / proposal-preview 的拍照按钮其实都退到 PickVisualMedia；想要真的"开相机一拍即录"，用 `ActivityResultContracts.TakePicture` + `FileProvider`
+2. **CropScreen 旋转 / aspect lock**：当前只 free-form 矩形
+3. **死代码清理**：CategoryForm.kt / ManualCategoryPicker / AddViewModel.saveManual / 旧 sendVoice (STT 路径) / `EditReorderableList`（已被 v8 2-列布局取代）
+4. **撤销采用 / 撤销 commit**：DraftCta accept / 直接录入后想反悔，目前要靠 drawer 长按删 + Detail 编辑改回去
+5. **AI prompt 的 hero spec 模板提示按自定义分类适配**：当前只有 6 个内建 example
+6. **PageFetcher headless 渲染**：被 detectBlock 拦的拼多多 / SPA 页 fall back 到 WebView
+7. **流式输出**：forced tool-use 拆 SSE delta（cycle 0014 推迟，看是否到时机）
+8. **MigrationTest CI**：CI 跑 v5→v6→…→v16 全链路；v16 schema JSON 已提交
+9. **vivo 自启动引导**：app 内引导用户去 iManager 开自启动 — 即使有 foreground service，被剥夺 autostart 仍会被冷态秒杀
+10. **历史会话的图清理**：现在 conversation-photos / draft-photos 的图删会话不清；磁盘会缓慢累积
+11. **录入页 picker 拒绝处理**：用户拒绝 RECORD_AUDIO / POST_NOTIFICATIONS 后没有 fallback 提示
+12. **OpenAI gpt-4o-audio 预设**：Settings preset 列表里加一个，方便用户跳过手填 model
+13. **Settings preset 校准** — Xiaomi MiLM 没公开端点
 
 ## 给下一个 agent 的备忘
 
@@ -333,6 +334,15 @@ treasure/
 
 | 日期 | 摘要 |
 |---|---|
+| 2026-05-14 | **v1.0 出 release** · cycle 0034 v9：MODIFY merge 提前到 runExtract（卡片标题 / 字段数 / 影集直接显示"修改后是什么样"）· proposal-preview / accept 简化无再 merge · Detail 抽屉 tab 改 参数 → 历史 → 影集 · 展示参数表去掉 hero/tail terra 分割线 · versionName 0.11.0 → 1.0.0（versionCode 14） |
+| 2026-05-14 | cycle 0034 v8：proposal-preview 开"+ 添加照片"（`saveDraftPhotoFile` 纯 I/O + saveable `cropTargetDraft` 标志位 dispatch）· `mergeDraftOntoDraft` 处理 PENDING / MODIFIED baseline · 卡片缩略图条移除 · Grid 编辑态长按拖修（`combinedClickable.onLongClick = null` 让出长按给 detectDragGesturesAfterLongPress） |
+| 2026-05-14 | cycle 0034 v7：prompt MODIFY 改 **delta-only**（之前要求 AI 全字段重述，导致影集被空覆盖；新 prompt 明令"omitted = keep baseline"）· `mergeDraftOntoItem` 合并 AI delta 到 baseline · Card "采用" → "保存草稿" + 新 "直接录入"（`acceptAndCommitProposal` 一锤子录）· 一键录入完成后不再跳 Detail |
+| 2026-05-14 | cycle 0034 v6：CropScreen 拖动 fix（`PointerEventPass.Initial` 抢在 Pager 之前 + 立即 consume，四角四边内 Move 都能拖）· `CroppedPhoto` 等比缩放修变形（Crop / Fit 双语义）· 前台保活加劲（API 34 `startForeground(type=DATA_SYNC)` + `IMPORTANCE_DEFAULT` 通知 + 运行时 POST_NOTIFICATIONS 申请 + WakeLock 10 分钟）· 预制插画双击预览撤回 |
+| 2026-05-14 | cycle 0034 v5：录入页 Drawer 一键录入（commit 所有 PENDING / MODIFIED · 二次确认）· 影集 commit 时丢失 bug 修（`materializeDraftPhotos` 把 file://URI 字符串正规化到 draft-photos/）· proposal-preview 影集管理统一到 `HeroAvatarPicker`（onSelectAvatar / onRemovePhoto / onSelectHeroVector）· Grid 编辑态保持 2-列 + 长按拖（`GridDragState` 用 `onGloballyPositioned` 上报 rect，drop 时按落点找命中卡）· Grid 编辑态删除二次确认 |
+| 2026-05-14 | cycle 0034 v4：**非破坏式 crop** — `Item.photoCrops: Map<String, PhotoCrop>` + schema v16，`CroppedPhoto` composable 用 `graphicsLayer` 在显示时叠 rect，原图字节始终完整 · `FullscreenPhotoViewer` 加 "调整裁剪" → CropScreen 预填当前 rect · proposal-preview 改用同款 HeroAvatarPicker 而非自己一套 |
+| 2026-05-14 | cycle 0034 v3：DraftCta / 工作集胶囊 / picker rows HeroIllustration → HeroAvatar（认 avatarPhotoPath 走 AsyncImage）· AI 头像 crop 提示词收紧（不要文字 / 标签）· 失败重试按钮（`AddUiState.retryAvailable` + `lastFailedExtract` + ↻重试胶囊）· Composer 待发送缩略图 / Refine 影集 / picker album 全部支持单击 / 双击预览（`FullscreenPhotoViewer` 加 photoCrops + onEditCrop） |
+| 2026-05-14 | cycle 0034 v2：长按麦克风录音（`VoiceRecorder` MediaRecorder AAC m4a / `VoicePlayer` MediaPlayer / `RecordingOverlay` 全屏页 + 音量脉冲）· schema v15 加 `add_messages.voice_path` · UserVoice 气泡点击播放 + 历史可重听 · Anthropic emit `audio` block / OpenAI emit `input_audio` block — provider 不接受让 API 400 静 surface |
+| 2026-05-14 | cycle 0034 v1：多图同送 + AI photo_assignments 协议 — `DraftAction.photoAssignments: [{source_index, crop?, set_as_avatar}]` · schema v14 加 `add_messages.photo_assignments_json` · 系统 prompt 加 `[ATTACHED PHOTOS]` 块 + 头像应紧贴物品提示 · `applyPhotoAssignmentsToDraft` 非破坏（只 copy 原图 + 记 rect）· `migratePhotosToItemOwned` commit 时拷到 `photos/<itemId>/`，删会话不丢图鉴 |
 | 2026-05-13 | cycle 0033：Refine 页接入影集管理（`ItemDraft.photos`/`avatarPhotoPath` + HeroAvatarPicker photo callbacks，picker→CropScreen→`filesDir/draft-photos/<convoId>/`，commit 把 photos/avatar 带进 Item，MODIFIED 行保留原 item id/createdAt/photos）· 新 `CropScreen`：4 角 / 4 边拖动 free-form 矩形 + 灰色蒙层 + 归一化 rect 出参 · Drawer flash 修复（SAVED 点击 / Refine 进入显式 `itemDrawerOpen=false`，`reopenDrawerOnResume` + `Lifecycle.Event.ON_RESUME` 回来重开）· Grid 长按 → 编辑态：`GridViewModel.selecting/selectedIds`、`EditHeader` 替换 [Edit + 红点] = `[完成] · 已选 N · [删除 N] [编辑 N]`、1-列 `EditReorderableList` 长按拖把手调序 · Schema v13 — `items.sort_order`（默认回填 `-created_at`，ItemDao 按 sort_order ASC, acquired DESC，新物品 commit 取 `min - 1`，MODIFY commit 保持原 sortOrder） · 新 `gridIntake` + `AddViewModel.startConversationFromItems` — Grid [编辑] 把选中物品扔录入页起新会话，自动开 drawer |
 | 2026-05-13 | cycle 0032：多 action 录入协议（修"4 件物品 AI 只录入 1 件 + 覆盖上一个草稿"两个核心 bug）· 协议从 `extractItemDraft` 改 `extractItemDrafts` 返 `List<DraftAction>`，tool 名 `submit_drafts` + actions[] + kind=create/modify + target_id · system prompt 加 `[CONVERSATION WORKING SET]` 块（id/status/title/category/specs） · v1 直接落工作集 → v2 复修：每个 action 一张 DraftCta，accept 才落工作集（`applyAcceptedCta`）· Schema v12 加 `add_messages.action_kind/target_id` 两列 · DraftCta 卡前缀 "修改 ·" / "新增" · max_tokens 1024 → 4096（thinking 8192，4 件物品 × 8 specs 不再 JSON 截断）· drawer `rememberSaveable` + 长按胶囊删除（SAVED 只从工作集移除不动物品 / PENDING+MODIFIED 丢草稿）· ListIcon + 工作集计数小红点替换 [Draft] 胶囊 |
 | 2026-05-12 | cycle 0031 第 N 轮：历史 UI emoji + 长日期（🛒🏆🔧⚙️👋；"2026 年 5 月 12 日"）· Edit 参数 divider 提示行去两侧横线 |
