@@ -108,6 +108,8 @@ fun AddChat(
     onPickWorkingItem: (com.treasure.core.repo.ConversationItem) -> Unit,
     onAddExistingItem: (String) -> Unit,
     onRemoveWorkingItem: (String) -> Unit,
+    /** Cycle 0034 v5：drawer 右上一键录入 — commit 所有 PENDING / MODIFIED。 */
+    onCommitAllPending: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
     val context = LocalContext.current
@@ -292,6 +294,7 @@ fun AddChat(
                 onPickItem = onPickWorkingItem,
                 onAddExistingItem = onAddExistingItem,
                 onRemoveItem = onRemoveWorkingItem,
+                onCommitAllPending = onCommitAllPending,
             )
         }
     }
@@ -1720,10 +1723,17 @@ private fun ItemListDrawer(
     onPickItem: (com.treasure.core.repo.ConversationItem) -> Unit,
     onAddExistingItem: (String) -> Unit,
     onRemoveItem: (String) -> Unit,
+    onCommitAllPending: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
     var pickerOpen by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<com.treasure.core.repo.ConversationItem?>(null) }
+    // Cycle 0034 v5：一键录入二次确认。
+    var confirmingCommit by remember { mutableStateOf(false) }
+    val pendingCount = items.count {
+        it.status == com.treasure.core.repo.ConversationItemStatus.PENDING ||
+            it.status == com.treasure.core.repo.ConversationItemStatus.MODIFIED
+    }
 
     val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
@@ -1761,6 +1771,21 @@ private fun ItemListDrawer(
                         style = MaterialTheme.typography.labelSmall,
                         fontStyle = FontStyle.Italic,
                     )
+                }
+                // Cycle 0034 v5：一键录入 — 把所有 PENDING / MODIFIED 一并提交
+                // 到图鉴。pendingCount=0 时整颗按钮置灰不可点。
+                if (pendingCount > 0) {
+                    Text(
+                        text = "一键录入 ($pendingCount)",
+                        color = colors.terra,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(colors.terra.copy(alpha = 0.12f))
+                            .clickable { confirmingCommit = true }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
                 }
                 IconCircleButton(onClick = { pickerOpen = true }) { PlusGlyph(colors.ink) }
             }
@@ -1839,6 +1864,34 @@ private fun ItemListDrawer(
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { deleting = null }) {
+                    Text("取消")
+                }
+            },
+            containerColor = colors.card,
+            titleContentColor = colors.ink,
+            textContentColor = colors.sub,
+        )
+    }
+    // Cycle 0034 v5：一键录入二次确认。
+    if (confirmingCommit) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmingCommit = false },
+            title = { Text(text = "一键录入 $pendingCount 件物品？") },
+            text = {
+                Text(
+                    text = "把工作集里所有待录入 / 新修改的物品一次性收进图鉴。" +
+                        "录入后会话仍可继续；要再改就到图鉴里编辑。",
+                    color = colors.sub,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirmingCommit = false
+                    onCommitAllPending()
+                }) { Text("录入", color = colors.terra) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirmingCommit = false }) {
                     Text("取消")
                 }
             },

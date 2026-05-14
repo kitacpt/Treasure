@@ -84,6 +84,9 @@ fun AddPreview(
     onTakePhoto: (() -> Unit)? = null,
     onRemovePhoto: ((String) -> Unit)? = null,
     onSelectAvatar: ((String?) -> Unit)? = null,
+    /** Cycle 0034 v5：用户在 HeroAvatarPicker 里点了某个预制插画 — 把它当成
+     *  这条草稿的"插画头像"（清掉照片头像）。 */
+    onSelectHeroVector: ((com.treasure.core.domain.HeroVector) -> Unit)? = null,
     /** Cycle 0034 v3：proposalMode 下 cta 自带的 photo_assignments 缩略图 —
      *  本来只显在 chat 卡上，用户想在预览页也看到 / 双击放大。每条 = 已 resolve
      *  到 file:// 的 source + crop 标记 + avatar 标记。 */
@@ -173,8 +176,12 @@ fun AddPreview(
                     categoryId = template.category.id,
                     palette = template.palette,
                     options = remember(template.category) { heroVectorOptionsFor(template.category) },
-                    selected = template.heroVector,
-                    onSelect = { /* read-only — 草稿页不让换插画 */ },
+                    // Cycle 0034 v5：draft.heroVector 非空时用用户挑的；否则
+                    // 用品类模板的默认线描。
+                    selected = draft.heroVector ?: template.heroVector,
+                    onSelect = { v ->
+                        onSelectHeroVector?.invoke(v)
+                    },
                     // Cycle 0033：影集管理 — 拍 / 选 / 长按删 / 点头像选用。
                     photoOptions = draft.photos,
                     selectedPhoto = draft.avatarPhotoPath,

@@ -34,6 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -135,6 +137,20 @@ fun GridScreen(
     } else {
         state.itemsInCategory
     }
+    // Cycle 0034 v5：编辑态批量删除前先弹二次确认
+    var confirmingDelete by remember { mutableStateOf(false) }
+    // Cycle 0034 v5：编辑态 2-列网格内拖拽调序 — state hoist 到这里，
+    // 子 ItemCard 通过共享 state 通信。drop 时按收到的 itemBounds 推断目标。
+    val gridDragState = remember(displayItems) {
+        GridDragState(
+            items = displayItems,
+            onReorder = onReorder,
+        )
+    }
+    // 让 onReorder 引用永远最新（不重建 state 时也能用）
+    androidx.compose.runtime.LaunchedEffect(onReorder) {
+        gridDragState.updateReorderCallback(onReorder)
+    }
 
     Box(
         modifier = Modifier
@@ -160,7 +176,7 @@ fun GridScreen(
                     EditHeader(
                         selectedCount = selectedIds.size,
                         onExit = onExitEditMode,
-                        onDelete = onDeleteSelected,
+                        onDelete = { confirmingDelete = true },
                         onSend = onSendSelectedToAdd,
                     )
                 } else {
@@ -191,27 +207,23 @@ fun GridScreen(
                 }
             }
 
-            if (selecting) {
-                // Cycle 0033：编辑态下 1-列长方形行 + 拖拽调序 + 选中态。
-                item {
-                    EditReorderableList(
-                        items = displayItems,
-                        selectedIds = selectedIds,
-                        onToggleSelect = onToggleSelect,
-                        onReorder = onReorder,
-                    )
-                }
-            } else {
-                items(
-                    items = displayItems.chunked(2),
-                    key = { pair -> pair.joinToString(",") { it.id } },
-                ) { pair ->
-                    ItemPairRow(
-                        pair = pair,
-                        onOpenItem = onOpenItem,
-                        onLongPressItem = onLongPressItem,
-                    )
-                }
+            // Cycle 0034 v5：编辑态保持 2-列原样布局 — 不再切换到 1-列。
+            // tap toggle 选中，长按再触发拖拽（drag start by long-press），
+            // 拖动用 graphicsLayer.translation 给视觉反馈；松手按落点解算
+            // 目标 grid 坐标，调用 onReorder 写回 sort_order。
+            items(
+                items = displayItems.chunked(2),
+                key = { pair -> pair.joinToString(",") { it.id } },
+            ) { pair ->
+                ItemPairRow(
+                    pair = pair,
+                    selecting = selecting,
+                    selectedIds = selectedIds,
+                    onOpenItem = onOpenItem,
+                    onLongPressItem = onLongPressItem,
+                    onToggleSelect = onToggleSelect,
+                    dragState = gridDragState,
+                )
             }
 
             if (displayItems.isEmpty()) {
@@ -226,6 +238,36 @@ fun GridScreen(
                 }
             }
         }
+
+        // Cycle 0034 v5：编辑态批量删除二次确认。
+        if (confirmingDelete) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirmingDelete = false },
+                title = { androidx.compose.material3.Text("删除 ${selectedIds.size} 件物品？") },
+                text = {
+                    androidx.compose.material3.Text(
+                        text = "这些物品会从图鉴里抹掉，无法恢复。它们的照片 / 历史也会一并清掉。",
+                        color = colors.sub,
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        confirmingDelete = false
+                        onDeleteSelected()
+                    }) {
+                        androidx.compose.material3.Text("删除", color = colors.terra)
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { confirmingDelete = false }) {
+                        androidx.compose.material3.Text("取消")
+                    }
+                },
+                containerColor = colors.card,
+                titleContentColor = colors.ink,
+                textContentColor = colors.sub,
+            )
+        }
     }
 }
 
@@ -239,6 +281,10 @@ private fun ItemPairRow(
     pair: List<Item>,
     onOpenItem: (String) -> Unit,
     onLongPressItem: (String) -> Unit = {},
+    selecting: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelect: (String) -> Unit = {},
+    dragState: GridDragState? = null,
 ) {
     val titleStyle = MaterialTheme.typography.bodyLarge
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
@@ -265,8 +311,14 @@ private fun ItemPairRow(
             ItemCard(
                 item = item,
                 titleLines = titleLines,
-                onClick = { onOpenItem(item.id) },
+                onClick = {
+                    if (selecting) onToggleSelect(item.id)
+                    else onOpenItem(item.id)
+                },
                 onLongPress = { onLongPressItem(item.id) },
+                selecting = selecting,
+                selected = item.id in selectedIds,
+                dragState = dragState,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -580,11 +632,45 @@ private fun ItemCard(
     titleLines: Int = 1,
     onClick: () -> Unit,
     onLongPress: () -> Unit = {},
+    selecting: Boolean = false,
+    selected: Boolean = false,
+    dragState: GridDragState? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTreasureColors.current
+    val isDragging = dragState?.draggingId == item.id
+    val translateX = if (isDragging) dragState.offset.x else 0f
+    val translateY = if (isDragging) dragState.offset.y else 0f
     Column(
-        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        modifier = modifier
+            .onGloballyPositioned { coords ->
+                if (selecting) dragState?.reportBounds(
+                    item.id,
+                    coords.positionInRoot(),
+                    coords.size,
+                )
+            }
+            .graphicsLayer {
+                translationX = translateX
+                translationY = translateY
+                if (isDragging) {
+                    scaleX = 1.04f
+                    scaleY = 1.04f
+                    shadowElevation = 14.dp.toPx()
+                }
+            }
+            .zIndex(if (isDragging) 1f else 0f)
+            .pointerInput(selecting) {
+                if (selecting) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { dragState?.start(item.id) },
+                        onDrag = { _, drag -> dragState?.drag(drag) },
+                        onDragEnd = { dragState?.drop() },
+                        onDragCancel = { dragState?.drop() },
+                    )
+                }
+            }
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
     ) {
         // Square hero plate
         Box(
@@ -592,7 +678,10 @@ private fun ItemCard(
                 .fillMaxWidth()
                 .aspectRatio(1f / 1.1f)
                 .background(colors.card)
-                .border(0.5.dp, colors.line)
+                .border(
+                    if (selected) 2.dp else 0.5.dp,
+                    if (selected) colors.terra else colors.line,
+                )
                 .padding(14.dp),
             contentAlignment = Alignment.Center,
         ) {
@@ -602,6 +691,24 @@ private fun ItemCard(
                     .aspectRatio(1f),
             ) {
                 HeroAvatar(item = item, modifier = Modifier.fillMaxSize())
+            }
+            // Cycle 0034 v5：选中标记圆点
+            if (selecting) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(if (selected) colors.terra else colors.paper)
+                        .border(0.5.dp, if (selected) colors.terra else colors.line, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (selected) Text(
+                        text = "✓",
+                        color = colors.paper,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -916,5 +1023,73 @@ private fun EmptyHint(categoryName: String?) {
             color = colors.sub,
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+/**
+ * Cycle 0034 v5：编辑态 2-列网格内拖拽调序的共享 state。
+ *
+ *  - draggingId / offset：当前正在拖动的卡 id + 累计位移（px，相对原位）
+ *  - itemBounds：每张可见卡在屏幕坐标系里的 (origin, size)，由 onGloballyPositioned 上报
+ *  - drop 时按手指最终落点（origin + offset + size/2）找命中的卡，
+ *    把 dragging 行放到那张卡所在位置 → 调用 onReorder 写 sort_order
+ */
+@androidx.compose.runtime.Stable
+internal class GridDragState(
+    items: List<Item>,
+    onReorder: (List<String>) -> Unit,
+) {
+    var items by androidx.compose.runtime.mutableStateOf(items)
+        private set
+    private var onReorderRef: (List<String>) -> Unit = onReorder
+    var draggingId by androidx.compose.runtime.mutableStateOf<String?>(null)
+        private set
+    var offset by androidx.compose.runtime.mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+        private set
+    private val bounds = mutableMapOf<String, Pair<androidx.compose.ui.geometry.Offset, androidx.compose.ui.unit.IntSize>>()
+
+    fun updateReorderCallback(cb: (List<String>) -> Unit) { onReorderRef = cb }
+
+    fun reportBounds(
+        id: String,
+        origin: androidx.compose.ui.geometry.Offset,
+        size: androidx.compose.ui.unit.IntSize,
+    ) { bounds[id] = origin to size }
+
+    fun start(id: String) {
+        draggingId = id
+        offset = androidx.compose.ui.geometry.Offset.Zero
+    }
+
+    fun drag(delta: androidx.compose.ui.geometry.Offset) {
+        offset += delta
+    }
+
+    fun drop() {
+        val id = draggingId ?: return
+        val (origin, size) = bounds[id] ?: run {
+            draggingId = null; offset = androidx.compose.ui.geometry.Offset.Zero; return
+        }
+        val cx = origin.x + offset.x + size.width / 2f
+        val cy = origin.y + offset.y + size.height / 2f
+        // 找落点命中的另一张卡（不含自己）
+        val target = bounds.entries
+            .filter { it.key != id }
+            .firstOrNull { (_, b) ->
+                val (o, s) = b
+                cx in o.x..(o.x + s.width) && cy in o.y..(o.y + s.height)
+            }?.key
+        draggingId = null
+        offset = androidx.compose.ui.geometry.Offset.Zero
+        if (target != null && target != id) {
+            val ids = items.map { it.id }.toMutableList()
+            val from = ids.indexOf(id)
+            val to = ids.indexOf(target)
+            if (from >= 0 && to >= 0 && from != to) {
+                val moved = ids.removeAt(from)
+                ids.add(to, moved)
+                onReorderRef(ids)
+            }
+        }
     }
 }

@@ -79,6 +79,8 @@ fun HeroAvatarPicker(
     val colors = LocalTreasureColors.current
     var open by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<String?>(null) }
+    // Cycle 0034 v5：预制插画双击预览的浮层 state。
+    var illustrationPreview by remember { mutableStateOf<HeroVector?>(null) }
     val showingPhoto = selectedPhoto != null && photoOptions.contains(selectedPhoto)
     val canManagePhotos = onTakePhoto != null || onPickPhotos != null
 
@@ -123,8 +125,8 @@ fun HeroAvatarPicker(
         Spacer(Modifier.height(6.dp))
         Text(
             text = when {
-                open && canManagePhotos -> "选 / 加 / 长按删 · 点头像收起"
-                open -> "选一张 · 点头像收起"
+                open && canManagePhotos -> "选 / 加 / 长按删 · 双击预览 · 点头像收起"
+                open -> "选一张 · 双击预览 · 点头像收起"
                 else -> if (canManagePhotos) "点头像 · 换插画 / 用照片" else "点头像 · 换插画"
             },
             color = colors.sub,
@@ -211,7 +213,14 @@ fun HeroAvatarPicker(
                             .clip(CircleShape)
                             .background(colors.card)
                             .border(if (on) 1.5.dp else 0.5.dp, if (on) colors.terra else colors.line, CircleShape)
-                            .clickable { onSelect(v) }
+                            .pointerInput(v) {
+                                detectTapGestures(
+                                    onTap = { onSelect(v) },
+                                    // Cycle 0034 v5：预制插画也支持双击预览 —
+                                    // 全屏放大看插画细节。
+                                    onDoubleTap = { illustrationPreview = v },
+                                )
+                            }
                             .padding(7.dp),
                     ) {
                         HeroIllustration(
@@ -248,6 +257,28 @@ fun HeroAvatarPicker(
             titleContentColor = colors.ink,
             textContentColor = colors.sub,
         )
+    }
+
+    // Cycle 0034 v5：双击某个预制插画 → 全屏放大预览。点画外区域退出。
+    illustrationPreview?.let { v ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(androidx.compose.ui.graphics.Color(0xCC0F0E0C))
+                .clickable { illustrationPreview = null },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(280.dp)
+                    .padding(30.dp),
+            ) {
+                HeroIllustration(
+                    item = previewItem(v, palette, categoryId),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
     }
 }
 

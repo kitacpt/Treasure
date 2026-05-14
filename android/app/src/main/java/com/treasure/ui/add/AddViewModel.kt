@@ -1175,8 +1175,13 @@ class AddViewModel(
         // 的 photo_assignments 预填进 proposalDraft 并可能 select 头像 / 删了
         // 几张；这时 draft.photos 非空，跳过 applyPhotoAssignmentsToDraft
         // （否则把 conversation-photos 路径再复制一次 + crop 元数据丢）。
+        // Cycle 0034 v5：proposal 路径里 draft.photos 是 file:// URI 字符串
+        // （cta.photoAssignments.sourceUri.toString() 给的形式）；commit 时
+        // migratePhotosToItemOwned 用 java.io.File(src) 直接解释为绝对路径，
+        // 撞不到对应文件 → 影集落空。这里统一走 materializeDraftPhotos 把
+        // 所有路径正规化到 filesDir/draft-photos/<convoId>/<uuid>.jpg。
         val draftWithPhotos = when {
-            draft.photos.isNotEmpty() -> draft
+            draft.photos.isNotEmpty() -> materializeDraftPhotos(draft)
             cta.photoAssignments.isNotEmpty() -> applyPhotoAssignmentsToDraft(draft, cta.photoAssignments)
             else -> draft
         }
@@ -1209,6 +1214,74 @@ class AddViewModel(
                 ),
             )
         }
+    }
+
+    /**
+     * Cycle 0034 v5：把 draft 上的 photo paths 全部正规化到 draft-photos/<convo>/。
+     *
+     * - 已经在那个目录下的 path：跳过；
+     * - file:// URI（proposal-preview 路径上 cta.sourceUri.toString() 给的形
+     *   式）：parse 出真实路径，复制一份并改 mapping；
+     * - content:// 或别的非本端路径：通过 ContentResolver 流式拷贝。
+     *
+     * 拿到新 mapping 后同步重写 photos / photoCrops / avatarPhotoPath。这之后
+     * commit 阶段的 [migratePhotosToItemOwned] 才能用 java.io.File(path) 直接
+     * 找到文件。
+     */
+    private suspend fun materializeDraftPhotos(draft: ItemDraft): ItemDraft = withContext(Dispatchers.IO) {
+        val convoId = _state.value.conversationId.ifBlank { return@withContext draft }
+        val app = getApplication<TreasureApp>()
+        val targetDir = java.io.File(app.filesDir, "draft-photos/$convoId").apply { mkdirs() }
+        val targetPath = targetDir.absolutePath + java.io.File.separator
+        val mapping = mutableMapOf<String, String>()
+        for (src in draft.photos) {
+            if (src.startsWith(targetPath)) {
+                mapping[src] = src
+                continue
+            }
+            val savedPath = runCatching {
+                // 尝试当本地绝对路径先
+                val asFile = runCatching { java.io.File(src) }.getOrNull()
+                val dest = java.io.File(targetDir, "${UUID.randomUUID()}.jpg")
+                if (asFile != null && asFile.exists() && asFile.length() > 0L) {
+                    asFile.inputStream().use { input ->
+                        dest.outputStream().use { out -> input.copyTo(out) }
+                    }
+                } else {
+                    val srcUri = android.net.Uri.parse(src)
+                    // file:// URI：取 path 字段
+                    if ("file".equals(srcUri.scheme, ignoreCase = true)) {
+                        val p = srcUri.path
+                        if (!p.isNullOrBlank()) {
+                            val f = java.io.File(p)
+                            if (f.exists() && f.length() > 0L) {
+                                f.inputStream().use { input ->
+                                    dest.outputStream().use { out -> input.copyTo(out) }
+                                }
+                            }
+                        }
+                    } else {
+                        // content:// 等：让 ContentResolver 处理
+                        app.contentResolver.openInputStream(srcUri)?.use { input ->
+                            dest.outputStream().use { out -> input.copyTo(out) }
+                        }
+                    }
+                }
+                if (dest.exists() && dest.length() > 0L) dest.absolutePath else null
+            }.getOrNull()
+            if (savedPath != null) mapping[src] = savedPath
+        }
+        if (mapping.isEmpty()) return@withContext draft
+        val newPhotos = draft.photos.mapNotNull { mapping[it] }
+        val newCrops = draft.photoCrops.mapNotNull { (old, rect) ->
+            mapping[old]?.let { it to rect }
+        }.toMap()
+        val newAvatar = draft.avatarPhotoPath?.let { mapping[it] }
+        draft.copy(
+            photos = newPhotos,
+            photoCrops = newCrops,
+            avatarPhotoPath = newAvatar,
+        )
     }
 
     /**
@@ -1350,6 +1423,16 @@ class AddViewModel(
         scheduleDraftAutoSave()
     }
 
+    /** Cycle 0034 v5：用户选了一个"预制插画"做头像 — 写进 draft.heroVector，
+     *  顺带清掉 avatarPhotoPath（互斥：照片头像 vs 插画头像）。 */
+    fun setDraftHeroVector(v: com.treasure.core.domain.HeroVector) {
+        val current = _state.value.confirmedDraft ?: ItemDraft()
+        _state.value = _state.value.copy(
+            confirmedDraft = current.copy(heroVector = v, avatarPhotoPath = null),
+        )
+        scheduleDraftAutoSave()
+    }
+
     /** 草稿头像 — 必须是 photos 里的某张；传 null = 用回线描插画。 */
     fun setDraftAvatar(path: String?) {
         val current = _state.value.confirmedDraft ?: return
@@ -1481,92 +1564,13 @@ class AddViewModel(
         onSaved: (String) -> Unit,
     ) {
         val draft = _state.value.confirmedDraft ?: return
+        val editing = _state.value.editingCiId
+        val workingItem = editing?.let { ed -> _state.value.items.firstOrNull { it.id == ed } }
         viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            // Cycle 0032：commit 前先看一下我们是不是在 MODIFY 一个已有物品
-            // （editingCiId 指向的 ConversationItem 是 MODIFIED 状态，itemRef
-            // 非空）。是的话保留原 item id / createdAt / photos，避免在图鉴
-            // 里产生重复行。
-            val editing = _state.value.editingCiId
-            val workingItem = editing?.let { ed ->
-                _state.value.items.firstOrNull { it.id == ed }
-            }
             val refItem: Item? = workingItem?.itemRef?.let { ref ->
                 runCatching { repo.observeById(ref).first() }.getOrNull()
             }
-            // Cycle 0027：category 现在是 String id。优先用 draft 里的；空就
-            // 默认 "tech"（最泛的内建分类）。如果命中内建 enum，用对应模板
-            // 拿 palette / heroVector；不命中（自定义分类）就走 GENERIC 套
-            // generic palette。
-            val categoryId = draft.category?.takeIf { it.isNotBlank() } ?: "tech"
-            val builtIn = Category.entries.firstOrNull { it.id == categoryId }
-            val template = builtIn?.let { CategoryTemplates.forCategory(it) }
-            val palette = refItem?.palette ?: template?.palette
-                ?: listOf("#0e0e0e", "#a47836", "#e8e2d4", "#5a5a5a")
-            val heroVector = refItem?.heroVector ?: template?.heroVector ?: HeroVector.GENERIC
-            val id = refItem?.id ?: makeId(categoryId, draft.brand, draft.model, now)
-            // 还是优先看 AI 填没填 "入手日期" spec；没填就今天。手动改的也会
-            // 体现在 spec 列表里，于是这里能拿到。
-            val acquired = readPurchaseField(draft, "入手日期")
-                .ifBlank { refItem?.acquired }
-                ?.ifBlank { LocalDate.now().toString() }
-                ?: LocalDate.now().toString()
-            // Cycle 0034：commit 时把 draft 影集里所有"会话域"路径（conversation-
-            // photos / draft-photos）COPY 到 photos/<itemId>/，让它们脱离会话
-            // 寿命独立存在 — 用户删除会话不再丢图。已在 photos/<itemId>/ 下
-            // 的（MODIFY 情况下从原 item 继承的）原样保留。
-            val draftPhotosRaw = draft.photos.ifEmpty { refItem?.photos ?: emptyList() }
-            // Cycle 0034 v4：crop 元数据继承 — 优先 draft.photoCrops（用户在
-            // 草稿阶段调过），空就退回 refItem 的（MODIFY 没动相册的情形）。
-            val draftCropsRaw: Map<String, com.treasure.core.domain.PhotoCrop> =
-                if (draft.photoCrops.isNotEmpty()) draft.photoCrops
-                else refItem?.photoCrops ?: emptyMap()
-            val migrated = migratePhotosToItemOwned(
-                itemId = id,
-                draftPhotos = draftPhotosRaw,
-                draftAvatar = draft.avatarPhotoPath ?: refItem?.avatarPhotoPath,
-                draftCrops = draftCropsRaw,
-            )
-            val itemPhotos = migrated.photos
-            val itemAvatar = migrated.avatar
-            val itemPhotoCrops = migrated.crops
-            val item = Item(
-                id = id,
-                category = categoryId,
-                brand = draft.brand.trim(),
-                model = draft.model.trim(),
-                nickname = draft.nickname.trim(),
-                acquired = acquired,
-                parted = refItem?.parted,
-                status = status,
-                palette = palette,
-                oneLiner = draft.oneLiner.trim(),
-                heroVector = heroVector,
-                specs = draft.specs.filter { it.label.isNotBlank() || it.value.isNotBlank() },
-                // Cycle 0031：草稿页用户能编辑 history 时间轴；用户填了就直接
-                // 用，没填就走老逻辑默认一条 ACQUIRED。
-                history = draft.history.ifEmpty {
-                    refItem?.history ?: listOf(HistoryEvent(acquired, HistoryKind.ACQUIRED, "购入", ""))
-                },
-                photos = itemPhotos,
-                avatarPhotoPath = itemAvatar,
-                photoCrops = itemPhotoCrops,
-                createdAt = refItem?.createdAt ?: now,
-                updatedAt = now,
-                // Cycle 0033：新物品 sortOrder = 当前最小 - 1 → 默认浮到图鉴
-                // 列表最前。MODIFY commit 保持原 sortOrder 不动（防止编辑后
-                // 物品被弹到前面，符合"后续改动不会影响排序"）。
-                sortOrder = refItem?.sortOrder ?: (repo.minSortOrder() - 1L),
-            )
-            repo.upsert(item)
-            // Cycle 0031 redesign：一个会话支持多物品 — commit 现在只是把活跃
-            // PENDING / MODIFIED 行升格为 SAVED，会话不再封存。下次 AI 提案
-            // 自动起一份新的 PENDING 行（upsertWorkingDraft 找不到活跃行就 new）。
-            //
-            // confirmedDraft / proposedDraft 是单草稿时期的会话级 baseline；
-            // commit 一次就清掉，让下个物品从干净起手开始（AI 也看不到上一个
-            // 物品的字段当 baseline，避免污染）。Committed 标记仍 append 一行，
-            // 让聊天历史有迹可循（"✦ 已收入图鉴"），但不锁 composer。
+            val id = buildAndSaveItem(draft = draft, refItem = refItem, status = status)
             markActiveItemSaved(id)
             val committed = AddMessage.Committed(
                 id = UUID.randomUUID().toString(),
@@ -1584,6 +1588,125 @@ class AddViewModel(
             persist(committed)
             onSaved(id)
         }
+    }
+
+    /**
+     * Cycle 0034 v5：一键录入 — 把工作集里所有 PENDING / MODIFIED 物品打包
+     * commit 成 Item。每条独立 commit（photo migration + upsert + mark SAVED）。
+     */
+    fun commitAllPendingWorkingItems(
+        status: ItemStatus = ItemStatus.OWNED,
+        onDone: (savedIds: List<String>) -> Unit = {},
+    ) {
+        val convoId = _state.value.conversationId.ifBlank { return }
+        viewModelScope.launch {
+            val candidates = conversations.loadItems(convoId).filter {
+                it.status == com.treasure.core.repo.ConversationItemStatus.PENDING ||
+                    it.status == com.treasure.core.repo.ConversationItemStatus.MODIFIED
+            }
+            val saved = mutableListOf<String>()
+            val now = System.currentTimeMillis()
+            for (ci in candidates) {
+                val draft = ci.draft ?: continue
+                val refItem: Item? = ci.itemRef?.let { ref ->
+                    runCatching { repo.observeById(ref).first() }.getOrNull()
+                }
+                val id = buildAndSaveItem(draft = draft, refItem = refItem, status = status)
+                // mark THIS ci SAVED (per-item; markActiveItemSaved uses editingCiId
+                // heuristic which doesn't apply for batch).
+                conversations.upsertItem(
+                    ci.copy(
+                        draft = null,
+                        itemRef = id,
+                        status = com.treasure.core.repo.ConversationItemStatus.SAVED,
+                        updatedAt = System.currentTimeMillis(),
+                    ),
+                )
+                saved += id
+            }
+            if (saved.isNotEmpty()) {
+                val msg = AddMessage.Committed(
+                    id = UUID.randomUUID().toString(),
+                    savedItemId = saved.first(),
+                )
+                _state.update {
+                    it.copy(
+                        messages = it.messages + msg,
+                        confirmedDraft = null,
+                        proposedDraft = null,
+                        pendingCtaId = null,
+                        editingCiId = null,
+                    )
+                }
+                persist(msg)
+            }
+            onDone(saved)
+        }
+    }
+
+    /** Cycle 0034 v5：从 draft + 可选 refItem 构造 Item 并 upsert，返回 id。
+     *  从 commitDraft 抽出来 — 也给批量提交用。 */
+    private suspend fun buildAndSaveItem(
+        draft: ItemDraft,
+        refItem: Item?,
+        status: ItemStatus,
+    ): String {
+        val now = System.currentTimeMillis()
+        val categoryId = draft.category?.takeIf { it.isNotBlank() } ?: "tech"
+        val builtIn = Category.entries.firstOrNull { it.id == categoryId }
+        val template = builtIn?.let { CategoryTemplates.forCategory(it) }
+        val palette = refItem?.palette ?: template?.palette
+            ?: listOf("#0e0e0e", "#a47836", "#e8e2d4", "#5a5a5a")
+        // Cycle 0034 v5：draft.heroVector 优先 — 用户在 Refine 里挑了
+        // 一张预制插画时，用它覆盖 refItem / template 的默认。
+        val heroVector = draft.heroVector
+            ?: refItem?.heroVector
+            ?: template?.heroVector
+            ?: HeroVector.GENERIC
+        val id = refItem?.id ?: makeId(categoryId, draft.brand, draft.model, now)
+        val acquired = readPurchaseField(draft, "入手日期")
+            .ifBlank { refItem?.acquired }
+            ?.ifBlank { LocalDate.now().toString() }
+            ?: LocalDate.now().toString()
+        // Cycle 0034 v5：commit 前先把 draft 上可能的"会话域 URI 字符串"正规
+        // 化到 draft-photos/<convo>/（materializeDraftPhotos 是幂等的）。然后
+        // migratePhotosToItemOwned 才能用 java.io.File(path) 直接打开。
+        val materialized = materializeDraftPhotos(draft)
+        val draftPhotosRaw = materialized.photos.ifEmpty { refItem?.photos ?: emptyList() }
+        val draftCropsRaw: Map<String, com.treasure.core.domain.PhotoCrop> =
+            if (materialized.photoCrops.isNotEmpty()) materialized.photoCrops
+            else refItem?.photoCrops ?: emptyMap()
+        val migrated = migratePhotosToItemOwned(
+            itemId = id,
+            draftPhotos = draftPhotosRaw,
+            draftAvatar = materialized.avatarPhotoPath ?: refItem?.avatarPhotoPath,
+            draftCrops = draftCropsRaw,
+        )
+        val item = Item(
+            id = id,
+            category = categoryId,
+            brand = draft.brand.trim(),
+            model = draft.model.trim(),
+            nickname = draft.nickname.trim(),
+            acquired = acquired,
+            parted = refItem?.parted,
+            status = status,
+            palette = palette,
+            oneLiner = draft.oneLiner.trim(),
+            heroVector = heroVector,
+            specs = draft.specs.filter { it.label.isNotBlank() || it.value.isNotBlank() },
+            history = draft.history.ifEmpty {
+                refItem?.history ?: listOf(HistoryEvent(acquired, HistoryKind.ACQUIRED, "购入", ""))
+            },
+            photos = migrated.photos,
+            avatarPhotoPath = migrated.avatar,
+            photoCrops = migrated.crops,
+            createdAt = refItem?.createdAt ?: now,
+            updatedAt = now,
+            sortOrder = refItem?.sortOrder ?: (repo.minSortOrder() - 1L),
+        )
+        repo.upsert(item)
+        return id
     }
 
     /** Used by the manual entry pop-up — same shape as cycle 0006. */

@@ -263,6 +263,12 @@ fun AddRoute(
                     },
                     onAddExistingItem = vm::addExistingItem,
                     onRemoveWorkingItem = vm::removeWorkingItem,
+                    onCommitAllPending = {
+                        vm.commitAllPendingWorkingItems { savedIds ->
+                            // 录入完跳到第一个新物品的 Detail；空就留在原地。
+                            savedIds.firstOrNull()?.let { onSaved(it) }
+                        }
+                    },
                 )
                 AddMode.Preview -> {
                     val cta = proposalCta
@@ -354,6 +360,9 @@ fun AddRoute(
                                     avatarPhotoPath = d.avatarPhotoPath?.takeIf { it != p },
                                 )
                             },
+                            onSelectHeroVector = { v ->
+                                proposalDraft = d.copy(heroVector = v, avatarPhotoPath = null)
+                            },
                             onPreviewProposalPhoto = { uris, idx ->
                                 photoPreview = ChatPhotoPreview(uris, idx.coerceIn(0, uris.lastIndex))
                             },
@@ -402,6 +411,7 @@ fun AddRoute(
                             },
                             onRemovePhoto = vm::removeDraftPhoto,
                             onSelectAvatar = vm::setDraftAvatar,
+                            onSelectHeroVector = vm::setDraftHeroVector,
                             onPreviewProposalPhoto = { uris, idx ->
                                 photoPreview = ChatPhotoPreview(uris, idx.coerceIn(0, uris.lastIndex))
                             },

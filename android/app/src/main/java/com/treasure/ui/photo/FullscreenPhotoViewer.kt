@@ -110,6 +110,9 @@ fun FullscreenPhotoViewer(
             ZoomableImageWithCallouts(
                 path = path,
                 callouts = pageCallouts,
+                // Cycle 0034 v5：默认预览直接显示裁剪后区域；要看原图 / 改 rect
+                // 走右上 "调整裁剪" 按钮。
+                crop = photoCrops[path],
                 onLongPressEmpty = { x, y -> addPending = PendingAdd(path, x, y) },
                 onLongPressPin = { idx ->
                     val c = pageCallouts.getOrNull(idx) ?: return@ZoomableImageWithCallouts
@@ -226,6 +229,7 @@ private data class PendingEdit(val path: String, val index: Int, val callout: Ph
 private fun ZoomableImageWithCallouts(
     path: String,
     callouts: List<PhotoCallout>,
+    crop: com.treasure.core.domain.PhotoCrop? = null,
     onLongPressEmpty: (xNorm: Float, yNorm: Float) -> Unit,
     onLongPressPin: (index: Int) -> Unit,
 ) {
@@ -297,12 +301,20 @@ private fun ZoomableImageWithCallouts(
                     translationY = offset.y
                 },
         ) {
-            AsyncImage(
-                model = path,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-            )
+            if (crop != null && !crop.isFullImage) {
+                com.treasure.ui.photo.CroppedPhoto(
+                    model = path,
+                    crop = crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                AsyncImage(
+                    model = path,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
         }
 
         // overlay callouts. Each pin gets its own pointer gesture so a
