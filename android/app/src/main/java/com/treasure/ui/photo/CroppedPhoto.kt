@@ -27,11 +27,19 @@ import com.treasure.core.domain.PhotoCrop
  *
  * crop 为 [PhotoCrop.Full]（或 null）时退化到普通 ContentScale.Crop。
  */
+enum class CroppedPhotoScale {
+    /** Fill the viewport with the crop region, clipping overflow (avatars / 小图). */
+    Crop,
+    /** Letterbox the crop region inside the viewport (fullscreen preview). */
+    Fit,
+}
+
 @Composable
 fun CroppedPhoto(
     model: Any?,
     crop: PhotoCrop?,
     modifier: Modifier = Modifier,
+    contentScale: CroppedPhotoScale = CroppedPhotoScale.Crop,
 ) {
     val effectiveCrop = crop ?: PhotoCrop.Full
     if (effectiveCrop.isFullImage) {
@@ -68,6 +76,7 @@ fun CroppedPhoto(
                 imgW = imgIntrinsicW.toFloat(),
                 imgH = imgIntrinsicH.toFloat(),
                 crop = effectiveCrop,
+                fill = contentScale == CroppedPhotoScale.Crop,
             )
         } else listOf(1f, 1f, 0f, 0f)
         AsyncImage(
@@ -105,12 +114,25 @@ fun CroppedPhoto(
  * ch*fitH)。把这个矩形拉伸到 (0, 0, viewportW, viewportH)：scale = viewport/
  * cropOnFit；translate = -cropTopLeft * scale。
  */
+/**
+ * Cycle 0034 v6：等比缩放版本 — 之前 sx / sy 各自取 viewport / cropSize，crop
+ * 区域和 viewport 长宽比不一样时就拉变形。这里改用统一 scale：
+ *
+ *  - [fill] = true（Crop 语义，给 avatar / 缩略图用）：scale = max，crop 区
+ *    域填满 viewport，多出来的那条边靠 clipToBounds 剪掉；
+ *  - [fill] = false（Fit 语义，给全屏预览用）：scale = min，crop 区域整体
+ *    letterbox 在 viewport 里。
+ *
+ * graphicsLayer 的变换是 `x' = scale * x + translation`（transformOrigin (0,0)）。
+ * 我们要的几何效果：把 fit-coords 下的 crop rect 整体送进 viewport，居中。
+ */
 private fun computeCropTransform(
     viewportW: Float,
     viewportH: Float,
     imgW: Float,
     imgH: Float,
     crop: PhotoCrop,
+    fill: Boolean,
 ): List<Float> {
     val imgAspect = imgW / imgH
     val viewportAspect = viewportW / viewportH
@@ -134,9 +156,10 @@ private fun computeCropTransform(
     val cropW = crop.w * fitW
     val cropH = crop.h * fitH
     if (cropW <= 0f || cropH <= 0f) return listOf(1f, 1f, 0f, 0f)
-    val sx = viewportW / cropW
-    val sy = viewportH / cropH
-    val tx = -cropX * sx
-    val ty = -cropY * sy
-    return listOf(sx, sy, tx, ty)
+    val sxRaw = viewportW / cropW
+    val syRaw = viewportH / cropH
+    val scale = if (fill) maxOf(sxRaw, syRaw) else minOf(sxRaw, syRaw)
+    val tx = -cropX * scale + (viewportW - cropW * scale) / 2f
+    val ty = -cropY * scale + (viewportH - cropH * scale) / 2f
+    return listOf(scale, scale, tx, ty)
 }

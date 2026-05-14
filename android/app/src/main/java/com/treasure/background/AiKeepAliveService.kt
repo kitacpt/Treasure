@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -35,7 +36,17 @@ class AiKeepAliveService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        // Cycle 0034 v6：Android 14+ 强制 startForeground 显式带 serviceType；
+        // 不传或值不匹配 manifest 里 declared 的会抛 SecurityException 并杀进程。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
         if (wakeLock == null) {
             val pm = getSystemService(POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(
@@ -43,9 +54,10 @@ class AiKeepAliveService : Service() {
                 "Treasure:ai-extract",
             ).apply {
                 setReferenceCounted(false)
-                // 上限 6 分钟，比 thinking 模型的 callTimeout (360s) 略大；
-                // 调用完成 stopService 会主动释放。
-                acquire(360_000L)
+                // Cycle 0034 v6：上限 10 分钟。thinking 模型的 callTimeout 是
+                // 360s，留出充足余量；用户主动 stop / 请求结束 stopService 会
+                // 主动 release。
+                acquire(600_000L)
             }
         }
         return START_NOT_STICKY
@@ -62,13 +74,21 @@ class AiKeepAliveService : Service() {
             val nm = getSystemService(NotificationManager::class.java)
             if (nm.getNotificationChannel(CHANNEL_ID) == null) {
                 nm.createNotificationChannel(
+                    // Cycle 0034 v6：importance 从 LOW 提到 DEFAULT。LOW 在
+                    // 部分 OEM（vivo iManager / 华为 Magic）下被视为"可忽略"，
+                    // 即便 startForeground 也可能不显示通知 → 系统当后台服务
+                    // 秒杀。DEFAULT 强制下拉栏显示一条状态行。
                     NotificationChannel(
                         CHANNEL_ID,
                         "AI 后台保活",
-                        NotificationManager.IMPORTANCE_LOW,
+                        NotificationManager.IMPORTANCE_DEFAULT,
                     ).apply {
                         description = "AI 调用期间显示一条小通知，避免熄屏被系统秒杀进程"
                         setShowBadge(false)
+                        // 不响铃 / 不震动 — 这只是个"我在干活"标记。
+                        setSound(null, null)
+                        enableVibration(false)
+                        enableLights(false)
                     },
                 )
             }
@@ -80,7 +100,10 @@ class AiKeepAliveService : Service() {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Treasure")
             .setContentText("正在和 AI 对话…")
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            // Cycle 0034 v6：PRIORITY_DEFAULT 跟 channel importance 对齐。
+            // foreground 服务在 vivo 上必须有"可见"通知才稳。
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOngoing(true)
             .setSilent(true)
             .build()

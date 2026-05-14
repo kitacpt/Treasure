@@ -302,10 +302,13 @@ private fun ZoomableImageWithCallouts(
                 },
         ) {
             if (crop != null && !crop.isFullImage) {
+                // Cycle 0034 v6：全屏预览用 Fit — 让裁剪区域整体可见，letterbox
+                // 不会"裁中再裁"。
                 com.treasure.ui.photo.CroppedPhoto(
                     model = path,
                     crop = crop,
                     modifier = Modifier.fillMaxSize(),
+                    contentScale = com.treasure.ui.photo.CroppedPhotoScale.Fit,
                 )
             } else {
                 AsyncImage(

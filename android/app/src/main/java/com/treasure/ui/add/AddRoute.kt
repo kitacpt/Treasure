@@ -100,6 +100,20 @@ fun AddRoute(
     // 拒绝直接收回 recorder。
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var recorder by remember { mutableStateOf<com.treasure.audio.VoiceRecorder?>(null) }
+    // Cycle 0034 v6：Android 13+ POST_NOTIFICATIONS — 前台保活 service 没这
+    // 个权限时通知不显示，部分 OEM (vivo iManager / 华为 Magic) 会把它当
+    // 普通后台进程秒杀。进入录入页时申请一次。
+    val notifPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { /* granted-or-not 都不阻塞用户；没拿到只是后台保活不那么稳 */ }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                ctx, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) notifPermLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val micPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
     ) { granted ->
