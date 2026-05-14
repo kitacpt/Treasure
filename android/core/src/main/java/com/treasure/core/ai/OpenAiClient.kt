@@ -86,9 +86,11 @@ class OpenAiClient(
         priorTurns: List<AiTurn>,
         workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
+        audioBytes: ByteArray?,
+        audioFormat: String,
     ): Result<List<DraftAction>> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = buildPayload(text, imagesJpegBytes, priorTurns, workingSet, categoryHints)
+            val payload = buildPayload(text, imagesJpegBytes, priorTurns, workingSet, categoryHints, audioBytes, audioFormat)
             val response = client.newCall(
                 Request.Builder()
                     .url(buildUrl())
@@ -127,6 +129,8 @@ class OpenAiClient(
         priorTurns: List<AiTurn>,
         workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
+        audio: ByteArray? = null,
+        audioFormat: String = "m4a",
     ): String {
         val toolSchema = json.parseToJsonElement(EXTRACT_TOOL_PARAMETERS).jsonObject
         val payload = buildJsonObject {
@@ -153,8 +157,8 @@ class OpenAiClient(
                 }
                 add(buildJsonObject {
                     put("role", "user")
-                    if (images.isNotEmpty()) {
-                        // OpenAI vision: array content with text + image_url blocks
+                    if (images.isNotEmpty() || audio != null) {
+                        // OpenAI multi-modal: array content with text + image_url + input_audio blocks
                         putJsonArray("content") {
                             add(buildJsonObject {
                                 put("type", "text")
@@ -167,6 +171,19 @@ class OpenAiClient(
                                     put("type", "image_url")
                                     putJsonObject("image_url") {
                                         put("url", "data:image/jpeg;base64,$b64")
+                                    }
+                                })
+                            }
+                            // Cycle 0034 v2：input_audio block — 仅 gpt-4o-audio-preview
+                            // 等 audio 模型支持；其他 chat 模型会返 400。format 直传
+                            // 录制时的容器名（m4a / wav / mp3）。
+                            audio?.let { bytes ->
+                                val b64 = Base64.getEncoder().encodeToString(bytes)
+                                add(buildJsonObject {
+                                    put("type", "input_audio")
+                                    putJsonObject("input_audio") {
+                                        put("data", b64)
+                                        put("format", audioFormat)
                                     }
                                 })
                             }

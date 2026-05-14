@@ -45,7 +45,15 @@ sealed interface AddConversationMessage {
     data class Assistant(override val id: String, val text: String, override val createdAt: Long) : AddConversationMessage
     data class User(override val id: String, val text: String, override val createdAt: Long) : AddConversationMessage
     data class UserPhoto(override val id: String, val uri: String, override val createdAt: Long) : AddConversationMessage
-    data class UserVoice(override val id: String, val text: String, val duration: String, override val createdAt: Long) : AddConversationMessage
+    /** Cycle 0034 v2：[audioPath] 是 file system 路径 — 用户长按录的原始 AAC/M4A，
+     *  历史会话回放靠它。[text] 旧版本可能装转写文本；新版本默认空。 */
+    data class UserVoice(
+        override val id: String,
+        val text: String,
+        val duration: String,
+        override val createdAt: Long,
+        val audioPath: String? = null,
+    ) : AddConversationMessage
     data class DraftCta(
         override val id: String,
         val draft: ItemDraft,
@@ -199,6 +207,7 @@ private fun ConversationMessageEntity.toDomain(json: Json): AddConversationMessa
     "user_photo" -> AddConversationMessage.UserPhoto(id, photoUri.orEmpty(), createdAt)
     "user_voice" -> AddConversationMessage.UserVoice(
         id, text.orEmpty(), voiceDuration.orEmpty().ifBlank { "0:04" }, createdAt,
+        audioPath = voicePath,
     )
     "draft_cta" -> {
         // Cycle 0024：DraftCta 的 status 复用 text 列存（"pending" / "accepted" /
@@ -266,6 +275,7 @@ private fun AddConversationMessage.toEntity(
         id = id, conversationId = conversationId, role = "user_voice",
         text = text, photoUri = null, voiceDuration = duration,
         draftJson = null, fieldCount = null, createdAt = createdAt,
+        voicePath = audioPath,
     )
     is AddConversationMessage.DraftCta -> ConversationMessageEntity(
         id = id, conversationId = conversationId, role = "draft_cta",

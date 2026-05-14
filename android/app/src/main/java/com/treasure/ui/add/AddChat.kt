@@ -12,6 +12,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -85,6 +87,7 @@ fun AddChat(
     onDeleteConversation: (String) -> Unit,
     onSendText: (String) -> Unit,
     onSendPhotos: (List<android.net.Uri>, String) -> Unit,
+    onStartVoice: () -> Unit,
     onGoSettings: () -> Unit,
     onPreviewPhoto: (android.net.Uri) -> Unit,
     onAcceptProposal: (String) -> Unit,
@@ -247,6 +250,7 @@ fun AddChat(
             },
             onStop = onStopExtract,
             onTakePhoto = ::launchPhotoFlow,
+            onStartVoice = onStartVoice,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .imePadding()
@@ -805,7 +809,11 @@ private fun MessageRow(
             uri = message.uri,
             onClick = { onPreviewPhoto(message.uri) },
         )
-        is AddMessage.UserVoice -> UserVoiceBubble(text = message.text, duration = message.duration)
+        is AddMessage.UserVoice -> UserVoiceBubble(
+            text = message.text,
+            duration = message.duration,
+            audioPath = message.audioPath,
+        )
         is AddMessage.DraftCta -> DraftCtaCard(
             message = message,
             onOpen = { onPreviewProposal(message) },
@@ -931,20 +939,39 @@ private fun UserPhotoBubble(uri: android.net.Uri, onClick: () -> Unit) {
 }
 
 @Composable
-private fun UserVoiceBubble(text: String, duration: String) {
+private fun UserVoiceBubble(text: String, duration: String, audioPath: String?) {
     val colors = LocalTreasureColors.current
+    // Cycle 0034 v2：bubble 点击 toggle 播放本地 m4a；播放中波形给彩色提示。
+    val player = com.treasure.audio.rememberVoicePlayer()
+    val playing = audioPath != null && player.playingPath == audioPath
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Column(
             modifier = Modifier
                 .widthIn(max = 280.dp)
                 .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomEnd = 4.dp, bottomStart = 14.dp))
                 .background(colors.ink)
+                .clickable(enabled = audioPath != null) { audioPath?.let { player.toggle(it) } }
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // 播放/暂停 icon
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(colors.paper.copy(alpha = if (playing) 1f else 0.7f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (playing) "❚❚" else "▶",
+                        color = colors.ink,
+                        fontSize = 10.sp,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
                 Waveform(
-                    color = colors.paper,
+                    color = if (playing) colors.terra.copy(alpha = 0.9f) else colors.paper,
                     bars = listOf(6, 9, 12, 7, 11, 5, 10, 13, 8, 6, 11, 9),
                     modifier = Modifier.height(14.dp),
                 )
@@ -955,15 +982,19 @@ private fun UserVoiceBubble(text: String, duration: String) {
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
-            Text(
-                text = "\"$text\"",
-                color = colors.paper.copy(alpha = 0.85f),
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontFamily = Cormorant,
-                    fontStyle = FontStyle.Italic,
-                    fontSize = 15.sp,
-                ),
-            )
+            // Cycle 0034 v2：text 仅在老消息（旧 STT 路径）非空时显示；新音频
+            // 流程是空字符串就不渲染这一行。
+            if (text.isNotBlank()) {
+                Text(
+                    text = "\"$text\"",
+                    color = colors.paper.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontFamily = Cormorant,
+                        fontStyle = FontStyle.Italic,
+                        fontSize = 15.sp,
+                    ),
+                )
+            }
         }
     }
 }
@@ -1278,6 +1309,8 @@ private fun Composer(
     onSend: () -> Unit,
     onStop: () -> Unit,
     onTakePhoto: () -> Unit,
+    /** Cycle 0034 v2：长按麦克风进入录音全屏页。 */
+    onStartVoice: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTreasureColors.current
@@ -1382,6 +1415,20 @@ private fun Composer(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+            Spacer(Modifier.width(8.dp))
+            // Cycle 0034 v2：麦克风键 — 长按进入全屏录音页。短按只是个 hint。
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .pointerInput(saved, busy) {
+                        detectTapGestures(
+                            onLongPress = {
+                                if (!saved && !busy) onStartVoice()
+                            },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) { MicGlyph(if (saved || busy) colors.sub.copy(alpha = 0.4f) else colors.sub) }
             Spacer(Modifier.width(8.dp))
             // Cycle 0031：发送键三态 —
             //   busy + 输入空：⬛ 停止键（terra 底 + paper 方块）→ 掐请求

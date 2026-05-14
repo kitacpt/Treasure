@@ -188,9 +188,20 @@ internal object Migrations {
         }
     }
 
+    /**
+     * Cycle 0034 v2：UserVoice 行存原始音频 file path（filesDir/voice-cache/
+     * <convo>/<uuid>.m4a）。voice_duration 列继续存"分:秒"字符串。重启 / 进
+     * 历史会话都能回放。
+     */
+    val MIGRATION_14_15 = object : Migration(14, 15) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `add_messages` ADD COLUMN `voice_path` TEXT")
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
         MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-        MIGRATION_13_14,
+        MIGRATION_13_14, MIGRATION_14_15,
     )
 }

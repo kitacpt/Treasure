@@ -49,7 +49,13 @@ sealed interface AddMessage {
     data class Assistant(val text: String) : AddMessage
     data class User(val text: String) : AddMessage
     data class UserPhoto(val uri: Uri, val caption: String = "1 张照片") : AddMessage
-    data class UserVoice(val text: String, val duration: String = "0:04") : AddMessage
+    data class UserVoice(
+        val text: String,
+        val duration: String = "0:04",
+        /** Cycle 0034 v2：本地音频文件路径 — 气泡点击播放 / VM 送给 AI 用。
+         *  老消息（cycle 0008-0033 转写流）audioPath = null，仅展示文本。 */
+        val audioPath: String? = null,
+    ) : AddMessage
 
     /**
      * Cycle 0024：一次 AI 提案。[id] 是数据库 row id；UI 上根据它 mutate
@@ -767,6 +773,21 @@ class AddViewModel(
     /** Cycle 0031 compat：单图 wrapper — 部分代码（旧 callsite）仍 sendPhoto。 */
     fun sendPhoto(uri: Uri, caption: String = "") = sendPhotos(listOf(uri), caption)
 
+    /** Cycle 0034 v2：用户长按麦克风录的音频。[audioPath] 是 m4a 完整路径
+     *  （已在 filesDir/voice-cache/<convo>/），duration 形如 "0:03"。把音频
+     *  字节作为 input_audio block 送给 AI；provider 不支持会返错 surface 出去。 */
+    fun sendVoiceAudio(audioPath: String, duration: String) {
+        if (_state.value.busy || audioPath.isBlank()) return
+        // text 字段留空 — 历史会话里把它视作 "（语音消息）"；不做转写。
+        appendMessage(AddMessage.UserVoice(text = "", duration = duration, audioPath = audioPath))
+        runExtract(
+            text = "（用户发了一段语音，时长 $duration，请直接听音内容回应）",
+            imageUris = emptyList(),
+            audioPath = audioPath,
+        )
+    }
+
+    /** Cycle 0008 兼容：旧 STT 路径（暂留供历史 callsite，新流不用）。 */
     fun sendVoice(transcript: String) {
         if (_state.value.busy) return
         val text = transcript.trim().ifBlank { "（无识别结果）" }
@@ -800,7 +821,7 @@ class AddViewModel(
     private fun runExtract(text: String, imageUri: Uri?) =
         runExtract(text = text, imageUris = listOfNotNull(imageUri))
 
-    private fun runExtract(text: String, imageUris: List<Uri>) {
+    private fun runExtract(text: String, imageUris: List<Uri>, audioPath: String? = null) {
         val app = getApplication<TreasureApp>()
         val client = app.aiClient()
         if (client == null) {
@@ -842,12 +863,20 @@ class AddViewModel(
             // Cycle 0032：构造工作集摘要喂给 AI。SAVED 行从 itemsRepo 拉真物
             // 品摘要；PENDING / MODIFIED 直接用 ConversationItem.draft 的字段。
             val workingSetSummary = buildWorkingSetSummary(_state.value.items)
+            // Cycle 0034 v2：把音频字节加载进来，作为 input_audio block 送 AI。
+            val audioBytes = audioPath?.let { path ->
+                runCatching {
+                    withContext(Dispatchers.IO) { java.io.File(path).readBytes() }
+                }.getOrNull()
+            }
             client.extractItemDrafts(
                 text = text,
                 imagesJpegBytes = bytesList,
                 priorTurns = priorTurns,
                 workingSet = workingSetSummary,
                 categoryHints = hints,
+                audioBytes = audioBytes,
+                audioFormat = "m4a",
             )
                 .onSuccess { actions ->
                     if (actions.isEmpty()) {
@@ -1526,7 +1555,10 @@ class AddViewModel(
             is AddMessage.Assistant -> AddConversationMessage.Assistant(id, msg.text, now)
             is AddMessage.User -> AddConversationMessage.User(id, msg.text, now)
             is AddMessage.UserPhoto -> AddConversationMessage.UserPhoto(id, msg.uri.toString(), now)
-            is AddMessage.UserVoice -> AddConversationMessage.UserVoice(id, msg.text, msg.duration, now)
+            is AddMessage.UserVoice -> AddConversationMessage.UserVoice(
+                id, msg.text, msg.duration, now,
+                audioPath = msg.audioPath,
+            )
             is AddMessage.DraftCta -> AddConversationMessage.DraftCta(
                 id = msg.id, // 保留 UI 已分配的 id，让后续 status 更新能找到同一行
                 draft = msg.draft,
@@ -1551,7 +1583,11 @@ class AddViewModel(
         is AddConversationMessage.Assistant -> AddMessage.Assistant(domain.text)
         is AddConversationMessage.User -> AddMessage.User(domain.text)
         is AddConversationMessage.UserPhoto -> AddMessage.UserPhoto(Uri.parse(domain.uri))
-        is AddConversationMessage.UserVoice -> AddMessage.UserVoice(domain.text, domain.duration)
+        is AddConversationMessage.UserVoice -> AddMessage.UserVoice(
+            text = domain.text,
+            duration = domain.duration,
+            audioPath = domain.audioPath,
+        )
         is AddConversationMessage.DraftCta -> AddMessage.DraftCta(
             id = domain.id,
             draft = domain.draft,

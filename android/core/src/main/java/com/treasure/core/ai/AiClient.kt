@@ -30,6 +30,10 @@ interface AiClient {
         priorTurns: List<AiTurn> = emptyList(),
         workingSet: List<WorkingItemSummary> = emptyList(),
         categoryHints: List<CategoryHint> = emptyList(),
+        /** Cycle 0034 v2：用户录的原始音频字节。null = 没附音频。
+         *  [audioFormat] = "m4a" / "wav" / "mp3"。Provider 接不接受随它，错就错。 */
+        audioBytes: ByteArray? = null,
+        audioFormat: String = "m4a",
     ): Result<List<DraftAction>>
 
     /** Cycle 0031：用户按 stop 时立刻掐掉正在飞的 HTTP 调用。impl 调

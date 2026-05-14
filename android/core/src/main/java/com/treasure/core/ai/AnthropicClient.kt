@@ -51,9 +51,11 @@ class AnthropicClient(
         priorTurns: List<AiTurn>,
         workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
+        audioBytes: ByteArray?,
+        audioFormat: String,
     ): Result<List<DraftAction>> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = buildPayload(text, imagesJpegBytes, priorTurns, workingSet, categoryHints)
+            val payload = buildPayload(text, imagesJpegBytes, priorTurns, workingSet, categoryHints, audioBytes, audioFormat)
             val response = client.newCall(
                 Request.Builder()
                     .url("$baseUrl/v1/messages")
@@ -80,6 +82,8 @@ class AnthropicClient(
         priorTurns: List<AiTurn>,
         workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
+        audio: ByteArray? = null,
+        audioFormat: String = "m4a",
     ): String {
         val toolSchema = json.parseToJsonElement(EXTRACT_TOOL_PARAMETERS).jsonObject
         val payload = buildJsonObject {
@@ -135,6 +139,21 @@ class AnthropicClient(
                                 putJsonObject("source") {
                                     put("type", "base64")
                                     put("media_type", "image/jpeg")
+                                    put("data", b64)
+                                }
+                            })
+                        }
+                        // Cycle 0034 v2：用户录的音频。Anthropic Messages API
+                        // 目前没"audio"块类型 — API 会以 400 返错（"unknown
+                        // content type"）。这是按用户要求："provider 不接受让
+                        // 它报错就行"。
+                        audio?.let { bytes ->
+                            val b64 = Base64.getEncoder().encodeToString(bytes)
+                            add(buildJsonObject {
+                                put("type", "audio")
+                                putJsonObject("source") {
+                                    put("type", "base64")
+                                    put("media_type", "audio/$audioFormat")
                                     put("data", b64)
                                 }
                             })

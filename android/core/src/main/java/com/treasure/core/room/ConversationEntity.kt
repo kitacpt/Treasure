@@ -42,4 +42,6 @@ internal data class ConversationMessageEntity(
     @ColumnInfo(name = "target_id") val targetId: String? = null,
     /** Cycle 0034：仅 draft_cta 用。AI 给的 photo_assignments 解析后 JSON。 */
     @ColumnInfo(name = "photo_assignments_json") val photoAssignmentsJson: String? = null,
+    /** Cycle 0034 v2：仅 user_voice 用。原始音频文件路径，重听 / 重发都靠它。 */
+    @ColumnInfo(name = "voice_path") val voicePath: String? = null,
 )

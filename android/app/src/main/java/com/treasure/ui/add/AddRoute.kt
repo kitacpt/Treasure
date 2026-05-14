@@ -85,6 +85,39 @@ fun AddRoute(
     ) { uri ->
         if (uri != null) cropSourceStr = uri.toString()
     }
+
+    // Cycle 0034 v2：录音入口 — 长按 Composer 麦克风进 RecordingOverlay。
+    // recorder 是 nullable，非 null 时显示 overlay；start()/stop()/cancel()
+    // 都在事件回调里就近做。permission 走 RECORD_AUDIO runtime 申请，
+    // 拒绝直接收回 recorder。
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var recorder by remember { mutableStateOf<com.treasure.audio.VoiceRecorder?>(null) }
+    val micPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            val convoId = vm.state.value.conversationId.ifBlank { return@rememberLauncherForActivityResult }
+            val dest = com.treasure.audio.VoiceRecorder.newFile(ctx, convoId)
+            val r = com.treasure.audio.VoiceRecorder(ctx, dest)
+            runCatching { r.start() }
+                .onSuccess { recorder = r }
+                .onFailure { /* 启动失败放弃 */ }
+        }
+    }
+    fun startVoice() {
+        if (recorder != null) return
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            ctx, android.Manifest.permission.RECORD_AUDIO,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        val convoId = vm.state.value.conversationId.ifBlank { return }
+        val dest = com.treasure.audio.VoiceRecorder.newFile(ctx, convoId)
+        val r = com.treasure.audio.VoiceRecorder(ctx, dest)
+        runCatching { r.start() }.onSuccess { recorder = r }
+    }
     // Cycle 0031：用户点 DraftCta 卡片进 proposal-preview。proposalCta 非 null
     // 时 AddPreview 渲染 cta.draft（用户可微改），trailing 改成 [采用]。
     var proposalCta by remember { mutableStateOf<AddMessage.DraftCta?>(null) }
@@ -167,6 +200,7 @@ fun AddRoute(
                     onDeleteConversation = vm::deleteConversation,
                     onSendText = vm::sendText,
                     onSendPhotos = vm::sendPhotos,
+                    onStartVoice = { startVoice() },
                     onGoSettings = onGoSettings,
                     onPreviewPhoto = { tapped ->
                         val all = state.messages
@@ -329,6 +363,18 @@ fun AddRoute(
                 callouts = emptyMap(),
                 onSetCallouts = { _, _ -> /* chat 图不存 callout */ },
                 onClose = { photoPreview = null },
+            )
+        }
+
+        // Cycle 0034 v2：录音全屏页 — 覆在最上面，长按麦克风进。
+        recorder?.let { r ->
+            RecordingOverlay(
+                recorder = r,
+                onCancel = { recorder = null },
+                onSend = { path, dur ->
+                    recorder = null
+                    vm.sendVoiceAudio(path, dur)
+                },
             )
         }
 
