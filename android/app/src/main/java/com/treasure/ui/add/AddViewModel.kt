@@ -65,6 +65,10 @@ sealed interface AddMessage {
          *  Modify = 修改 [targetCiId] 指向的工作集行。 */
         val actionKind: com.treasure.core.repo.DraftCtaActionKind = com.treasure.core.repo.DraftCtaActionKind.Create,
         val targetCiId: String? = null,
+        /** Cycle 0034：AI 给本卡分配的图。每条 (sourceUri, crop?, isAvatar)。
+         *  采用时按这个列表拷贝 / 裁剪到 draft.photos / avatarPhotoPath。
+         *  存在 Room 里（draft_json 同字段编码）让重启后采用仍能找到原图。 */
+        val photoAssignments: List<ResolvedPhotoAssignment> = emptyList(),
     ) : AddMessage
 
     /** Cycle 0024：用户已"采用"某次 AI 提案后留下的草稿快照行。
@@ -90,6 +94,9 @@ sealed interface AddMessage {
 }
 
 enum class NoteTone { Info, Working, Success, Warning, Error }
+
+/** Cycle 0034：UI 这边复用 core repo 的 [com.treasure.core.repo.ResolvedPhotoAssignment]。 */
+typealias ResolvedPhotoAssignment = com.treasure.core.repo.ResolvedPhotoAssignment
 
 data class FakeConversation(
     val id: String,
@@ -151,6 +158,10 @@ class AddViewModel(
     // coroutine + OkHttp client 都要 cancel 才彻底断。
     private var currentExtractJob: kotlinx.coroutines.Job? = null
     private var currentClient: com.treasure.core.ai.AiClient? = null
+    // Cycle 0034：最近一轮 user-turn 发出的 photo URIs（持久化后的 file://）。
+    // AI 返回的 photo_assignments 里 source_index 就对应这里的下标。Accept 一
+    // 张 cta 卡时按 index 抄到 draft.photos。
+    private var lastTurnPhotoUris: List<android.net.Uri> = emptyList()
 
     /** Cycle 0031：用户在思考态点 [⬛] 停止 — 只 cancel OkHttp 不 cancel
      *  coroutine。OkHttp 抛 IOException("Canceled") → runCatching 捕获 →
@@ -732,26 +743,29 @@ class AddViewModel(
         链接"。
     """.trimIndent()
 
-    /** Cycle 0031：发图也允许带一句文字描述（旧 sendPhoto 只发图）。如果
-     *  caption 空就退回老逻辑的占位提示文案。 */
-    fun sendPhoto(uri: Uri, caption: String = "") {
-        // Cycle 0031 redesign：会话不再封存。
-        if (_state.value.busy) return
+    /** Cycle 0034：一次发多张图。每张分别 persist 到 conversation-photos，
+     *  作为单独 UserPhoto 消息入库；source_index 对应 photos 顺序，供 AI 在
+     *  photo_assignments 里引用。 */
+    fun sendPhotos(uris: List<Uri>, caption: String = "") {
+        if (_state.value.busy || uris.isEmpty()) return
         val app = getApplication<TreasureApp>()
         viewModelScope.launch {
-            // Cycle 0031：copy picker 的 content:// 到 filesDir，picker 的 URI
-            // 离开当前 Activity 就失效（没拿 takePersistableUriPermission），
-            // 写到 Room 里再读回来全是白板。
             val persisted = withContext(Dispatchers.IO) {
-                runCatching { persistChatPhoto(app, uri) }.getOrNull() ?: uri
+                uris.map { u -> runCatching { persistChatPhoto(app, u) }.getOrNull() ?: u }
             }
-            appendMessage(AddMessage.UserPhoto(persisted))
+            persisted.forEach { appendMessage(AddMessage.UserPhoto(it)) }
             val trimmed = caption.trim()
             if (trimmed.isNotEmpty()) appendMessage(AddMessage.User(trimmed))
-            val effectiveText = trimmed.ifBlank { "（用户附了一张照片，请识别）" }
-            runExtract(text = effectiveText, imageUri = persisted)
+            val effectiveText = trimmed.ifBlank {
+                if (persisted.size == 1) "（用户附了一张照片，请识别）"
+                else "（用户附了 ${persisted.size} 张照片，请按物品逐张分配 / 按需切 crop）"
+            }
+            runExtract(text = effectiveText, imageUris = persisted)
         }
     }
+
+    /** Cycle 0031 compat：单图 wrapper — 部分代码（旧 callsite）仍 sendPhoto。 */
+    fun sendPhoto(uri: Uri, caption: String = "") = sendPhotos(listOf(uri), caption)
 
     fun sendVoice(transcript: String) {
         if (_state.value.busy) return
@@ -783,7 +797,10 @@ class AddViewModel(
         )
     }
 
-    private fun runExtract(text: String, imageUri: Uri?) {
+    private fun runExtract(text: String, imageUri: Uri?) =
+        runExtract(text = text, imageUris = listOfNotNull(imageUri))
+
+    private fun runExtract(text: String, imageUris: List<Uri>) {
         val app = getApplication<TreasureApp>()
         val client = app.aiClient()
         if (client == null) {
@@ -810,17 +827,24 @@ class AddViewModel(
             val hints = categoryRepo.loadAll()
                 .filter { !it.hidden }
                 .map { com.treasure.core.ai.CategoryHint(it.id, it.nameZh, it.nameEn) }
-            val bytes = imageUri?.let { uri ->
+            // Cycle 0034：一组 jpegs，按 source_index 顺序压缩。AI 据
+            // photo_assignments 把对应 index 的图分配给草稿。
+            val bytesList = imageUris.mapNotNull { uri ->
                 runCatching {
                     withContext(Dispatchers.IO) { compressForAi(app, uri) }
                 }.getOrNull()
             }
+            // Cycle 0034：记下这一轮 user-turn 的 photo 集（按持久化后的 Uri
+            // 顺序），accept 时按 source_index 反查。这个 state 只活在本次
+            // VM 内存，不入 Room — 用户重启应用前还没 accept，那批 photo 索
+            // 引就丢了；按 cycle 0034 设计，这是可接受的。
+            lastTurnPhotoUris = imageUris
             // Cycle 0032：构造工作集摘要喂给 AI。SAVED 行从 itemsRepo 拉真物
             // 品摘要；PENDING / MODIFIED 直接用 ConversationItem.draft 的字段。
             val workingSetSummary = buildWorkingSetSummary(_state.value.items)
             client.extractItemDrafts(
                 text = text,
-                imageJpegBytes = bytes,
+                imagesJpegBytes = bytesList,
                 priorTurns = priorTurns,
                 workingSet = workingSetSummary,
                 categoryHints = hints,
@@ -847,7 +871,23 @@ class AddViewModel(
                     // 看完整草稿、不喜欢就直接拒，未确认的不污染工作集。
                     val assistantText = buildAssistantSummary(actions)
                     val assistant = AddMessage.Assistant(assistantText)
+                    // Cycle 0034：resolve photo_assignments — 把 source_index
+                    // 反查到 lastTurnPhotoUris 拿到本地 file:// path。AI 给出
+                    // 的 crop 已是归一化 0..1 矩形；UI / accept 时直接拿。
+                    val turnUris = lastTurnPhotoUris
                     val ctas = actions.map { a ->
+                        val resolved = a.photoAssignments.mapNotNull { pa ->
+                            val srcUri = turnUris.getOrNull(pa.sourceIndex) ?: return@mapNotNull null
+                            val crop = pa.crop
+                            com.treasure.core.repo.ResolvedPhotoAssignment(
+                                sourceUri = srcUri.toString(),
+                                cropX = crop?.x ?: 0f,
+                                cropY = crop?.y ?: 0f,
+                                cropW = crop?.w ?: 1f,
+                                cropH = crop?.h ?: 1f,
+                                isAvatar = pa.setAsAvatar,
+                            )
+                        }
                         AddMessage.DraftCta(
                             id = UUID.randomUUID().toString(),
                             draft = a.draft,
@@ -862,6 +902,7 @@ class AddViewModel(
                             targetCiId = a.targetId.takeIf {
                                 a.kind == com.treasure.core.ai.ActionKind.MODIFY
                             },
+                            photoAssignments = resolved,
                         )
                     }
                     // 会话标题：以最近一条 create action 的 brand+model 命名（modify
@@ -1066,6 +1107,11 @@ class AddViewModel(
     ) {
         val convoId = _state.value.conversationId.ifBlank { return }
         val now = System.currentTimeMillis()
+        // Cycle 0034：先把 AI 分配的图按 crop 抄到 filesDir/draft-photos/<convo>/，
+        // 拿到本端 file:// 路径，merge 进 draft.photos / avatarPhotoPath。这步
+        // 在 upsertItem 之前做完，让落到工作集的就是终态。
+        val draftWithPhotos = if (cta.photoAssignments.isEmpty()) draft
+        else applyPhotoAssignmentsToDraft(draft, cta.photoAssignments)
         val existing = conversations.loadItems(convoId).associateBy { it.id }
         val target = cta.targetCiId?.let { existing[it] }
         if (cta.actionKind == com.treasure.core.repo.DraftCtaActionKind.Modify && target != null) {
@@ -1078,7 +1124,7 @@ class AddViewModel(
                     com.treasure.core.repo.ConversationItemStatus.PENDING
             }
             conversations.upsertItem(
-                target.copy(draft = draft, status = newStatus, updatedAt = now),
+                target.copy(draft = draftWithPhotos, status = newStatus, updatedAt = now),
             )
         } else {
             val order = conversations.nextSortOrder(convoId)
@@ -1086,7 +1132,7 @@ class AddViewModel(
                 com.treasure.core.repo.ConversationItem(
                     id = UUID.randomUUID().toString(),
                     conversationId = convoId,
-                    draft = draft,
+                    draft = draftWithPhotos,
                     itemRef = null,
                     status = com.treasure.core.repo.ConversationItemStatus.PENDING,
                     sortOrder = order,
@@ -1095,6 +1141,87 @@ class AddViewModel(
                 ),
             )
         }
+    }
+
+    /**
+     * Cycle 0034：把已 resolve 的 photo 分配应用到 draft。
+     *  - 每条分配解码 sourceUri，按归一化 crop 切出子 bitmap，落 jpg 到
+     *    filesDir/draft-photos/<convoId>/<uuid>.jpg
+     *  - append 到 draft.photos
+     *  - 第一条 isAvatar=true 的设为 draft.avatarPhotoPath
+     */
+    private suspend fun applyPhotoAssignmentsToDraft(
+        draft: ItemDraft,
+        assignments: List<com.treasure.core.repo.ResolvedPhotoAssignment>,
+    ): ItemDraft = withContext(Dispatchers.IO) {
+        val convoId = _state.value.conversationId.ifBlank { return@withContext draft }
+        val app = getApplication<TreasureApp>()
+        val dir = java.io.File(app.filesDir, "draft-photos/$convoId").apply { mkdirs() }
+        val addedPhotos = mutableListOf<String>()
+        var newAvatar: String? = null
+        for (a in assignments) {
+            val savedPath = runCatching {
+                val src = app.contentResolver.openInputStream(android.net.Uri.parse(a.sourceUri))?.use {
+                    android.graphics.BitmapFactory.decodeStream(it)
+                } ?: return@runCatching null
+                val w = src.width
+                val h = src.height
+                val left = (a.cropX * w).toInt().coerceIn(0, w - 1)
+                val top = (a.cropY * h).toInt().coerceIn(0, h - 1)
+                val right = ((a.cropX + a.cropW) * w).toInt().coerceIn(left + 1, w)
+                val bottom = ((a.cropY + a.cropH) * h).toInt().coerceIn(top + 1, h)
+                val cropped = android.graphics.Bitmap.createBitmap(src, left, top, right - left, bottom - top)
+                if (cropped !== src) src.recycle()
+                val dest = java.io.File(dir, "${UUID.randomUUID()}.jpg")
+                dest.outputStream().use { out ->
+                    cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, out)
+                }
+                cropped.recycle()
+                if (dest.exists() && dest.length() > 0) dest.absolutePath else null
+            }.getOrNull() ?: continue
+            addedPhotos += savedPath
+            if (a.isAvatar && newAvatar == null) newAvatar = savedPath
+        }
+        draft.copy(
+            photos = draft.photos + addedPhotos,
+            avatarPhotoPath = newAvatar ?: draft.avatarPhotoPath,
+        )
+    }
+
+    /**
+     * Cycle 0034：commit 时把会话域路径下的图复制到 photos/<itemId>/，
+     * 让物品的影集独立于会话。已经在 photos/<itemId>/ 下面的（MODIFY 物品
+     * 原 photos）原样保留。返回新的 (photos, avatar) 列表 / 路径。
+     *
+     * 不删源文件 — 会话删除时一并清理（暂未实现），或留在磁盘做软备份。
+     */
+    private suspend fun migratePhotosToItemOwned(
+        itemId: String,
+        draftPhotos: List<String>,
+        draftAvatar: String?,
+    ): Pair<List<String>, String?> = withContext(Dispatchers.IO) {
+        val app = getApplication<TreasureApp>()
+        val targetDir = java.io.File(app.filesDir, "photos/$itemId").apply { mkdirs() }
+        val targetPath = targetDir.absolutePath + java.io.File.separator
+        val mapping = mutableMapOf<String, String>()
+        for (src in draftPhotos) {
+            if (src.startsWith(targetPath)) {
+                mapping[src] = src // 已经是 item-owned
+                continue
+            }
+            val srcFile = java.io.File(src)
+            if (!srcFile.exists() || srcFile.length() == 0L) continue
+            val dest = java.io.File(targetDir, "${UUID.randomUUID()}.jpg")
+            runCatching {
+                srcFile.inputStream().use { input ->
+                    dest.outputStream().use { out -> input.copyTo(out) }
+                }
+            }
+            if (dest.exists() && dest.length() > 0L) mapping[src] = dest.absolutePath
+        }
+        val migratedPhotos = draftPhotos.mapNotNull { mapping[it] }
+        val migratedAvatar = draftAvatar?.let { mapping[it] ?: if (it.startsWith(targetPath)) it else null }
+        migratedPhotos to migratedAvatar
     }
 
     /** Cycle 0031：草稿页历史时间轴整段替换。AddPreview 加 / 改 / 删一行
@@ -1282,6 +1409,16 @@ class AddViewModel(
                 .ifBlank { refItem?.acquired }
                 ?.ifBlank { LocalDate.now().toString() }
                 ?: LocalDate.now().toString()
+            // Cycle 0034：commit 时把 draft 影集里所有"会话域"路径（conversation-
+            // photos / draft-photos）COPY 到 photos/<itemId>/，让它们脱离会话
+            // 寿命独立存在 — 用户删除会话不再丢图。已在 photos/<itemId>/ 下
+            // 的（MODIFY 情况下从原 item 继承的）原样保留。
+            val draftPhotosRaw = draft.photos.ifEmpty { refItem?.photos ?: emptyList() }
+            val (itemPhotos, itemAvatar) = migratePhotosToItemOwned(
+                itemId = id,
+                draftPhotos = draftPhotosRaw,
+                draftAvatar = draft.avatarPhotoPath ?: refItem?.avatarPhotoPath,
+            )
             val item = Item(
                 id = id,
                 category = categoryId,
@@ -1300,11 +1437,8 @@ class AddViewModel(
                 history = draft.history.ifEmpty {
                     refItem?.history ?: listOf(HistoryEvent(acquired, HistoryKind.ACQUIRED, "购入", ""))
                 },
-                // Cycle 0033：草稿阶段就能管影集 — commit 时 draft.photos
-                // 优先（用户在 Refine 里挑 / 拍 / 删的就是最终态）；MODIFY 进
-                // 来若用户没动 photos，draft.photos 已经预填了原 item.photos。
-                photos = draft.photos.ifEmpty { refItem?.photos ?: emptyList() },
-                avatarPhotoPath = draft.avatarPhotoPath ?: refItem?.avatarPhotoPath,
+                photos = itemPhotos,
+                avatarPhotoPath = itemAvatar,
                 createdAt = refItem?.createdAt ?: now,
                 updatedAt = now,
                 // Cycle 0033：新物品 sortOrder = 当前最小 - 1 → 默认浮到图鉴
@@ -1401,6 +1535,7 @@ class AddViewModel(
                 createdAt = now,
                 actionKind = msg.actionKind,
                 targetCiId = msg.targetCiId,
+                photoAssignments = msg.photoAssignments,
             )
             is AddMessage.DraftConfirmed -> AddConversationMessage.DraftConfirmed(
                 id = msg.id, draft = msg.draft, fieldCount = msg.fieldCount, createdAt = now,
@@ -1424,6 +1559,7 @@ class AddViewModel(
             status = domain.status,
             actionKind = domain.actionKind,
             targetCiId = domain.targetCiId,
+            photoAssignments = domain.photoAssignments,
         )
         is AddConversationMessage.DraftConfirmed -> AddMessage.DraftConfirmed(
             id = domain.id, draft = domain.draft, fieldCount = domain.fieldCount,
@@ -1447,6 +1583,7 @@ class AddViewModel(
                 createdAt = now,
                 actionKind = cta.actionKind,
                 targetCiId = cta.targetCiId,
+                photoAssignments = cta.photoAssignments,
             ),
         )
     }
@@ -1466,6 +1603,7 @@ class AddViewModel(
                 createdAt = now,
                 actionKind = cta.actionKind,
                 targetCiId = cta.targetCiId,
+                photoAssignments = cta.photoAssignments,
             ),
         )
         conversations.upsert(

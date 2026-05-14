@@ -84,7 +84,7 @@ fun AddChat(
     onRenameConversation: (id: String, newTitle: String) -> Unit,
     onDeleteConversation: (String) -> Unit,
     onSendText: (String) -> Unit,
-    onSendPhoto: (android.net.Uri, String) -> Unit,
+    onSendPhotos: (List<android.net.Uri>, String) -> Unit,
     onGoSettings: () -> Unit,
     onPreviewPhoto: (android.net.Uri) -> Unit,
     onAcceptProposal: (String) -> Unit,
@@ -114,12 +114,13 @@ fun AddChat(
         }
     }
 
-    // Cycle 0031：选了图先暂存到 pendingPhoto，跟下一次文字发送一起带过去。
-    // 之前是 picker 一回调直接 onSendPhoto，用户没法配文字。
-    var pendingPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
+    // Cycle 0034：可一次挑多张图作为同一轮 user-turn 的附件 — AI 在系统提示
+    // 的 [ATTACHED PHOTOS] 里看到 N 张，分配给具体物品的影集。pendingPhotos
+    // 暂存到 send 时一并发送；用户可再点一次 + 追加；每张缩略图有 ✕ 删除。
+    var pendingPhotos by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
     val pickPhoto = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-    ) { uri -> if (uri != null) pendingPhoto = uri }
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 9),
+    ) { uris -> if (uris.isNotEmpty()) pendingPhotos = pendingPhotos + uris }
 
     val photoPermission = rememberPhotoPermissionName()
     val photoPermLauncher = rememberLauncherForActivityResult(
@@ -232,18 +233,17 @@ fun AddChat(
             onInputChange = { input = it },
             busy = state.busy,
             saved = state.saved,
-            pendingPhoto = pendingPhoto,
-            onClearPendingPhoto = { pendingPhoto = null },
+            pendingPhotos = pendingPhotos,
+            onRemovePending = { uri -> pendingPhotos = pendingPhotos - uri },
             onSend = {
-                val photoToSend = pendingPhoto
-                if (photoToSend != null) {
-                    // 图片 + 文字一起送给 AI。caption 可空。
-                    onSendPhoto(photoToSend, input)
+                if (pendingPhotos.isNotEmpty()) {
+                    // 一组图片 + 一段文字一起送给 AI；AI 据图分配给物品影集。
+                    onSendPhotos(pendingPhotos, input)
                 } else {
                     onSendText(input)
                 }
                 input = ""
-                pendingPhoto = null
+                pendingPhotos = emptyList()
             },
             onStop = onStopExtract,
             onTakePhoto = ::launchPhotoFlow,
@@ -1071,6 +1071,59 @@ private fun DraftCtaCard(
                 Text(text = "→", color = colors.ink, style = MaterialTheme.typography.bodyLarge)
             }
         }
+        // Cycle 0034：AI 给这张卡分了哪些图 — 缩略图条让用户在采用前看一眼
+        // 是否分配正确。⭐ 标 avatar；crop 比例 != 整图时角落带一个剪刀提示。
+        if (message.photoAssignments.isNotEmpty()) {
+            androidx.compose.foundation.lazy.LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(message.photoAssignments.size) { idx ->
+                    val pa = message.photoAssignments[idx]
+                    val cropped = pa.cropW < 0.999f || pa.cropH < 0.999f ||
+                        pa.cropX > 0.001f || pa.cropY > 0.001f
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(colors.paper)
+                            .border(0.5.dp, colors.line, RoundedCornerShape(6.dp)),
+                    ) {
+                        AsyncImage(
+                            model = pa.sourceUri,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                        if (pa.isAvatar) {
+                            Text(
+                                text = "★",
+                                color = colors.terra,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(2.dp),
+                            )
+                        }
+                        if (cropped) {
+                            Text(
+                                text = "✂",
+                                color = colors.paper,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(2.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(colors.ink.copy(alpha = 0.6f))
+                                    .padding(horizontal = 3.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
         if (isPending) {
             // 采用 / 不要 按钮：右下角，与 cycle 0021 起的 footer 一致风格
             Row(
@@ -1220,8 +1273,8 @@ private fun Composer(
     onInputChange: (String) -> Unit,
     busy: Boolean,
     saved: Boolean,
-    pendingPhoto: android.net.Uri?,
-    onClearPendingPhoto: () -> Unit,
+    pendingPhotos: List<android.net.Uri>,
+    onRemovePending: (android.net.Uri) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     onTakePhoto: () -> Unit,
@@ -1236,48 +1289,50 @@ private fun Composer(
             .border(0.5.dp, colors.line, RoundedCornerShape(22.dp))
             .padding(horizontal = 14.dp, vertical = 7.dp),
     ) {
-        // Cycle 0031：pending 图预览条 — 用户选完图先在这呆着，跟文字一起发。
-        // 64dp 圆角缩略图 + 右上 × 取消。
-        if (pendingPhoto != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        // Cycle 0034：pending photos strip — 多张图横滑预览，单张右上 × 删。
+        // 用户可再点 📷 追加更多。AI 见到 N 张图后会按 source_index 分配给草稿。
+        if (pendingPhotos.isNotEmpty()) {
+            Column(modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp, bottom = 6.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(colors.paper)
-                        .border(0.5.dp, colors.line, RoundedCornerShape(8.dp)),
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    coil.compose.AsyncImage(
-                        model = pendingPhoto,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    )
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(2.dp)
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(colors.ink.copy(alpha = 0.75f))
-                            .clickable(onClick = onClearPendingPhoto),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "✕",
-                            color = colors.paper,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                    items(pendingPhotos.size) { idx ->
+                        val uri = pendingPhotos[idx]
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.paper)
+                                .border(0.5.dp, colors.line, RoundedCornerShape(8.dp)),
+                        ) {
+                            coil.compose.AsyncImage(
+                                model = uri,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(2.dp)
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.ink.copy(alpha = 0.75f))
+                                    .clickable { onRemovePending(uri) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("✕", color = colors.paper, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
                     }
                 }
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "可以配一句话一起发",
+                    text = if (pendingPhotos.size == 1) "可以配一句话一起发" else "${pendingPhotos.size} 张图 · 可再加 📷 / 配一句话一起发",
                     color = colors.sub,
                     style = MaterialTheme.typography.labelSmall,
                     fontStyle = FontStyle.Italic,
@@ -1305,7 +1360,7 @@ private fun Composer(
                     Text(
                         text = when {
                             saved -> "会话已封存 · 已收入图鉴"
-                            pendingPhoto != null -> "配一句话…（可留空）"
+                            pendingPhotos.isNotEmpty() -> "配一句话…（可留空）"
                             else -> "说说这件东西…"
                         },
                         color = colors.sub.copy(alpha = if (saved) 0.5f else 1f),
@@ -1334,7 +1389,7 @@ private fun Composer(
             //   非 busy：箭头键，有内容才点亮（ink 底）
             // saved 模式 disable 整个 composer（外层已 disable 文本框、加号、
             // 这里也要禁用）。
-            val hasContent = input.isNotBlank() || pendingPhoto != null
+            val hasContent = input.isNotBlank() || pendingPhotos.isNotEmpty()
             when {
                 saved -> {
                     Box(

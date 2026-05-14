@@ -21,6 +21,22 @@ enum class DraftCtaStatus { Pending, Accepted, Rejected }
 /** Cycle 0032：一张 DraftCta 卡片对应的 action — 新增 or 修改某行。 */
 enum class DraftCtaActionKind { Create, Modify }
 
+/**
+ * Cycle 0034：AI 给 DraftCta 卡片做的图分配，已 resolve 到本地 file path。
+ * source_index 已查表换成 sourceUri（filesDir/conversation-photos/<uuid>.jpg）。
+ * crop = (x, y, w, h) 归一化矩形；整图就是 (0,0,1,1)。一个卡片里最多一条
+ * [isAvatar]=true，会被 commit 时设为物品头像。
+ */
+@kotlinx.serialization.Serializable
+data class ResolvedPhotoAssignment(
+    val sourceUri: String,
+    val cropX: Float = 0f,
+    val cropY: Float = 0f,
+    val cropW: Float = 1f,
+    val cropH: Float = 1f,
+    val isAvatar: Boolean = false,
+)
+
 /** 录入页对话的领域级 message —— 对应 UI 层 AddMessage。 */
 sealed interface AddConversationMessage {
     val id: String
@@ -40,6 +56,9 @@ sealed interface AddConversationMessage {
          *  conversation_items 行（[targetCiId] 指向它）。 */
         val actionKind: DraftCtaActionKind = DraftCtaActionKind.Create,
         val targetCiId: String? = null,
+        /** Cycle 0034：AI 给本卡分配的图（已 resolve source_index → 本地 path）。
+         *  采用时按这个列表拷贝 / 裁剪到 draft.photos / avatarPhotoPath。 */
+        val photoAssignments: List<ResolvedPhotoAssignment> = emptyList(),
     ) : AddConversationMessage
     /** Cycle 0024：用户 "采用" 后写下的快照，等价于"这一刻起，会话草稿是这样"。 */
     data class DraftConfirmed(
@@ -197,10 +216,20 @@ private fun ConversationMessageEntity.toDomain(json: Json): AddConversationMessa
             "modify" -> DraftCtaActionKind.Modify
             else -> DraftCtaActionKind.Create
         }
+        // Cycle 0034：解析 JSON 列里的 photoAssignments；老行（v13 前）NULL → []。
+        val assignments: List<ResolvedPhotoAssignment> = photoAssignmentsJson?.let {
+            runCatching {
+                json.decodeFromString(
+                    kotlinx.serialization.builtins.ListSerializer(ResolvedPhotoAssignment.serializer()),
+                    it,
+                )
+            }.getOrNull()
+        }.orEmpty()
         AddConversationMessage.DraftCta(
             id, draft, fieldCount ?: 0, status, createdAt,
             actionKind = kind,
             targetCiId = targetId,
+            photoAssignments = assignments,
         )
     }
     "draft_confirmed" -> {
@@ -249,6 +278,11 @@ private fun AddConversationMessage.toEntity(
             DraftCtaActionKind.Modify -> "modify"
         },
         targetId = targetCiId,
+        photoAssignmentsJson = if (photoAssignments.isEmpty()) null
+        else json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(ResolvedPhotoAssignment.serializer()),
+            photoAssignments,
+        ),
     )
     is AddConversationMessage.DraftConfirmed -> ConversationMessageEntity(
         id = id, conversationId = conversationId, role = "draft_confirmed",

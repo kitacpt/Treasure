@@ -40,6 +40,30 @@ ones. Treat the working-set entry's current state as the baseline; apply the use
 on top; return the full result. Specs and history entries already present should remain unless
 the user contradicted them.
 
+═══ PHOTO ASSIGNMENTS (cycle 0034) ═══
+
+The user may attach photos in their turn. The system prompt's [ATTACHED PHOTOS] block (when
+present) tells you how many photos are in this turn, by 0-based index. You can attribute photos
+to draft items via `photo_assignments` on each action:
+
+  - Each assignment: {source_index: int, crop?: {x, y, w, h}, set_as_avatar?: bool}
+    - source_index: which of the user's photos this assignment refers to (0-based).
+    - crop (optional): a normalized sub-region of that photo (x,y,w,h all in [0..1]). Omit to
+      use the whole image. Use crop when ONE photo shows MULTIPLE items and you need to
+      isolate this item's portion (e.g. four rackets in a row → x=0.0,y=0,w=0.25,h=1 for the
+      leftmost).
+    - set_as_avatar: at most ONE assignment in a single action should have this true; that
+      crop becomes the item's avatar / list-card image. The rest just go into its album.
+
+When the user shows 4 items in 1 photo, return 4 create actions, each with one photo_assignment
+having a `crop` for its quarter and set_as_avatar=true.
+
+When the user shows 4 items in 4 photos, return 4 create actions, each with one assignment
+{source_index: i, set_as_avatar: true} (no crop needed).
+
+If you can't tell which photo belongs to which item, leave photo_assignments empty — the user
+will adjust manually. Don't guess wildly; an empty assignment is better than a wrong one.
+
 ═══ FIELD RULES (apply to every action's `draft`) ═══
 
 Categories — pick exactly one of:
@@ -97,6 +121,7 @@ internal fun buildSystemWithWorkingSet(
     workingSet: List<WorkingItemSummary>,
     json: kotlinx.serialization.json.Json,
     categoryHints: List<CategoryHint> = emptyList(),
+    attachedPhotoCount: Int = 0,
 ): String {
     val sb = StringBuilder(SYSTEM_PROMPT)
     if (categoryHints.isNotEmpty()) {
@@ -107,6 +132,9 @@ internal fun buildSystemWithWorkingSet(
         categoryHints.forEach { (id, zh, en) ->
             sb.append("  $id  ($zh${if (en.isNotBlank()) " / $en" else ""})\n")
         }
+    }
+    if (attachedPhotoCount > 0) {
+        sb.append("\n\n[ATTACHED PHOTOS — the user attached $attachedPhotoCount photo(s) in this turn, indexed 0..${attachedPhotoCount - 1}. Use photo_assignments on each action to attribute photos / sub-regions to items.]")
     }
     sb.append("\n\n[CONVERSATION WORKING SET — items already in this session. Each line has an `id` you can target with `modify`. ")
     if (workingSet.isEmpty()) {
@@ -153,6 +181,35 @@ internal val EXTRACT_TOOL_PARAMETERS: String = """
           "target_id": {
             "type": "string",
             "description": "Required when kind=modify. Must be one of the ids in the [CONVERSATION WORKING SET] block of the system prompt."
+          },
+          "photo_assignments": {
+            "type": "array",
+            "description": "Cycle 0034: attribute user-attached photos to this item. Empty when user didn't attach photos, or you can't tell which photo goes where.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source_index": {
+                  "type": "integer",
+                  "description": "0-based index of the photo in the user's current turn (see [ATTACHED PHOTOS])."
+                },
+                "crop": {
+                  "type": "object",
+                  "description": "Optional normalized sub-region. Use when one photo shows multiple items.",
+                  "properties": {
+                    "x": { "type": "number", "description": "0..1 from image left" },
+                    "y": { "type": "number", "description": "0..1 from image top" },
+                    "w": { "type": "number", "description": "0..1 width" },
+                    "h": { "type": "number", "description": "0..1 height" }
+                  },
+                  "required": ["x", "y", "w", "h"]
+                },
+                "set_as_avatar": {
+                  "type": "boolean",
+                  "description": "True for at most ONE assignment in this action — that crop becomes the item's avatar."
+                }
+              },
+              "required": ["source_index"]
+            }
           },
           "draft": {
             "type": "object",

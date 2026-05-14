@@ -166,7 +166,7 @@ fun AddRoute(
                     onRenameConversation = vm::renameConversation,
                     onDeleteConversation = vm::deleteConversation,
                     onSendText = vm::sendText,
-                    onSendPhoto = vm::sendPhoto,
+                    onSendPhotos = vm::sendPhotos,
                     onGoSettings = onGoSettings,
                     onPreviewPhoto = { tapped ->
                         val all = state.messages

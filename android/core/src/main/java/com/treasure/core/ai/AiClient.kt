@@ -26,7 +26,7 @@ interface AiClient {
      */
     suspend fun extractItemDrafts(
         text: String,
-        imageJpegBytes: ByteArray? = null,
+        imagesJpegBytes: List<ByteArray> = emptyList(),
         priorTurns: List<AiTurn> = emptyList(),
         workingSet: List<WorkingItemSummary> = emptyList(),
         categoryHints: List<CategoryHint> = emptyList(),
@@ -52,6 +52,37 @@ data class DraftAction(
     val kind: ActionKind,
     @SerialName("target_id") val targetId: String? = null,
     val draft: ItemDraft,
+    /**
+     * Cycle 0034：用户在本轮 user-turn 里发了几张图，AI 据此把每张图（或一
+     * 张图里的一块）分配给具体物品的影集 — 一张图也能切到不同物品（比如
+     * 用户发了 1 张 "桌面 4 件器材合照"，AI 给每件分一个 crop rect）。
+     *
+     * 空列表 = AI 没作图片分配，commit 时 draft.photos 沿用现有逻辑。
+     */
+    @SerialName("photo_assignments") val photoAssignments: List<PhotoAssignment> = emptyList(),
+)
+
+/**
+ * Cycle 0034：AI 把用户发的某张图（按 source_index）分配给当前 draft，
+ * 可选 [crop] 指定该图内子区域。[setAsAvatar] = true 表示这张（裁剪后的）
+ * 子图当物品头像。一个 action 内最多一个 set_as_avatar=true。
+ *
+ * 索引 source_index 对应本轮 user-turn 里 photos 数组的位置（0-based）。
+ */
+@Serializable
+data class PhotoAssignment(
+    @SerialName("source_index") val sourceIndex: Int,
+    val crop: NormalizedRect? = null,
+    @SerialName("set_as_avatar") val setAsAvatar: Boolean = false,
+)
+
+/** [x, y, w, h] 都是 0..1 的归一化坐标，相对原图。整图 = (0,0,1,1)。 */
+@Serializable
+data class NormalizedRect(
+    val x: Float,
+    val y: Float,
+    val w: Float,
+    val h: Float,
 )
 
 @Serializable

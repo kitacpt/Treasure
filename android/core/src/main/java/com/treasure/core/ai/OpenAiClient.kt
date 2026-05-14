@@ -82,13 +82,13 @@ class OpenAiClient(
 
     override suspend fun extractItemDrafts(
         text: String,
-        imageJpegBytes: ByteArray?,
+        imagesJpegBytes: List<ByteArray>,
         priorTurns: List<AiTurn>,
         workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
     ): Result<List<DraftAction>> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = buildPayload(text, imageJpegBytes, priorTurns, workingSet, categoryHints)
+            val payload = buildPayload(text, imagesJpegBytes, priorTurns, workingSet, categoryHints)
             val response = client.newCall(
                 Request.Builder()
                     .url(buildUrl())
@@ -123,7 +123,7 @@ class OpenAiClient(
 
     private fun buildPayload(
         text: String,
-        image: ByteArray?,
+        images: List<ByteArray>,
         priorTurns: List<AiTurn>,
         workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
@@ -143,7 +143,7 @@ class OpenAiClient(
             putJsonArray("messages") {
                 add(buildJsonObject {
                     put("role", "system")
-                    put("content", buildSystemWithWorkingSet(workingSet, json, categoryHints))
+                    put("content", buildSystemWithWorkingSet(workingSet, json, categoryHints, images.size))
                 })
                 priorTurns.forEach { turn ->
                     add(buildJsonObject {
@@ -153,20 +153,23 @@ class OpenAiClient(
                 }
                 add(buildJsonObject {
                     put("role", "user")
-                    if (image != null) {
+                    if (images.isNotEmpty()) {
                         // OpenAI vision: array content with text + image_url blocks
                         putJsonArray("content") {
                             add(buildJsonObject {
                                 put("type", "text")
                                 put("text", "User description:\n\n$text")
                             })
-                            val b64 = Base64.getEncoder().encodeToString(image)
-                            add(buildJsonObject {
-                                put("type", "image_url")
-                                putJsonObject("image_url") {
-                                    put("url", "data:image/jpeg;base64,$b64")
-                                }
-                            })
+                            // Cycle 0034：多张图按 source_index 顺序送入
+                            images.forEach { img ->
+                                val b64 = Base64.getEncoder().encodeToString(img)
+                                add(buildJsonObject {
+                                    put("type", "image_url")
+                                    putJsonObject("image_url") {
+                                        put("url", "data:image/jpeg;base64,$b64")
+                                    }
+                                })
+                            }
                         }
                     } else {
                         put("content", "User description:\n\n$text")

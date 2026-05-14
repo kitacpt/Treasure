@@ -40,4 +40,6 @@ internal data class ConversationMessageEntity(
     @ColumnInfo(name = "action_kind") val actionKind: String? = null,
     /** Cycle 0032：modify 行指向的 conversation_items.id；create 行 NULL。 */
     @ColumnInfo(name = "target_id") val targetId: String? = null,
+    /** Cycle 0034：仅 draft_cta 用。AI 给的 photo_assignments 解析后 JSON。 */
+    @ColumnInfo(name = "photo_assignments_json") val photoAssignmentsJson: String? = null,
 )

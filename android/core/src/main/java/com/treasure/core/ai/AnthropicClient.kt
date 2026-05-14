@@ -47,13 +47,13 @@ class AnthropicClient(
 
     override suspend fun extractItemDrafts(
         text: String,
-        imageJpegBytes: ByteArray?,
+        imagesJpegBytes: List<ByteArray>,
         priorTurns: List<AiTurn>,
         workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
     ): Result<List<DraftAction>> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = buildPayload(text, imageJpegBytes, priorTurns, workingSet, categoryHints)
+            val payload = buildPayload(text, imagesJpegBytes, priorTurns, workingSet, categoryHints)
             val response = client.newCall(
                 Request.Builder()
                     .url("$baseUrl/v1/messages")
@@ -76,7 +76,7 @@ class AnthropicClient(
 
     private fun buildPayload(
         text: String,
-        image: ByteArray?,
+        images: List<ByteArray>,
         priorTurns: List<AiTurn>,
         workingSet: List<WorkingItemSummary>,
         categoryHints: List<CategoryHint>,
@@ -87,7 +87,7 @@ class AnthropicClient(
             // Cycle 0032：多 action 时 tool call 体积变大（4 件物品 × 8 specs
             // ≈ 700 token）；max_tokens 上调一档，留 4096 给 thinking。
             put("max_tokens", if (thinkingEnabled) 8192 else 4096)
-            put("system", buildSystemWithWorkingSet(workingSet, json, categoryHints))
+            put("system", buildSystemWithWorkingSet(workingSet, json, categoryHints, images.size))
             temperature?.let { put("temperature", it) }
             if (thinkingEnabled) {
                 putJsonObject("thinking") {
@@ -126,8 +126,10 @@ class AnthropicClient(
                 add(buildJsonObject {
                     put("role", "user")
                     putJsonArray("content") {
-                        if (image != null) {
-                            val b64 = Base64.getEncoder().encodeToString(image)
+                        // Cycle 0034：多张图作为独立 image block 按顺序送入，
+                        // 顺序 = photo_assignments 里 source_index 的顺序。
+                        images.forEach { img ->
+                            val b64 = Base64.getEncoder().encodeToString(img)
                             add(buildJsonObject {
                                 put("type", "image")
                                 putJsonObject("source") {

@@ -177,8 +177,20 @@ internal object Migrations {
         }
     }
 
+    /**
+     * Cycle 0034：DraftCta 行存 AI 给出的 photo_assignments — 每张已解析为
+     * `(sourceUri, crop, isAvatar)`。一段 JSON 串落到 add_messages 新列里，
+     * 让用户重启后还能采用某张卡（包括把图拷贝到 draft 影集）。
+     */
+    val MIGRATION_13_14 = object : Migration(13, 14) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `add_messages` ADD COLUMN `photo_assignments_json` TEXT")
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
         MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
+        MIGRATION_13_14,
     )
 }
