@@ -660,7 +660,11 @@ private fun ItemCard(
                 }
             }
             .zIndex(if (isDragging) 1f else 0f)
-            .pointerInput(selecting) {
+            // Cycle 0034 v8：编辑态下，combinedClickable 如果同时挂 onLongClick
+            // 会先于 detectDragGesturesAfterLongPress 把长按事件吃掉 — 结果
+            // "长按拖" 永远进不去 drag 模式。selecting 下让出 onLongClick，把
+            // 长按完全交给 drag detector；只 onClick 用来切换选中。
+            .pointerInput(selecting, item.id) {
                 if (selecting) {
                     detectDragGesturesAfterLongPress(
                         onDragStart = { dragState?.start(item.id) },
@@ -670,7 +674,10 @@ private fun ItemCard(
                     )
                 }
             }
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = if (selecting) null else onLongPress,
+            ),
     ) {
         // Square hero plate
         Box(

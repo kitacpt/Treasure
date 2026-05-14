@@ -84,6 +84,13 @@ fun AddRoute(
     var editCropInitial by remember {
         mutableStateOf<com.treasure.core.domain.PhotoCrop?>(null)
     }
+    // Cycle 0034 v8：picker → CropScreen 后落到哪个 draft —
+    //   "confirmed" = vm.confirmedDraft (Manual Refine)
+    //   "proposal"  = local proposalDraft (proposal-preview)
+    // 进 picker 前就设好；onConfirm 时 dispatch。
+    var cropTargetDraft by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf("confirmed")
+    }
     val cropScope = androidx.compose.runtime.rememberCoroutineScope()
     // Cycle 0033 v2：picker launcher hoist 到 AddRoute 顶部 — 之前嵌在
     // `when (mode) AddMode.Preview -> else { ... }` 里，mode 切换会让 launcher
@@ -317,23 +324,25 @@ fun AddRoute(
                                     }.toMap()
                                 val assignmentAvatar = ass.firstOrNull { it.isAvatar }?.sourceUri
 
-                                // Cycle 0034 v7：MODIFY 卡的 cta.draft 只是 AI
-                                // 的增量；如果 target 是 SAVED 工作集行，先把它
-                                // merge 到对应 Item 的 baseline 上，才不会把已有
-                                // 影集 / specs / history "覆盖成空白"。CREATE 卡
-                                // 没 baseline，直接用 cta.draft。
+                                // Cycle 0034 v7+v8：MODIFY 卡的 cta.draft 只是
+                                // AI 的增量。把它 merge 到 baseline 上（SAVED
+                                // 用底下的 Item；PENDING/MODIFIED 用工作集行自
+                                // 己的 draft），影集 / specs / history 不丢。
+                                // CREATE 卡没 baseline，直接用 cta.draft。
                                 val targetCi = cta.targetCiId?.let { id ->
                                     state.items.firstOrNull { it.id == id }
                                 }
                                 val refItem = targetCi?.itemRef?.let { ref ->
                                     runCatching { app.repository.observeById(ref).first() }.getOrNull()
                                 }
-                                val mergedDraft = if (
-                                    refItem != null &&
-                                    cta.actionKind == com.treasure.core.repo.DraftCtaActionKind.Modify
-                                ) {
-                                    vm.mergeDraftOntoItem(cta.draft, refItem)
-                                } else cta.draft
+                                val mergedDraft = when {
+                                    cta.actionKind != com.treasure.core.repo.DraftCtaActionKind.Modify ->
+                                        cta.draft
+                                    refItem != null -> vm.mergeDraftOntoItem(cta.draft, refItem)
+                                    targetCi?.draft != null ->
+                                        vm.mergeDraftOntoDraft(cta.draft, targetCi.draft!!)
+                                    else -> cta.draft
+                                }
 
                                 // photo_assignments 在 merged 之上 append（不覆盖
                                 // 已有 photos）。avatar：assignment 给的优先 →
@@ -408,6 +417,27 @@ fun AddRoute(
                             onSelectHeroVector = { v ->
                                 proposalDraft = d.copy(heroVector = v, avatarPhotoPath = null)
                             },
+                            // Cycle 0034 v8：proposal-preview 也开"+ 添加照片"
+                            // 跟拍照入口 — 跟 Manual Refine 完全同样的交互。
+                            // picker 选完图后走 CropScreen，确认后写入 proposalDraft。
+                            // cropTargetDraft 这个 saveable flag 是为了让 picker
+                            // 跨 ON_PAUSE 也能记住"该往哪个 draft 写"。
+                            onPickPhoto = {
+                                cropTargetDraft = "proposal"
+                                pickPhotoLauncher.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                    ),
+                                )
+                            },
+                            onTakePhoto = {
+                                cropTargetDraft = "proposal"
+                                pickPhotoLauncher.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                    ),
+                                )
+                            },
                             onPreviewProposalPhoto = { uris, idx ->
                                 photoPreview = ChatPhotoPreview(uris, idx.coerceIn(0, uris.lastIndex))
                             },
@@ -439,6 +469,7 @@ fun AddRoute(
                                 }
                             },
                             onPickPhoto = {
+                                cropTargetDraft = "confirmed"
                                 pickPhotoLauncher.launch(
                                     androidx.activity.result.PickVisualMediaRequest(
                                         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
@@ -448,6 +479,7 @@ fun AddRoute(
                             // 拍照按钮先复用 picker（系统 picker 在多数厂商
                             // 上已含拍照入口）；专用相机 launcher 留给后续 cycle。
                             onTakePhoto = {
+                                cropTargetDraft = "confirmed"
                                 pickPhotoLauncher.launch(
                                     androidx.activity.result.PickVisualMediaRequest(
                                         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
@@ -512,8 +544,28 @@ fun AddRoute(
                 source = src,
                 onCancel = { cropSourceStr = null },
                 onConfirm = { rect ->
+                    val target = cropTargetDraft
                     cropScope.launch {
-                        vm.persistDraftPhoto(src, rect)
+                        if (target == "proposal") {
+                            // Cycle 0034 v8：proposal-preview 加图 — 落到本地
+                            // proposalDraft；不动 vm.confirmedDraft。
+                            val savedPath = vm.saveDraftPhotoFile(src) ?: return@launch
+                            val newCrop = com.treasure.core.domain.PhotoCrop(
+                                x = rect.left, y = rect.top,
+                                w = rect.right - rect.left,
+                                h = rect.bottom - rect.top,
+                            )
+                            val cur = proposalDraft ?: return@launch
+                            proposalDraft = cur.copy(
+                                photos = cur.photos + savedPath,
+                                photoCrops = if (newCrop.isFullImage) cur.photoCrops
+                                    else cur.photoCrops + (savedPath to newCrop),
+                                // 第一张加进来的就作为头像（用户没自己挑过的话）
+                                avatarPhotoPath = cur.avatarPhotoPath ?: savedPath,
+                            )
+                        } else {
+                            vm.persistDraftPhoto(src, rect)
+                        }
                     }
                     cropSourceStr = null
                 },

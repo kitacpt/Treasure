@@ -1149,58 +1149,8 @@ private fun DraftCtaCard(
                 Text(text = "→", color = colors.ink, style = MaterialTheme.typography.bodyLarge)
             }
         }
-        // Cycle 0034：AI 给这张卡分了哪些图 — 缩略图条让用户在采用前看一眼
-        // 是否分配正确。⭐ 标 avatar；crop 比例 != 整图时角落带一个剪刀提示。
-        if (message.photoAssignments.isNotEmpty()) {
-            androidx.compose.foundation.lazy.LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                items(message.photoAssignments.size) { idx ->
-                    val pa = message.photoAssignments[idx]
-                    val cropped = pa.cropW < 0.999f || pa.cropH < 0.999f ||
-                        pa.cropX > 0.001f || pa.cropY > 0.001f
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(colors.paper)
-                            .border(0.5.dp, colors.line, RoundedCornerShape(6.dp)),
-                    ) {
-                        // Cycle 0034 v4：缩略图直接显示 crop 后的区域；不再用
-                        // ✂ 角标 — 用户能直接看到 AI 给的裁剪结果。
-                        if (cropped) {
-                            com.treasure.ui.photo.CroppedPhoto(
-                                model = pa.sourceUri,
-                                crop = com.treasure.core.domain.PhotoCrop(
-                                    x = pa.cropX, y = pa.cropY, w = pa.cropW, h = pa.cropH,
-                                ),
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else {
-                            AsyncImage(
-                                model = pa.sourceUri,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                            )
-                        }
-                        if (pa.isAvatar) {
-                            Text(
-                                text = "★",
-                                color = colors.terra,
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(2.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        // Cycle 0034 v8：卡片不再展示影集缩略图条 — 影集管理留给 Proposal
+        // 预览页（点卡片进入），跟 Refine 页用同一套 HeroAvatarPicker。
         if (isPending) {
             // Cycle 0034 v7：按钮三态 — [不要] (灰) / [保存草稿] (terra 12% 底)
             // / [直接录入] (terra 实底，强调"一锤子录入")

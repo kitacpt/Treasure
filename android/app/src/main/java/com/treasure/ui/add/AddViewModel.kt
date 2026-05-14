@@ -1065,16 +1065,22 @@ class AddViewModel(
         }
     }
 
-    /** Cycle 0034 v7：直接从卡片采用时，把 cta.draft 在必要时 merge 到 baseline。 */
+    /** Cycle 0034 v7：直接从卡片采用时，把 cta.draft 在必要时 merge 到 baseline。
+     *  Cycle 0034 v8：baseline 可能是 SAVED 行下的 Item，也可能是 PENDING /
+     *  MODIFIED 工作集行的 draft。两种 case 都走对应的 merge。 */
     private suspend fun mergeForDirectAccept(cta: AddMessage.DraftCta): ItemDraft {
         if (cta.actionKind != com.treasure.core.repo.DraftCtaActionKind.Modify) return cta.draft
         val targetCi = cta.targetCiId?.let { id ->
             _state.value.items.firstOrNull { it.id == id }
         } ?: return cta.draft
+        // SAVED → 用 itemRef 对应的 Item 当 baseline
         val refItem = targetCi.itemRef?.let { ref ->
             runCatching { repo.observeById(ref).first() }.getOrNull()
-        } ?: return cta.draft
-        return mergeDraftOntoItem(cta.draft, refItem)
+        }
+        if (refItem != null) return mergeDraftOntoItem(cta.draft, refItem)
+        // PENDING / MODIFIED → 用工作集行本身的 draft 当 baseline
+        val baseDraft = targetCi.draft ?: return cta.draft
+        return mergeDraftOntoDraft(cta.draft, baseDraft)
     }
 
     /**
@@ -1511,6 +1517,32 @@ class AddViewModel(
      *  这条逻辑修复 cycle 0034 v6 的"MODIFY 后影集消失"bug：AI 默认只发增量，
      *  之前代码直接拿 cta.draft 当全量用，photos / specs / history 都被清空。
      */
+    /** Cycle 0034 v8：[mergeDraftOntoItem] 的 draft-baseline 版本 — MODIFY
+     *  cta 目标可能是 PENDING / MODIFIED 工作集行（itemRef 为空，只有 draft
+     *  baseline）。同样合并语义，photos / photoCrops / avatarPhotoPath 全
+     *  来自 base.draft 不变。 */
+    internal fun mergeDraftOntoDraft(diff: ItemDraft, base: ItemDraft): ItemDraft {
+        val diffSpecsByLabel = diff.specs.filter { it.label.isNotBlank() }.associateBy { it.label }
+        val mergedSpecs = base.specs.map { existing ->
+            diffSpecsByLabel[existing.label] ?: existing
+        } + diff.specs.filter { d ->
+            d.label.isNotBlank() && d.label !in base.specs.map { it.label }
+        }
+        return ItemDraft(
+            category = diff.category?.takeIf { it.isNotBlank() } ?: base.category,
+            brand = diff.brand.ifBlank { base.brand },
+            model = diff.model.ifBlank { base.model },
+            nickname = diff.nickname.ifBlank { base.nickname },
+            oneLiner = diff.oneLiner.ifBlank { base.oneLiner },
+            specs = mergedSpecs,
+            history = base.history + diff.history,
+            photos = base.photos,
+            photoCrops = base.photoCrops,
+            avatarPhotoPath = base.avatarPhotoPath,
+            heroVector = diff.heroVector ?: base.heroVector,
+        )
+    }
+
     internal fun mergeDraftOntoItem(diff: ItemDraft, base: Item): ItemDraft {
         val diffSpecsByLabel = diff.specs.filter { it.label.isNotBlank() }.associateBy { it.label }
         val mergedSpecs = base.specs.map { existing ->
@@ -1585,31 +1617,55 @@ class AddViewModel(
     suspend fun persistDraftPhoto(
         sourceUri: Uri,
         cropRect: androidx.compose.ui.geometry.Rect? = null,
-    ): String? = withContext(Dispatchers.IO) {
+    ): String? {
+        // Cycle 0034 v4：保留原图字节，crop 落到 draft.photoCrops；非破坏式。
+        val savedPath = saveDraftPhotoFile(sourceUri) ?: return null
+        addDraftPhoto(savedPath)
+        if (cropRect != null) {
+            val rect = com.treasure.core.domain.PhotoCrop(
+                x = cropRect.left, y = cropRect.top,
+                w = cropRect.right - cropRect.left,
+                h = cropRect.bottom - cropRect.top,
+            )
+            if (!rect.isFullImage) setDraftPhotoCrop(savedPath, rect)
+        }
+        return savedPath
+    }
+
+    /**
+     * Cycle 0034 v8：纯 I/O — 把 sourceUri 的完整字节流复制一份到
+     * filesDir/draft-photos/<convo>/<uuid>.jpg，返回新文件绝对路径。
+     * **不修改任何 state**。Manual Refine 用 [persistDraftPhoto] 走 state 写
+     * 路径；proposal-preview 这边自己管 proposalDraft，调这个拿到 path 后
+     * 直接合进本地 state。原图字节保留，crop 由调用方在自己 state 里记录。
+     */
+    suspend fun saveDraftPhotoFile(sourceUri: Uri): String? = withContext(Dispatchers.IO) {
         val convoId = _state.value.conversationId.ifBlank { return@withContext null }
         val app = getApplication<TreasureApp>()
         val dir = java.io.File(app.filesDir, "draft-photos/$convoId").apply { mkdirs() }
         val dest = java.io.File(dir, "${UUID.randomUUID()}.jpg")
         runCatching {
-            val bitmap = app.contentResolver.openInputStream(sourceUri)?.use {
-                android.graphics.BitmapFactory.decodeStream(it)
-            } ?: return@runCatching null
-            val final = if (cropRect != null) {
-                val w = bitmap.width
-                val h = bitmap.height
-                val left = (cropRect.left * w).toInt().coerceIn(0, w - 1)
-                val top = (cropRect.top * h).toInt().coerceIn(0, h - 1)
-                val right = (cropRect.right * w).toInt().coerceIn(left + 1, w)
-                val bottom = (cropRect.bottom * h).toInt().coerceIn(top + 1, h)
-                android.graphics.Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
-                    .also { if (it !== bitmap) bitmap.recycle() }
-            } else bitmap
-            dest.outputStream().use { out ->
-                final.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, out)
+            val resolver = app.contentResolver
+            // 先按 file:// path 试 — 拷文件比解码再编码快得多。
+            val srcUri = sourceUri
+            if ("file".equals(srcUri.scheme, ignoreCase = true)) {
+                val p = srcUri.path
+                if (!p.isNullOrBlank()) {
+                    val f = java.io.File(p)
+                    if (f.exists() && f.length() > 0L) {
+                        f.inputStream().use { input ->
+                            dest.outputStream().use { out -> input.copyTo(out) }
+                        }
+                        return@runCatching dest.absolutePath.takeIf { dest.length() > 0L }
+                    }
+                }
             }
-            final.recycle()
-            dest.absolutePath
-        }.getOrNull()?.also { addDraftPhoto(it) }
+            // content:// 之类：流式拷贝
+            resolver.openInputStream(srcUri)?.use { input ->
+                dest.outputStream().use { out -> input.copyTo(out) }
+            } ?: return@runCatching null
+            if (dest.exists() && dest.length() > 0L) dest.absolutePath else null
+        }.getOrNull()
     }
 
     /** Cycle 0031：Draft 编辑实时保存 — 500ms debounce 后把当前 confirmedDraft
@@ -1974,7 +2030,12 @@ class AddViewModel(
                 is AddMessage.Assistant -> AiTurn(AiRole.ASSISTANT, msg.text)
                 is AddMessage.User -> AiTurn(AiRole.USER, msg.text)
                 is AddMessage.UserVoice -> AiTurn(AiRole.USER, "（语音）${msg.text}")
-                is AddMessage.UserPhoto -> null // 图片单独走 image block，不放到上下文里
+                // Cycle 0034 v8：明确确认 — 历史轮次的 UserPhoto 不再当 image
+                // block 重传给 AI。每张图只在它原本附在的那条 user-turn 里走
+                // 一次（runExtract.imageUris），后续 turns 一律拿不到。AI 哪
+                // 一轮如果还想"看"那张图，需要自己在 priorTurns 的文字里记忆
+                // （它通常会在 oneLiner / specs 里浓缩描述）。
+                is AddMessage.UserPhoto -> null
                 is AddMessage.DraftCta -> AiTurn(
                     AiRole.ASSISTANT,
                     when (msg.status) {
