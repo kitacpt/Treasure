@@ -497,7 +497,9 @@ private fun HeroSpecsTable(item: Item) {
 // ─── Drawer (read-only) ─────────────────────────────────────────────────────
 
 private enum class DrawerTab(val label: String) {
-    History("历史"), Specs("参数"), Album("影集")
+    // Cycle 0034 v9：参数排前面、历史挪到中间。展示一件物品最常需要的"长什么样"
+    // = 参数；历史是次频；影集是看图。
+    Specs("参数"), History("历史"), Album("影集")
 }
 
 @Composable
@@ -728,21 +730,12 @@ private fun SpecsList(item: Item) {
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp),
     ) {
+        // Cycle 0034 v9：展示页参数表只用单一条细分隔，hero / tail 视觉上
+        // 不再用 terra 横线切开（编辑页保留那条线，让用户知道哪 4 条是 hero）。
         visible.forEachIndexed { idx, spec ->
             SpecRow(spec.label, spec.value)
             if (idx != visible.lastIndex) {
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(colors.line))
-            }
-            // Subtle hairline after the hero set so users know what's "promoted"
-            if (idx == Item.HERO_SPEC_COUNT - 1 && idx != visible.lastIndex) {
-                Spacer(Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(0.5.dp)
-                        .background(colors.terra.copy(alpha = 0.4f)),
-                )
-                Spacer(Modifier.height(8.dp))
             }
         }
         Spacer(Modifier.height(40.dp))

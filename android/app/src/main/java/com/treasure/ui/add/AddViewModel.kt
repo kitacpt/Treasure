@@ -928,6 +928,15 @@ class AddViewModel(
                     // 反查到 lastTurnPhotoUris 拿到本地 file:// path。AI 给出
                     // 的 crop 已是归一化 0..1 矩形；UI / accept 时直接拿。
                     val turnUris = lastTurnPhotoUris
+                    // Cycle 0034 v9：MODIFY 的 cta.draft 在这儿就和 baseline 合
+                    // 并，存"合并后"的完整 draft 到卡上。这样卡片标题 / 字段数
+                    // / 影集 都直接显示"修改后是什么样" — 跟用户的口径一致。
+                    // 下游 (acceptProposal / acceptAndCommit / proposal-preview)
+                    // 拿到的 cta.draft 都已经是 full state，不用再 merge。
+                    val workingItems = _state.value.items
+                    val itemMap = runCatching { repo.items.first() }
+                        .getOrDefault(emptyList())
+                        .associateBy { it.id }
                     val ctas = actions.map { a ->
                         val resolved = a.photoAssignments.mapNotNull { pa ->
                             val srcUri = turnUris.getOrNull(pa.sourceIndex) ?: return@mapNotNull null
@@ -941,10 +950,21 @@ class AddViewModel(
                                 isAvatar = pa.setAsAvatar,
                             )
                         }
+                        val mergedDraft = if (a.kind == com.treasure.core.ai.ActionKind.MODIFY &&
+                            !a.targetId.isNullOrBlank()) {
+                            val ci = workingItems.firstOrNull { it.id == a.targetId }
+                            val refItem = ci?.itemRef?.let { itemMap[it] }
+                            val baseDraft = ci?.draft
+                            when {
+                                refItem != null -> mergeDraftOntoItem(a.draft, refItem)
+                                baseDraft != null -> mergeDraftOntoDraft(a.draft, baseDraft)
+                                else -> a.draft
+                            }
+                        } else a.draft
                         AddMessage.DraftCta(
                             id = UUID.randomUUID().toString(),
-                            draft = a.draft,
-                            fieldCount = fieldCount(a.draft),
+                            draft = mergedDraft,
+                            fieldCount = fieldCount(mergedDraft),
                             status = DraftCtaStatus.Pending,
                             actionKind = when (a.kind) {
                                 com.treasure.core.ai.ActionKind.CREATE ->
@@ -1056,31 +1076,10 @@ class AddViewModel(
                 it is AddMessage.DraftCta && it.id == ctaId
             } as AddMessage.DraftCta?
             accepted?.let { upsertCtaStatus(it) }
-            // Cycle 0034 v7：直接从卡片采用（没走 preview），MODIFY 卡的
-            // cta.draft 是 AI 的 delta。如果 target 是 SAVED 工作集行，先把
-            // delta merge 到原 Item，再 upsert，影集 / specs / history 才不会
-            // 被清空。CREATE 卡照常直接用 cta.draft。
-            val mergedDraft = mergeForDirectAccept(cta)
-            applyAcceptedCta(cta, mergedDraft)
+            // Cycle 0034 v9：cta.draft 已经是合并后的 full state（runExtract 阶
+            // 段就 merge 过）— 这儿不用再合并，直接 apply。
+            applyAcceptedCta(cta, cta.draft)
         }
-    }
-
-    /** Cycle 0034 v7：直接从卡片采用时，把 cta.draft 在必要时 merge 到 baseline。
-     *  Cycle 0034 v8：baseline 可能是 SAVED 行下的 Item，也可能是 PENDING /
-     *  MODIFIED 工作集行的 draft。两种 case 都走对应的 merge。 */
-    private suspend fun mergeForDirectAccept(cta: AddMessage.DraftCta): ItemDraft {
-        if (cta.actionKind != com.treasure.core.repo.DraftCtaActionKind.Modify) return cta.draft
-        val targetCi = cta.targetCiId?.let { id ->
-            _state.value.items.firstOrNull { it.id == id }
-        } ?: return cta.draft
-        // SAVED → 用 itemRef 对应的 Item 当 baseline
-        val refItem = targetCi.itemRef?.let { ref ->
-            runCatching { repo.observeById(ref).first() }.getOrNull()
-        }
-        if (refItem != null) return mergeDraftOntoItem(cta.draft, refItem)
-        // PENDING / MODIFIED → 用工作集行本身的 draft 当 baseline
-        val baseDraft = targetCi.draft ?: return cta.draft
-        return mergeDraftOntoDraft(cta.draft, baseDraft)
     }
 
     /**
@@ -1107,8 +1106,8 @@ class AddViewModel(
                 it is AddMessage.DraftCta && it.id == ctaId
             } as AddMessage.DraftCta?
             accepted?.let { upsertCtaStatus(it) }
-            val mergedDraft = mergeForDirectAccept(cta)
-            val ciId = applyAcceptedCta(cta, mergedDraft)
+            // Cycle 0034 v9：cta.draft 已经是合并后的 full state。
+            val ciId = applyAcceptedCta(cta, cta.draft)
             if (ciId == null) return@launch
             // 找到刚 upsert 的 ConversationItem，commit 成 Item，标记 SAVED。
             val convoId = _state.value.conversationId

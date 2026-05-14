@@ -324,25 +324,10 @@ fun AddRoute(
                                     }.toMap()
                                 val assignmentAvatar = ass.firstOrNull { it.isAvatar }?.sourceUri
 
-                                // Cycle 0034 v7+v8：MODIFY 卡的 cta.draft 只是
-                                // AI 的增量。把它 merge 到 baseline 上（SAVED
-                                // 用底下的 Item；PENDING/MODIFIED 用工作集行自
-                                // 己的 draft），影集 / specs / history 不丢。
-                                // CREATE 卡没 baseline，直接用 cta.draft。
-                                val targetCi = cta.targetCiId?.let { id ->
-                                    state.items.firstOrNull { it.id == id }
-                                }
-                                val refItem = targetCi?.itemRef?.let { ref ->
-                                    runCatching { app.repository.observeById(ref).first() }.getOrNull()
-                                }
-                                val mergedDraft = when {
-                                    cta.actionKind != com.treasure.core.repo.DraftCtaActionKind.Modify ->
-                                        cta.draft
-                                    refItem != null -> vm.mergeDraftOntoItem(cta.draft, refItem)
-                                    targetCi?.draft != null ->
-                                        vm.mergeDraftOntoDraft(cta.draft, targetCi.draft!!)
-                                    else -> cta.draft
-                                }
+                                // Cycle 0034 v9：cta.draft 在 runExtract 阶段就
+                                // 已合并 — proposal-preview 不再二次 merge，
+                                // 直接拿来当 baseline，再叠 photo_assignments。
+                                val mergedDraft = cta.draft
 
                                 // photo_assignments 在 merged 之上 append（不覆盖
                                 // 已有 photos）。avatar：assignment 给的优先 →
