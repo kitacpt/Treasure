@@ -178,6 +178,8 @@ fun EditScreen(
         mutableStateOf<String?>(null)
     }
     val cropSource = cropSourceStr?.let { android.net.Uri.parse(it) }
+    // Cycle 0034 v3：双击影集缩略图 → 全屏 FullscreenPhotoViewer 预览
+    var previewPhotos by remember { mutableStateOf<Pair<List<String>, Int>?>(null) }
     // 单图 picker（替换原 PickMultipleVisualMedia — 多图同时裁剪 UX 复杂，
     // 一次一张更清晰；用户想加多张就连点几次）。
     val pickPhoto = rememberLauncherForActivityResult(
@@ -264,6 +266,9 @@ fun EditScreen(
                     onTakePhoto = startCamera,
                     onPickPhotos = pickPhotos,
                     onRemovePhoto = onRemovePhoto,
+                    onPreviewPhoto = { uris, idx ->
+                        previewPhotos = uris to idx.coerceIn(0, uris.lastIndex)
+                    },
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -369,6 +374,16 @@ fun EditScreen(
                     onAddCroppedPhoto(src, rect)
                     cropSourceStr = null
                 },
+            )
+        }
+        // Cycle 0034 v3：双击影集缩略图开全屏预览（左右滑切换）。
+        previewPhotos?.let { (uris, idx) ->
+            com.treasure.ui.photo.FullscreenPhotoViewer(
+                photos = uris,
+                initialIndex = idx,
+                callouts = item.callouts,
+                onSetCallouts = { _, _ -> /* 编辑页里只是看大图，callout 在 Detail 抽屉 */ },
+                onClose = { previewPhotos = null },
             )
         }
     }

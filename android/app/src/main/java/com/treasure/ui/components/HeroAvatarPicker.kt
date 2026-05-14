@@ -68,6 +68,10 @@ fun HeroAvatarPicker(
     onTakePhoto: (() -> Unit)? = null,
     onPickPhotos: (() -> Unit)? = null,
     onRemovePhoto: ((String) -> Unit)? = null,
+    /** Cycle 0034 v3：双击影集缩略图开全屏 viewer 看大图（左右滑切换）。
+     *  传 (photoOptions, tappedIndex)。null 表示不支持预览（行为仍保留 single
+     *  tap 选 + long-press 删）。 */
+    onPreviewPhoto: ((sourceUris: List<String>, initialIndex: Int) -> Unit)? = null,
 ) {
     val colors = LocalTreasureColors.current
     var open by remember { mutableStateOf(false) }
@@ -140,7 +144,7 @@ fun HeroAvatarPicker(
                     .padding(horizontal = 22.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                photoOptions.forEach { path ->
+                photoOptions.forEachIndexed { idx, path ->
                     val on = path == selectedPhoto
                     Box(
                         modifier = Modifier
@@ -148,9 +152,15 @@ fun HeroAvatarPicker(
                             .clip(CircleShape)
                             .background(colors.card)
                             .border(if (on) 1.5.dp else 0.5.dp, if (on) colors.terra else colors.line, CircleShape)
-                            .pointerInput(path, onSelectPhoto, onRemovePhoto) {
+                            .pointerInput(path, onSelectPhoto, onRemovePhoto, onPreviewPhoto) {
                                 detectTapGestures(
                                     onTap = { onSelectPhoto?.invoke(path) },
+                                    // Cycle 0034 v3：双击预览 — 全屏 viewer 看大
+                                    // 图，左右滑切换；不需要拖手势就跟普通选中
+                                    // 区分开了。
+                                    onDoubleTap = {
+                                        onPreviewPhoto?.invoke(photoOptions, idx)
+                                    },
                                     onLongPress = {
                                         if (onRemovePhoto != null) pendingDelete = path
                                     },

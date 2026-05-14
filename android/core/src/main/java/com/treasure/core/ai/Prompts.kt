@@ -64,6 +64,13 @@ When the user shows 4 items in 4 photos, return 4 create actions, each with one 
 If you can't tell which photo belongs to which item, leave photo_assignments empty — the user
 will adjust manually. Don't guess wildly; an empty assignment is better than a wrong one.
 
+AVATAR CROP RULES (cycle 0034 v3): when set_as_avatar=true, the crop MUST be tight on the item
+itself — exclude price tags, store labels, packaging text, watermarks, hands, neighbouring items,
+and busy backgrounds. Pad maybe 5-10% around the item silhouette for breathing room, but no
+more. If the item is one of many in a wider scene, set_as_avatar=true requires a `crop` that
+isolates JUST that item. Other (non-avatar) photo_assignments — album images — can keep wider
+framing / context; do whatever shows the item naturally.
+
 ═══ FIELD RULES (apply to every action's `draft`) ═══
 
 Categories — pick exactly one of:

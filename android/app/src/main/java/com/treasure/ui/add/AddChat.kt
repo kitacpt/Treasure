@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.treasure.illust.HeroIllustration
+import com.treasure.ui.components.HeroAvatar
 import com.treasure.theme.Cormorant
 import com.treasure.theme.LocalTreasureColors
 
@@ -88,8 +89,10 @@ fun AddChat(
     onSendText: (String) -> Unit,
     onSendPhotos: (List<android.net.Uri>, String) -> Unit,
     onStartVoice: () -> Unit,
+    onRetryLastExtract: () -> Unit,
     onGoSettings: () -> Unit,
     onPreviewPhoto: (android.net.Uri) -> Unit,
+    onPreviewPendingPhoto: (uris: List<String>, initialIndex: Int) -> Unit,
     onAcceptProposal: (String) -> Unit,
     onRejectProposal: (String) -> Unit,
     onPreviewProposal: (AddMessage.DraftCta) -> Unit,
@@ -218,6 +221,11 @@ fun AddChat(
                         // 时显示（用户已经发新一句话 / 图，旧耗时就别再喧宾夺主）
                         item { ElapsedHint(state.lastElapsedMs) }
                     }
+                    // Cycle 0034 v3：上一轮失败时挂一个"重试"按钮 — 用户网断 /
+                    // 服务挂了之后可以一键重发，不用重新打字 / 选图。
+                    if (state.retryAvailable && !state.busy) {
+                        item { RetryRow(onRetry = onRetryLastExtract) }
+                    }
                 }
             }
         }
@@ -251,6 +259,9 @@ fun AddChat(
             onStop = onStopExtract,
             onTakePhoto = ::launchPhotoFlow,
             onStartVoice = onStartVoice,
+            onPreviewPending = { idx ->
+                onPreviewPendingPhoto(pendingPhotos.map { it.toString() }, idx)
+            },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .imePadding()
@@ -1013,7 +1024,16 @@ private fun DraftCtaCard(
             ?.let { CategoryTemplates.forCategory(it) }
             ?: CategoryTemplates.forCategory(com.treasure.core.domain.Category.TECH)
     }
-    val previewItem = remember(message.draft, template) {
+    // Cycle 0034 v3：采用前先用 AI 分配的"准头像"做预览 — 优先取一条标了
+    // isAvatar=true 的 photo_assignment，没有就取第一条；用它的 sourceUri 当
+    // 卡片上的小图。注意：这里还没真正落盘裁好，所以展示的是源图全幅；点
+    // 采用后 applyAcceptedCta 会把按 crop 裁好的副本写进 draft.photos /
+    // avatarPhotoPath，工作集 / 图鉴里看到的就是裁过的版。
+    val previewAvatar = remember(message.photoAssignments) {
+        message.photoAssignments.firstOrNull { it.isAvatar }?.sourceUri
+            ?: message.photoAssignments.firstOrNull()?.sourceUri
+    }
+    val previewItem = remember(message.draft, template, previewAvatar) {
         com.treasure.core.domain.Item(
             id = "preview",
             category = template.category.id,
@@ -1028,7 +1048,8 @@ private fun DraftCtaCard(
             heroVector = template.heroVector,
             specs = emptyList(),
             history = emptyList(),
-            photos = emptyList(),
+            photos = listOfNotNull(previewAvatar),
+            avatarPhotoPath = previewAvatar,
             createdAt = 0L,
             updatedAt = 0L,
         )
@@ -1057,7 +1078,8 @@ private fun DraftCtaCard(
                     .border(0.5.dp, colors.line)
                     .padding(5.dp),
             ) {
-                HeroIllustration(item = previewItem, modifier = Modifier.fillMaxSize())
+                // Cycle 0034 v3：用 HeroAvatar，有 avatarPhotoPath 时显示真照片
+                HeroAvatar(item = previewItem, modifier = Modifier.fillMaxSize())
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -1269,6 +1291,27 @@ private fun ElapsedHint(elapsedMs: Long) {
     }
 }
 
+/** Cycle 0034 v3：上轮 AI 调用失败 → 跟在错误信息后面挂个 "重试 ↻" 小胶囊。 */
+@Composable
+private fun RetryRow(onRetry: () -> Unit) {
+    val colors = LocalTreasureColors.current
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(colors.terra.copy(alpha = 0.12f))
+                .border(0.5.dp, colors.terra.copy(alpha = 0.6f), RoundedCornerShape(999.dp))
+                .clickable(onClick = onRetry)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = "↻", color = colors.terra, style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.width(6.dp))
+            Text(text = "重试", color = colors.terra, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
 private fun formatElapsed(ms: Long): String {
     val totalSec = ms / 1000.0
     return if (totalSec < 10) String.format("%.1f s", totalSec)
@@ -1311,6 +1354,8 @@ private fun Composer(
     onTakePhoto: () -> Unit,
     /** Cycle 0034 v2：长按麦克风进入录音全屏页。 */
     onStartVoice: () -> Unit = {},
+    /** Cycle 0034 v3：点缩略图全屏预览（左右滑切换待发送的图）。 */
+    onPreviewPending: (Int) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTreasureColors.current
@@ -1340,7 +1385,8 @@ private fun Composer(
                                 .size(64.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(colors.paper)
-                                .border(0.5.dp, colors.line, RoundedCornerShape(8.dp)),
+                                .border(0.5.dp, colors.line, RoundedCornerShape(8.dp))
+                                .clickable { onPreviewPending(idx) },
                         ) {
                             coil.compose.AsyncImage(
                                 model = uri,
@@ -1835,7 +1881,8 @@ private fun WorkingItemRow(
                 .border(0.5.dp, colors.line)
                 .padding(4.dp),
         ) {
-            HeroIllustration(item = previewItem, modifier = Modifier.fillMaxSize())
+            // Cycle 0034 v3：HeroAvatar — avatarPhotoPath 非空时显示真照片
+            HeroAvatar(item = previewItem, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -1910,7 +1957,11 @@ private fun draftToPreviewItem(draft: com.treasure.core.ai.ItemDraft): com.treas
         heroVector = template.heroVector,
         specs = emptyList(),
         history = emptyList(),
-        photos = emptyList(),
+        // Cycle 0034 v3：把 draft 上的 photos / avatarPhotoPath 透传给 stub
+        // Item，让 HeroAvatar 优先走 AsyncImage(avatarPhoto) — 之前都丢成空，
+        // 工作集胶囊还是显示线描。
+        photos = draft.photos,
+        avatarPhotoPath = draft.avatarPhotoPath,
         createdAt = 0L,
         updatedAt = 0L,
     )
@@ -2046,7 +2097,7 @@ private fun ItemPickerRow(
                 .border(0.5.dp, colors.line)
                 .padding(4.dp),
         ) {
-            HeroIllustration(item = item, modifier = Modifier.fillMaxSize())
+            HeroAvatar(item = item, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {

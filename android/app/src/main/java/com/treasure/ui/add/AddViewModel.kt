@@ -140,6 +140,10 @@ data class AddUiState(
      *  这里记下来，commit / 增量 upsert 都 prefer 这个 ciId（而不是"最近一条
      *  PENDING / MODIFIED"的启发式）。null 表示没显式选中，走启发式。 */
     val editingCiId: String? = null,
+    /** Cycle 0034 v3：最近一次 AI 调用失败，且可重发上一轮（图 / 文 / 音都
+     *  原封不动重传）。用户主动取消 / 重新发新消息时清掉。UI 据此在最后一条
+     *  助手错误消息下面渲染"重试"小按钮。 */
+    val retryAvailable: Boolean = false,
 ) {
     val refineDraft: ItemDraft get() = confirmedDraft ?: ItemDraft()
     /** Cycle 0031：commit 后封存 — 现在 commit 是 per-item，整个 conversation
@@ -198,6 +202,23 @@ class AddViewModel(
                 ),
             )
         }
+    }
+
+    /** Cycle 0034 v3：最近一次 runExtract 失败的入参 — 用户点重试按钮就用它
+     *  重发。成功 / 取消 / 用户开新 turn 都清。 */
+    private data class ExtractArgs(
+        val text: String,
+        val imageUris: List<Uri>,
+        val audioPath: String?,
+    )
+    private var lastFailedExtract: ExtractArgs? = null
+
+    /** Cycle 0034 v3：用户点 "重试" → 用 [lastFailedExtract] 重发上一轮。 */
+    fun retryLastExtract() {
+        val args = lastFailedExtract ?: return
+        lastFailedExtract = null
+        _state.update { it.copy(retryAvailable = false) }
+        runExtract(text = args.text, imageUris = args.imageUris, audioPath = args.audioPath)
     }
 
     /** Cycle 0031：用户在 drawer 里点开某行 PENDING / MODIFIED 草稿编辑 →
@@ -834,7 +855,10 @@ class AddViewModel(
             return
         }
         val startedAt = System.currentTimeMillis()
-        _state.update { it.copy(busy = true, busyStartedAt = startedAt, lastElapsedMs = null) }
+        // Cycle 0034 v3：起新一轮时上一轮的"重试态"作废 — 用户已经在重试 / 改
+        // 入参，旧失败不再相关。失败 onFailure 会重新打开 retryAvailable。
+        lastFailedExtract = null
+        _state.update { it.copy(busy = true, busyStartedAt = startedAt, lastElapsedMs = null, retryAvailable = false) }
         // Cycle 0031：AI 调用期间起一发前台保活 service — vivo / 华为 / OPPO
         // 这种激进省电系统熄屏 / 切后台几秒就杀普通进程，OkHttp 直接断。前
         // 台 service + PARTIAL_WAKE_LOCK 给 OS 一个"我在干活"信号，撑过这
@@ -975,6 +999,13 @@ class AddViewModel(
                             AddMessage.Assistant(err.text.ifBlank { "嗯。" })
                         else -> AddMessage.Assistant("出错了：${err.message ?: "未知错误"}")
                     }
+                    // Cycle 0034 v3：真错（网断 / 服务返码 / 模型不接图音）允许
+                    // 重试上一轮 — 把入参全存 lastFailedExtract，UI 加 "重试" 按
+                    // 钮。Cancel / chat-only 不进重试态。
+                    val canRetry = !cancelled && err !is com.treasure.core.ai.ChatOnlyResponseException
+                    lastFailedExtract = if (canRetry) {
+                        ExtractArgs(text = text, imageUris = imageUris, audioPath = audioPath)
+                    } else null
                     _state.update {
                         val started = it.busyStartedAt ?: startedAt
                         it.copy(
@@ -987,6 +1018,7 @@ class AddViewModel(
                                 err is com.treasure.core.ai.ChatOnlyResponseException -> null
                                 else -> err.message
                             },
+                            retryAvailable = canRetry,
                         )
                     }
                     if (msg is AddMessage.SystemNote) {

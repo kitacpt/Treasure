@@ -201,6 +201,7 @@ fun AddRoute(
                     onSendText = vm::sendText,
                     onSendPhotos = vm::sendPhotos,
                     onStartVoice = { startVoice() },
+                    onRetryLastExtract = vm::retryLastExtract,
                     onGoSettings = onGoSettings,
                     onPreviewPhoto = { tapped ->
                         val all = state.messages
@@ -208,6 +209,9 @@ fun AddRoute(
                             .map { it.uri.toString() }
                         val idx = all.indexOf(tapped.toString()).coerceAtLeast(0)
                         photoPreview = ChatPhotoPreview(all, idx)
+                    },
+                    onPreviewPendingPhoto = { uris, idx ->
+                        photoPreview = ChatPhotoPreview(uris, idx.coerceIn(0, uris.lastIndex))
                     },
                     onAcceptProposal = vm::acceptProposal,
                     onRejectProposal = vm::rejectProposal,
@@ -302,6 +306,13 @@ fun AddRoute(
                                 proposalDraft = null
                                 mode = AddMode.Chat
                             },
+                            // Cycle 0034 v3：把 cta 上 AI 给的 photo_assignments
+                            // 缩略图条也带进 Refine 预览页，让用户在采用前一眼
+                            // 看清"AI 分了哪几张图、哪张当头像"。
+                            proposalPhotoAssignments = cta.photoAssignments,
+                            onPreviewProposalPhoto = { uris, idx ->
+                                photoPreview = ChatPhotoPreview(uris, idx.coerceIn(0, uris.lastIndex))
+                            },
                         )
                     } else {
                         // Manual Refine：编辑 confirmedDraft，[确认收入] 入图鉴。
@@ -347,6 +358,9 @@ fun AddRoute(
                             },
                             onRemovePhoto = vm::removeDraftPhoto,
                             onSelectAvatar = vm::setDraftAvatar,
+                            onPreviewProposalPhoto = { uris, idx ->
+                                photoPreview = ChatPhotoPreview(uris, idx.coerceIn(0, uris.lastIndex))
+                            },
                         )
                     }
                 }
