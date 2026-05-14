@@ -2,7 +2,10 @@ package com.treasure.ui.photo
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -204,25 +207,45 @@ private fun CropOverlay(
     // 即使外层 crop 被 setState 异步刷新过，gesture 内部仍稳定。
     val latestCrop by androidx.compose.runtime.rememberUpdatedState(crop)
 
+    // Cycle 0034 v7：bug — 横向拖动失效。CropScreen 套在 MainScreen 的
+    // HorizontalPager 内，detectDragGestures 用 awaitTouchSlopOrCancellation
+    // 等触摸 slop，跟 Pager 的 horizontal-only slop 检测器抢；纵向赢（Pager
+    // 没装），横向 Pager 总比我们先达到 slop 把事件吃走，结果矩形不动。
+    // 改用 awaitEachGesture + 在 down event 第一时间 consume()，让 Pager 完
+    // 全看不到 CropScreen 上的触摸。
     androidx.compose.foundation.Canvas(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(bounds) {
-                var startCrop = latestCrop
-                var mode: DragMode = DragMode.None
-                var accDrag = Offset.Zero
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        startCrop = latestCrop
-                        mode = pickMode(offset, startCrop, edgeHit)
-                        accDrag = Offset.Zero
-                    },
-                    onDrag = { change, drag ->
-                        change.consume()
-                        accDrag += drag
-                        onChange(applyDrag(startCrop, bounds, mode, accDrag, minSizePx))
-                    },
-                )
+                awaitPointerEventScope {
+                    while (true) {
+                        // Initial pass — 在 Pager 的 horizontal slop 检测之前先
+                        // 吃 down event，把 Pager 让出来。
+                        val down = awaitFirstDown(
+                            requireUnconsumed = false,
+                            pass = PointerEventPass.Initial,
+                        )
+                        val startCrop = latestCrop
+                        val mode = pickMode(down.position, startCrop, edgeHit)
+                            .let { if (it == DragMode.None) DragMode.Move else it }
+                        down.consume()
+                        var accDrag = Offset.Zero
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull() ?: break
+                            if (!change.pressed) {
+                                change.consume()
+                                break
+                            }
+                            val delta = change.positionChange()
+                            if (delta != Offset.Zero) {
+                                accDrag += delta
+                                onChange(applyDrag(startCrop, bounds, mode, accDrag, minSizePx))
+                            }
+                            change.consume()
+                        }
+                    }
+                }
             },
     ) {
         // 灰色蒙层：图片范围内剪掉裁剪矩形那块亮起
