@@ -134,6 +134,13 @@ fun DetailScreen(
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
     val expanded = sheetState.currentValue == SheetValue.Expanded
 
+    // Cycle 0035 v2：抽屉展开时 back 键先把抽屉收回 partial peek，不直接 pop
+    // 到 Main。和 fullscreen viewer 同样的优先级。
+    val sheetScope = androidx.compose.runtime.rememberCoroutineScope()
+    androidx.activity.compose.BackHandler(enabled = expanded && fullscreenIndex == null) {
+        sheetScope.launch { sheetState.partialExpand() }
+    }
+
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
         sheetPeekHeight = 52.dp,

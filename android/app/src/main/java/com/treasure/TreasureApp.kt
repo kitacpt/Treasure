@@ -81,31 +81,34 @@ class TreasureApp : Application() {
      * as the gate for AI features. Provider switch happens here.
      */
     fun aiClient(): AiClient? {
-        val key = settingsStore.apiKey ?: return null
-        val model = settingsStore.model
-        val provider = settingsStore.provider
-        val temperature = settingsStore.temperature
-        val thinking = settingsStore.thinkingEnabled
-        return when (provider) {
+        // Cycle 0035：从 effective profile（per-conversation override 优先，
+        // 否则默认）构造 client。空 key / 配置缺失 → null，沿用旧的"未配置"
+        // gate 语义。
+        val profile = settingsStore.effectiveProfile() ?: return null
+        if (!profile.hasKey) return null
+        val key = profile.apiKey
+        val temperature = profile.temperature
+        val thinking = profile.thinkingEnabled
+        return when (profile.provider) {
             Provider.Anthropic -> AnthropicClient(
                 apiKey = key,
-                model = model.ifBlank { AnthropicClient.DEFAULT_MODEL },
-                baseUrl = settingsStore.baseUrl ?: "https://api.anthropic.com",
+                model = profile.effectiveModel,
+                baseUrl = profile.effectiveBaseUrl.ifBlank { "https://api.anthropic.com" },
                 temperature = temperature,
                 thinkingEnabled = thinking,
             )
             Provider.OpenAi -> OpenAiClient(
                 apiKey = key,
-                model = model.ifBlank { OpenAiClient.DEFAULT_MODEL },
-                baseUrl = settingsStore.baseUrl ?: "https://api.openai.com",
+                model = profile.effectiveModel,
+                baseUrl = profile.effectiveBaseUrl.ifBlank { "https://api.openai.com" },
                 temperature = temperature,
                 thinkingEnabled = thinking,
             )
             Provider.OpenAiCompatible -> {
-                val url = settingsStore.baseUrl ?: return null
+                val url = profile.effectiveBaseUrl.takeIf { it.isNotBlank() } ?: return null
                 OpenAiClient(
                     apiKey = key,
-                    model = model.ifBlank { OpenAiClient.DEFAULT_MODEL },
+                    model = profile.effectiveModel,
                     baseUrl = url,
                     temperature = temperature,
                     thinkingEnabled = thinking,

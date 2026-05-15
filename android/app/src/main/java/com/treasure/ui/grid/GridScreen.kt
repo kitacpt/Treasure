@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -152,16 +153,85 @@ fun GridScreen(
         gridDragState.updateReorderCallback(onReorder)
     }
 
+    // Cycle 0035 v4：拖拽手势从 per-tile 提升到 LazyColumn 父 Box ——
+    // 之前 pointerInput 挂在 ItemCard 上，liveOrder 一变 chunked(2) 的 row key
+    // 就变，row 整个被销毁重建，drag 协程也跟着取消，看到的现象是"刚换位
+    // 就被打断"。手势放在父层，row 怎么重排都不打断它。
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val dragScope = androidx.compose.runtime.rememberCoroutineScope()
+    var dragSurfaceOrigin by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+    }
+    var dragSurfaceHeight by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(0)
+    }
+    // 拖到上/下边缘时自动滚动 LazyColumn 的方向：-1 上滚、0 不动、1 下滚。
+    var autoScrollDir by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(0)
+    }
+    androidx.compose.runtime.LaunchedEffect(autoScrollDir) {
+        if (autoScrollDir != 0) {
+            while (kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]?.isActive == true) {
+                // scrollBy 返回实际消耗的像素 — 用它修正 dragState 的起点，
+                // 让被拖卡的视觉位置不因 list 滚动而偏移。
+                val consumed = listState.scrollBy(autoScrollDir * 8f)
+                gridDragState.applyScrollDelta(consumed)
+                androidx.compose.runtime.withFrameNanos { }
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.paper)
-            .statusBarsPadding(),
+            .statusBarsPadding()
+            .onGloballyPositioned {
+                dragSurfaceOrigin = it.positionInRoot()
+                dragSurfaceHeight = it.size.height
+            }
+            .pointerInput(selecting) {
+                if (!selecting) return@pointerInput
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { localPos ->
+                        val screenX = localPos.x + dragSurfaceOrigin.x
+                        val screenY = localPos.y + dragSurfaceOrigin.y
+                        val targetId = gridDragState.hitTest(screenX, screenY)
+                        if (targetId != null) gridDragState.start(targetId)
+                    },
+                    onDrag = { change, drag ->
+                        if (gridDragState.draggingId == null) return@detectDragGesturesAfterLongPress
+                        gridDragState.drag(drag)
+                        // 拖到上下边缘 ~96dp 内时启动自动滚动
+                        val edge = 96f
+                        val localY = change.position.y
+                        autoScrollDir = when {
+                            localY < edge -> -1
+                            localY > dragSurfaceHeight - edge -> 1
+                            else -> 0
+                        }
+                        change.consume()
+                    },
+                    onDragEnd = {
+                        autoScrollDir = 0
+                        gridDragState.drop()
+                    },
+                    onDragCancel = {
+                        autoScrollDir = 0
+                        gridDragState.drop()
+                    },
+                )
+            },
     ) {
         // Cycle 0031：从 LazyVerticalGrid 改成 LazyColumn + chunked(2) Row 渲染 —
         // 为了让"同一行两张卡片中任一标题两行 → 两张都两行"的同步效果可控（vertical
         // grid 没办法跨行同步行高）。每对卡的标题行数靠 TextMeasurer 预测算出。
         androidx.compose.foundation.lazy.LazyColumn(
+            state = listState,
+            // Cycle 0035 v4：拖动期间停用用户滚动，避免 LazyColumn 的
+            // scrollable 跟父层 drag detector 抢手势；programmatic scrollBy
+            // 仍然能用，做 auto-scroll near edge。
+            userScrollEnabled = gridDragState.draggingId == null,
             contentPadding = PaddingValues(
                 start = 22.dp,
                 end = 22.dp,
@@ -207,12 +277,12 @@ fun GridScreen(
                 }
             }
 
-            // Cycle 0034 v5：编辑态保持 2-列原样布局 — 不再切换到 1-列。
-            // tap toggle 选中，长按再触发拖拽（drag start by long-press），
-            // 拖动用 graphicsLayer.translation 给视觉反馈；松手按落点解算
-            // 目标 grid 坐标，调用 onReorder 写回 sort_order。
+            // Cycle 0035 v2：拖拽时由 dragState.liveItems() 提供实时顺序 —
+            // 手指划过另一张卡 → swap-insert → 整组立即重新布局；松手时若
+            // liveOrder 跟开始时不同就 commit。
+            val orderedForDisplay = if (selecting) gridDragState.liveItems() else displayItems
             items(
-                items = displayItems.chunked(2),
+                items = orderedForDisplay.chunked(2),
                 key = { pair -> pair.joinToString(",") { it.id } },
             ) { pair ->
                 ItemPairRow(
@@ -639,8 +709,33 @@ private fun ItemCard(
 ) {
     val colors = LocalTreasureColors.current
     val isDragging = dragState?.draggingId == item.id
-    val translateX = if (isDragging) dragState.offset.x else 0f
-    val translateY = if (isDragging) dragState.offset.y else 0f
+    // Cycle 0035 v3：被拖卡的视觉 translation 由 dragState 算 — 等于
+    // dragStartSlotPos + offset - currentSlotPos，让卡片视觉上始终停在
+    // 手指下，不管 insert-shift 把它送到了 liveOrder 里第几位。
+    val dragTranslate = if (isDragging) dragState!!.translationFor(item.id)
+        else androidx.compose.ui.geometry.Offset.Zero
+    val translateX = dragTranslate.x
+    val translateY = dragTranslate.y
+    // Cycle 0035 v2：抬起感 — 拖动时柔顺地放大 + 加阴影 + 微旋。spring 收尾
+    // 让落卡时有"放下"的弹性。
+    val liftScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isDragging) 1.08f else 1f,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+            stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
+        ),
+        label = "grid-lift-scale",
+    )
+    val liftElevation by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isDragging) 28f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(durationMillis = 180),
+        label = "grid-lift-elev",
+    )
+    val liftRotation by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isDragging) -2.2f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(durationMillis = 180),
+        label = "grid-lift-rot",
+    )
     Column(
         modifier = modifier
             .onGloballyPositioned { coords ->
@@ -653,27 +748,17 @@ private fun ItemCard(
             .graphicsLayer {
                 translationX = translateX
                 translationY = translateY
-                if (isDragging) {
-                    scaleX = 1.04f
-                    scaleY = 1.04f
-                    shadowElevation = 14.dp.toPx()
-                }
+                scaleX = liftScale
+                scaleY = liftScale
+                rotationZ = liftRotation
+                shadowElevation = liftElevation
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                clip = false
             }
             .zIndex(if (isDragging) 1f else 0f)
-            // Cycle 0034 v8：编辑态下，combinedClickable 如果同时挂 onLongClick
-            // 会先于 detectDragGesturesAfterLongPress 把长按事件吃掉 — 结果
-            // "长按拖" 永远进不去 drag 模式。selecting 下让出 onLongClick，把
-            // 长按完全交给 drag detector；只 onClick 用来切换选中。
-            .pointerInput(selecting, item.id) {
-                if (selecting) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = { dragState?.start(item.id) },
-                        onDrag = { _, drag -> dragState?.drag(drag) },
-                        onDragEnd = { dragState?.drop() },
-                        onDragCancel = { dragState?.drop() },
-                    )
-                }
-            }
+            // Cycle 0035 v4：drag pointerInput 已经提到 GridScreen 父 Box；
+            // 这里只留 click（tap 切换选中 / 打开物品）。长按改由父层 detector
+            // 统一处理（survives row 重建），不挂 onLongClick 让事件穿透。
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = if (selecting) null else onLongPress,
@@ -1046,14 +1131,26 @@ internal class GridDragState(
     items: List<Item>,
     onReorder: (List<String>) -> Unit,
 ) {
-    var items by androidx.compose.runtime.mutableStateOf(items)
-        private set
+    private val itemsMap: Map<String, Item> = items.associateBy { it.id }
+    private val initialOrder: List<String> = items.map { it.id }
     private var onReorderRef: (List<String>) -> Unit = onReorder
+
+    var liveOrder by androidx.compose.runtime.mutableStateOf(initialOrder)
+        private set
+
+    fun liveItems(): List<Item> = liveOrder.mapNotNull { itemsMap[it] }
+
     var draggingId by androidx.compose.runtime.mutableStateOf<String?>(null)
         private set
+    /** 累积的手指屏幕位移，从 drag-start 起。不被 swap / 重排 / 滚动触碰。 */
     var offset by androidx.compose.runtime.mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
         private set
-    private val bounds = mutableMapOf<String, Pair<androidx.compose.ui.geometry.Offset, androidx.compose.ui.unit.IntSize>>()
+
+    private val bounds = androidx.compose.runtime.mutableStateMapOf<String, Pair<androidx.compose.ui.geometry.Offset, androidx.compose.ui.unit.IntSize>>()
+
+    /** 被拖卡在 drag start 时的屏幕原点（= 它当时的 bounds.first）。 */
+    private var dragStartScreenPos: androidx.compose.ui.geometry.Offset = androidx.compose.ui.geometry.Offset.Zero
+    private var dragSize: androidx.compose.ui.unit.IntSize = androidx.compose.ui.unit.IntSize.Zero
 
     fun updateReorderCallback(cb: (List<String>) -> Unit) { onReorderRef = cb }
 
@@ -1066,37 +1163,69 @@ internal class GridDragState(
     fun start(id: String) {
         draggingId = id
         offset = androidx.compose.ui.geometry.Offset.Zero
+        val b = bounds[id] ?: return
+        dragStartScreenPos = b.first
+        dragSize = b.second
     }
 
     fun drag(delta: androidx.compose.ui.geometry.Offset) {
         offset += delta
+        val id = draggingId ?: return
+        // 手指当前屏幕中心 = 起点 + 累积位移 + 卡片中线偏移
+        val cx = dragStartScreenPos.x + offset.x + dragSize.width / 2f
+        val cy = dragStartScreenPos.y + offset.y + dragSize.height / 2f
+        // 用实时 bounds 命中其他卡 — 这样自动滚动后新进入视野的卡也能被命中
+        val hoverId = bounds.entries.firstOrNull { (k, b) ->
+            if (k == id) return@firstOrNull false
+            val (o, s) = b
+            cx in o.x..(o.x + s.width) && cy in o.y..(o.y + s.height)
+        }?.key ?: return
+        val list = liveOrder.toMutableList()
+        val from = list.indexOf(id)
+        val to = list.indexOf(hoverId)
+        if (from < 0 || to < 0 || from == to) return
+        // insert-shift
+        val moved = list.removeAt(from)
+        list.add(to, moved)
+        liveOrder = list
+        // 立即把被拖卡 bounds 改成 hover 卡的位置（onGloballyPositioned 异步
+        // 触发前，translation 才不会有 1 帧抖动）。hover 卡的新位置由 layout
+        // 异步上报，下一帧 bounds 就会自洽。
+        val hoverOldPos = bounds[hoverId]?.first ?: return
+        bounds[id] = hoverOldPos to dragSize
     }
 
     fun drop() {
-        val id = draggingId ?: return
-        val (origin, size) = bounds[id] ?: run {
-            draggingId = null; offset = androidx.compose.ui.geometry.Offset.Zero; return
-        }
-        val cx = origin.x + offset.x + size.width / 2f
-        val cy = origin.y + offset.y + size.height / 2f
-        // 找落点命中的另一张卡（不含自己）
-        val target = bounds.entries
-            .filter { it.key != id }
-            .firstOrNull { (_, b) ->
-                val (o, s) = b
-                cx in o.x..(o.x + s.width) && cy in o.y..(o.y + s.height)
-            }?.key
         draggingId = null
         offset = androidx.compose.ui.geometry.Offset.Zero
-        if (target != null && target != id) {
-            val ids = items.map { it.id }.toMutableList()
-            val from = ids.indexOf(id)
-            val to = ids.indexOf(target)
-            if (from >= 0 && to >= 0 && from != to) {
-                val moved = ids.removeAt(from)
-                ids.add(to, moved)
-                onReorderRef(ids)
-            }
+        if (liveOrder != initialOrder) {
+            onReorderRef(liveOrder)
         }
+    }
+
+    /** 被拖那张：视觉上 = 起点 + 累积位移 − 当前 layout 位置，让它紧贴手指。
+     *  其他卡：返回 Zero（layout 自然把它们放对了）。 */
+    fun translationFor(id: String): androidx.compose.ui.geometry.Offset {
+        if (draggingId != id) return androidx.compose.ui.geometry.Offset.Zero
+        val currentLayoutPos = bounds[id]?.first ?: return androidx.compose.ui.geometry.Offset.Zero
+        return dragStartScreenPos + offset - currentLayoutPos
+    }
+
+    /** 父层 drag detector 长按时调用，找命中的卡 id；没命中返回 null。 */
+    fun hitTest(x: Float, y: Float): String? {
+        return bounds.entries.firstOrNull { (_, b) ->
+            val (o, s) = b
+            x in o.x..(o.x + s.width) && y in o.y..(o.y + s.height)
+        }?.key
+    }
+
+    /** 自动滚动时屏幕坐标系跟着 listState scroll 一起平移 — 起点也要跟着
+     *  上下走，否则 translation 会越走越偏。父层在 scrollBy 之后调这个。 */
+    fun applyScrollDelta(deltaPx: Float) {
+        if (draggingId == null) return
+        // 内容向下滚动 = 所有 layout 位置向下偏 → 起点也得向下偏，保持
+        // (起点 + 累积位移) 相对屏幕真实手指位置不变。这里 deltaPx 是
+        // scrollBy 实际消耗的像素（content 向上偏移就是正值）。
+        dragStartScreenPos = dragStartScreenPos.copy(y = dragStartScreenPos.y - deltaPx)
     }
 }

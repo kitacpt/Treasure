@@ -9,46 +9,43 @@ import com.treasure.TreasureApp
 import com.treasure.core.ai.AnthropicClient
 import com.treasure.core.ai.OpenAiClient
 import com.treasure.core.ai.Provider
+import com.treasure.data.AiProfile
 import com.treasure.data.AiProviderPreset
 import com.treasure.data.SettingsStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.coroutines.launch
 
-/** Persisted, on-screen state. The [draft] mirrors persisted fields while
- *  the editor drawer is open, so cancelling discards changes. */
+/**
+ * Cycle 0035：从单份配置改为多份 + 默认。屏幕状态：
+ *  - [profiles]：当前所有 profiles
+ *  - [defaultProfileId]：默认 profile（aiClient 走它）
+ *  - [activeIndex]：pager 当前停在第几张（含末尾的"添加"卡）
+ *  - [editorTarget]：当前在编辑哪一份（null = 抽屉关）
+ *  - [draft]：编辑抽屉里的草稿
+ */
 data class SettingsUiState(
-    val saved: SavedConfig = SavedConfig(),
+    val profiles: List<AiProfile> = emptyList(),
+    val defaultProfileId: String? = null,
+    val activeIndex: Int = 0,
+    val editorTarget: String? = null,  // profile id; null = closed
     val draft: DraftConfig = DraftConfig(),
-    val editorOpen: Boolean = false,
     val testStatus: TestStatus = TestStatus.Idle,
-)
-
-data class SavedConfig(
-    val preset: AiProviderPreset = AiProviderPreset.Anthropic,
-    val provider: Provider = Provider.Anthropic,
-    val baseUrl: String = "",
-    val model: String = "",
-    val apiKey: String = "",
-    val keyConfigured: Boolean = false,
-    val temperature: Double? = null,
-    val thinkingEnabled: Boolean = false,
-    /** 上次 [testConnection] 是否成功；用来在摘要卡上画绿灯。改配置后 save() 会重置回 false → 黄灯。 */
-    val lastTestPassed: Boolean = false,
+    val addSheetOpen: Boolean = false,
 )
 
 data class DraftConfig(
     val preset: AiProviderPreset = AiProviderPreset.Anthropic,
+    val displayName: String = "",
     val baseUrl: String = "",
     val model: String = "",
     val apiKey: String = "",
-    /** 文本框直接编辑；空串 = 走默认 */
     val temperatureText: String = "",
     val thinkingEnabled: Boolean = false,
 )
@@ -57,10 +54,6 @@ sealed interface TestStatus {
     data object Idle : TestStatus
     data object Running : TestStatus
     data object Ok : TestStatus
-    /**
-     * 测试失败 — `kind` 是简短的错误类别（HTTP 400 / 网络 / 配置 / 未知），
-     * `detail` 是带细节的人类可读 message。UI 渲染成 "× kind · detail"。
-     */
     data class Failed(val kind: String, val detail: String) : TestStatus
 }
 
@@ -70,63 +63,105 @@ class SettingsViewModel(private val store: SettingsStore) : ViewModel() {
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 
     private fun loadState(): SettingsUiState {
-        val provider = store.provider
-        val baseUrl = store.baseUrl.orEmpty()
-        val preset = AiProviderPreset.fromId(store.presetId)
-            ?: AiProviderPreset.forLegacy(provider, store.baseUrl)
-        val saved = SavedConfig(
-            preset = preset,
-            provider = provider,
-            baseUrl = baseUrl.ifBlank { preset.baseUrl.orEmpty() },
-            model = store.model,
-            apiKey = store.apiKey.orEmpty(),
-            keyConfigured = store.hasKey(),
-            temperature = store.temperature,
-            thinkingEnabled = store.thinkingEnabled,
-            lastTestPassed = store.lastTestPassed,
-        )
+        val list = store.profiles
         return SettingsUiState(
-            saved = saved,
-            draft = DraftConfig(
-                preset = saved.preset,
-                baseUrl = saved.baseUrl,
-                model = saved.model,
-                apiKey = saved.apiKey,
-                temperatureText = saved.temperature?.let { "%.2f".format(it) }.orEmpty(),
-                thinkingEnabled = saved.thinkingEnabled,
-            ),
+            profiles = list,
+            defaultProfileId = store.defaultProfileId,
         )
     }
 
-    /** Open the editor drawer, seeded with the currently saved values. */
-    fun openEditor() = _state.update {
-        it.copy(
-            editorOpen = true,
-            draft = DraftConfig(
-                preset = it.saved.preset,
-                baseUrl = it.saved.baseUrl,
-                model = it.saved.model,
-                apiKey = it.saved.apiKey,
-                temperatureText = it.saved.temperature?.let { v -> "%.2f".format(v) }.orEmpty(),
-                thinkingEnabled = it.saved.thinkingEnabled,
-            ),
-            testStatus = TestStatus.Idle,
-        )
+    fun setActiveIndex(i: Int) {
+        _state.update { it.copy(activeIndex = i) }
     }
 
-    fun closeEditor() = _state.update { it.copy(editorOpen = false) }
+    /** Pager 滑到某张 → activeIndex 更新。 */
+    fun openAddSheet() = _state.update { it.copy(addSheetOpen = true) }
+    fun closeAddSheet() = _state.update { it.copy(addSheetOpen = false) }
 
-    /**
-     * Cycle 0019：用户在抽屉里改任何配置都意味着 "上次测试" 不再算数 →
-     * 立刻把状态灯回到黄。save() 不再 reset；它信任此刻的 lastTestPassed。
-     */
-    private fun invalidateTest() {
-        store.lastTestPassed = false
+    fun addProfile(preset: AiProviderPreset) {
+        val newProfile = AiProfile.fromPreset(preset)
+        val next = store.addProfile(newProfile)
         _state.update {
             it.copy(
-                saved = it.saved.copy(lastTestPassed = false),
+                profiles = next,
+                defaultProfileId = store.defaultProfileId,
+                addSheetOpen = false,
+                activeIndex = next.size - 1,  // jump to new card
+                editorTarget = newProfile.id,  // open editor for the new profile
+                draft = DraftConfig(
+                    preset = preset,
+                    displayName = "",
+                    baseUrl = newProfile.baseUrl,
+                    model = newProfile.model,
+                    apiKey = "",
+                    temperatureText = "",
+                    thinkingEnabled = false,
+                ),
                 testStatus = TestStatus.Idle,
             )
+        }
+    }
+
+    fun removeProfile(id: String) {
+        val next = store.removeProfile(id)
+        _state.update {
+            it.copy(
+                profiles = next,
+                defaultProfileId = store.defaultProfileId,
+                editorTarget = if (it.editorTarget == id) null else it.editorTarget,
+                activeIndex = it.activeIndex.coerceAtMost(maxOf(0, next.size)),
+            )
+        }
+    }
+
+    fun setAsDefault(id: String) {
+        store.defaultProfileId = id
+        _state.update { it.copy(defaultProfileId = id) }
+    }
+
+    fun openEditor(id: String) {
+        val p = store.profileById(id) ?: return
+        _state.update {
+            it.copy(
+                editorTarget = id,
+                draft = DraftConfig(
+                    preset = p.preset,
+                    displayName = p.displayName,
+                    baseUrl = p.baseUrl,
+                    model = p.model,
+                    apiKey = p.apiKey,
+                    temperatureText = p.temperature?.let { v -> "%.2f".format(v) }.orEmpty(),
+                    thinkingEnabled = p.thinkingEnabled,
+                ),
+                testStatus = TestStatus.Idle,
+            )
+        }
+    }
+
+    fun setDisplayName(s: String) {
+        _state.update { it.copy(draft = it.draft.copy(displayName = s)) }
+    }
+
+    /** 在编辑抽屉里点"移除"时调用 — 关抽屉、删 profile。 */
+    fun removeCurrentEditingProfile() {
+        val target = _state.value.editorTarget ?: return
+        val next = store.removeProfile(target)
+        _state.update {
+            it.copy(
+                profiles = next,
+                defaultProfileId = store.defaultProfileId,
+                editorTarget = null,
+                activeIndex = it.activeIndex.coerceAtMost(maxOf(0, next.size)),
+            )
+        }
+    }
+
+    fun closeEditor() = _state.update { it.copy(editorTarget = null) }
+
+    private fun invalidateTest() {
+        _state.update {
+            // 编辑抽屉里的改动还没存盘 → 不去碰持久态；只把灯先回黄。
+            it.copy(testStatus = TestStatus.Idle)
         }
     }
 
@@ -164,41 +199,37 @@ class SettingsViewModel(private val store: SettingsStore) : ViewModel() {
     }
 
     fun save() {
-        val draft = _state.value.draft
-        store.presetId = draft.preset.id
-        store.provider = draft.preset.provider
-        store.apiKey = draft.apiKey
-        store.model = draft.model.ifBlank { draft.preset.defaultModel }
-        store.baseUrl = draft.baseUrl.takeIf { it.isNotBlank() }
+        val s = _state.value
+        val targetId = s.editorTarget ?: return
+        val existing = store.profileById(targetId) ?: return
+        val draft = s.draft
         val parsedTemp = draft.temperatureText.trim().toDoubleOrNull()?.coerceIn(0.0, 2.0)
-        store.temperature = parsedTemp
-        store.thinkingEnabled = draft.thinkingEnabled
-        // Cycle 0019：save() 信任此刻的 lastTestPassed — 任何改动都已经在
-        // setter 里把它打回 false 了。这里没改 → 仍然是上次测试的状态。
-        val keepGreen = store.lastTestPassed
+        val updated = existing.copy(
+            presetId = draft.preset.id,
+            displayName = draft.displayName.trim(),
+            baseUrl = draft.baseUrl,
+            model = draft.model.ifBlank { draft.preset.defaultModel },
+            apiKey = draft.apiKey,
+            temperature = parsedTemp,
+            thinkingEnabled = draft.thinkingEnabled,
+        )
+        store.updateProfile(updated)
         _state.update {
-            val saved = SavedConfig(
-                preset = draft.preset,
-                provider = draft.preset.provider,
-                baseUrl = draft.baseUrl,
-                model = draft.model.ifBlank { draft.preset.defaultModel },
-                apiKey = draft.apiKey,
-                keyConfigured = store.hasKey(),
-                temperature = parsedTemp,
-                thinkingEnabled = draft.thinkingEnabled,
-                lastTestPassed = keepGreen,
+            it.copy(
+                profiles = store.profiles,
+                editorTarget = null,
             )
-            it.copy(saved = saved, editorOpen = false)
         }
     }
 
-    fun clear() {
+    fun resetAll() {
         store.clear()
         _state.update { loadState() }
     }
 
     fun testConnection() {
         val draft = _state.value.draft
+        val targetId = _state.value.editorTarget
         if (draft.apiKey.isBlank()) {
             _state.update { it.copy(testStatus = TestStatus.Failed("配置", "先填 API key")) }
             return
@@ -237,12 +268,16 @@ class SettingsViewModel(private val store: SettingsStore) : ViewModel() {
                 )
             }
             val result = client.extractItemDrafts(text = "测试连接：随便编一个 AirPods Pro 2")
-            // 持久化：成功 → 绿灯；失败 → 不动（多半已经从 false 起步，
-            // 但若之前是 true 这次失败，也降回 false）
-            store.lastTestPassed = result.isSuccess
+            // 把 lastTestPassed 同步到这份 profile（如果在编辑中且还没 save，
+            // 这次结果直接 patch 到磁盘上的 profile 上；下次 save 不会覆盖它）。
+            if (targetId != null) {
+                store.profileById(targetId)?.let { p ->
+                    store.updateProfile(p.copy(lastTestPassed = result.isSuccess))
+                }
+            }
             _state.update {
                 it.copy(
-                    saved = it.saved.copy(lastTestPassed = result.isSuccess),
+                    profiles = store.profiles,
                     testStatus = if (result.isSuccess) TestStatus.Ok
                     else result.exceptionOrNull().toTestFailed(),
                 )
@@ -260,14 +295,6 @@ class SettingsViewModel(private val store: SettingsStore) : ViewModel() {
     }
 }
 
-/**
- * 把 AiClient 抛出的各种异常归到一个简短的类别 + 一行人话。
- *
- * - `HTTP 400: { ... json ... }` → 解出 provider 报的 `error.message`，
- *   类别用 "HTTP 400"
- * - 网络异常 (UnknownHost / Connect / SocketTimeout) → 类别 "网络"
- * - 其他 → 类别 "错误"，全文当 detail
- */
 private fun Throwable?.toTestFailed(): TestStatus.Failed {
     val raw = this?.message?.trim().orEmpty()
     if (raw.isEmpty()) return TestStatus.Failed("错误", "未知异常 (${this?.javaClass?.simpleName ?: "?"})")
@@ -293,7 +320,6 @@ private fun Throwable?.toTestFailed(): TestStatus.Failed {
     return TestStatus.Failed("错误", raw.take(280))
 }
 
-/** 从 provider 的 JSON error 体里抓 `error.message` / `error.msg`。 */
 private fun extractProviderErrorMessage(body: String): String? {
     if (!body.startsWith("{")) return null
     return runCatching {
@@ -301,10 +327,10 @@ private fun extractProviderErrorMessage(body: String): String? {
             .jsonObject
         val err = obj["error"] ?: obj["err"] ?: return@runCatching null
         when (err) {
-            is kotlinx.serialization.json.JsonObject ->
+            is JsonObject ->
                 (err["message"] ?: err["msg"])
-                    ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
-            is kotlinx.serialization.json.JsonPrimitive ->
+                    ?.let { (it as? JsonPrimitive)?.contentOrNull }
+            is JsonPrimitive ->
                 err.contentOrNull
             else -> null
         }

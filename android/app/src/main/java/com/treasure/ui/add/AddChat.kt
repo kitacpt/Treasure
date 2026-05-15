@@ -12,7 +12,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +43,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -63,6 +67,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
@@ -89,6 +96,8 @@ fun AddChat(
     onSendText: (String) -> Unit,
     onSendPhotos: (List<android.net.Uri>, String) -> Unit,
     onStartVoice: () -> Unit,
+    /** Cycle 0035 v2：press-and-hold 语音松手 — stop recorder + send。 */
+    onPressVoiceCommit: () -> Unit,
     onRetryLastExtract: () -> Unit,
     onGoSettings: () -> Unit,
     onPreviewPhoto: (android.net.Uri) -> Unit,
@@ -111,13 +120,43 @@ fun AddChat(
     onRemoveWorkingItem: (String) -> Unit,
     /** Cycle 0034 v5：drawer 右上一键录入 — commit 所有 PENDING / MODIFIED。 */
     onCommitAllPending: () -> Unit,
+    /** Cycle 0035：录入页 chatbar 右下角"附件 / 模型"两个 chip 抽屉用的数据。 */
+    aiProfiles: List<com.treasure.data.AiProfile>,
+    selectedProfileId: String?,
+    onSelectProfile: (String) -> Unit,
+    onPickFile: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
     val context = LocalContext.current
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    // Cycle 0035：Composer 实际渲染高度（含展开的 chatbar drawer）。下方
+    // LazyColumn 的 bottom contentPadding 跟着它走 — 抽屉撑开时输入框被顶
+    // 上去，最后一条消息也跟着被顶上去，不会被盖住。
+    var composerHeightPx by remember { mutableStateOf(0) }
+    // Cycle 0035 v2：press-and-hold 语音录制中 — true 时盖一层半屏毛玻璃在
+    // 聊天列表上，"录音中… 松手发送"。
+    var pressVoiceActive by remember { mutableStateOf(false) }
+
+    // Cycle 0035 v5：IME 弹起 / 收起时把最后一条消息再拉到底 —— LazyColumn
+    // 自己维护"距顶部"的滚动位置，viewport 一缩小，原本贴底的消息会被推
+    // 出视野下边，看上去就是"聊天没跟着键盘上抬"。监听 IME 高度变化主动
+    // animateScrollToItem 到末尾。
+    val imeBottomDp = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+    LaunchedEffect(imeBottomDp) {
+        if (state.messages.isNotEmpty()) {
+            listState.animateScrollToItem(state.messages.size - 1)
+        }
+    }
 
     LaunchedEffect(state.messages.size) {
+        if (state.messages.isNotEmpty()) {
+            listState.animateScrollToItem(state.messages.size - 1)
+        }
+    }
+    // Cycle 0035：Composer 高度变化（抽屉展开 / 收起）时把最后一条消息再
+    // 拉到底，避免被刚撑开的抽屉短暂盖住。
+    LaunchedEffect(composerHeightPx) {
         if (state.messages.isNotEmpty()) {
             listState.animateScrollToItem(state.messages.size - 1)
         }
@@ -160,8 +199,25 @@ fun AddChat(
         }
     }
 
+    // Cycle 0035 v3：架构改成 Header → LazyColumn(weight 1) → Composer 直接
+    // 串在 Column 里，输入框上方就是 LazyColumn 的底；最后一条消息物理上
+    // 不可能再被 Composer 盖住。键盘 / 抽屉撑高 Composer 时 LazyColumn 自动
+    // 让位。不再用 contentPadding 估算 Composer 高度的 hack。
+    //
+    // Cycle 0035 v4：
+    //  - 收紧 Composer 与底部胶囊的距离（100 → 72dp，跟胶囊顶部贴近一些）
+    //  - 用 edge-to-edge + enableEdgeToEdge 之后系统不再自动 adjustResize，
+    //    所以 IME 弹起得自己把内容上推 — bottom 取 max(IME, 72dp) 实现
+    //    "无键盘 = 给胶囊留位，有键盘 = 顶到 IME 上方"。
+    val bottomImeInset = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+    val imeOpen = bottomImeInset > 0.dp
+    val composerBottomInset = if (imeOpen) bottomImeInset else 72.dp
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = composerBottomInset),
+        ) {
             ChatHeader(
                 title = state.conversationTitle,
                 workingItemCount = workingItems.size,
@@ -174,107 +230,117 @@ fun AddChat(
                 NotConfiguredBanner(onGoSettings = onGoSettings)
             }
 
-            // The composer floats over the bottom of this column at
-            // navigationBarsPadding + 100dp (roughly 150–170dp tall once
-            // the composer + control island stack). Add equivalent bottom
-            // contentPadding so messages can scroll fully into view above
-            // the composer instead of disappearing under it.
-            //
-            // Cycle 0014：键盘弹起时也要让消息往上腾出位置 — bottom inset 取
-            // max(navigationBars, ime)。Compose 的 imePadding 在 IME 上来时
-            // 自动是包含 navBar 的高度。
-            val bottomNavInset = WindowInsets.navigationBars
-                .asPaddingValues().calculateBottomPadding()
-            val bottomImeInset = WindowInsets.ime
-                .asPaddingValues().calculateBottomPadding()
-            val effectiveBottom = maxOf(bottomNavInset, bottomImeInset)
-            // Cycle 0021：包一层 SelectionContainer 让用户能长按 → 复制 / 选择
-            // 任意一段文字（助手 / 用户 / 语音转写 / 草稿副标都行）。
-            // Composer 那边的 BasicTextField 自带 paste，无需多动。
-            androidx.compose.foundation.text.selection.SelectionContainer(
+            // Cycle 0035 v3：聊天列表 wrap 在 Box 里，press-voice 半屏遮罩
+            // 直接铺这个 Box，物理上覆住 LazyColumn 区域，不挡下面的 Composer。
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
             ) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(
-                        start = 22.dp,
-                        end = 22.dp,
-                        top = 18.dp,
-                        bottom = 18.dp + effectiveBottom + 160.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                androidx.compose.foundation.text.selection.SelectionContainer(
+                    modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(state.messages.size) { idx ->
-                        val message = state.messages[idx]
-                        MessageRow(
-                            message = message,
-                            onPreviewProposal = onPreviewProposal,
-                            onPreviewPhoto = onPreviewPhoto,
-                            onAcceptProposal = onAcceptProposal,
-                            onAcceptAndCommitProposal = onAcceptAndCommitProposal,
-                            onRejectProposal = onRejectProposal,
-                        )
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 22.dp,
+                            end = 22.dp,
+                            top = 18.dp,
+                            bottom = 18.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(state.messages.size) { idx ->
+                            val message = state.messages[idx]
+                            MessageRow(
+                                message = message,
+                                onPreviewProposal = onPreviewProposal,
+                                onPreviewPhoto = onPreviewPhoto,
+                                onAcceptProposal = onAcceptProposal,
+                                onAcceptAndCommitProposal = onAcceptAndCommitProposal,
+                                onRejectProposal = onRejectProposal,
+                            )
+                        }
+                        if (state.busy) {
+                            item { TypingIndicator(startedAt = state.busyStartedAt) }
+                        } else if (state.lastElapsedMs != null && state.messages.lastOrNull() !is AddMessage.User && state.messages.lastOrNull() !is AddMessage.UserPhoto) {
+                            item { ElapsedHint(state.lastElapsedMs) }
+                        }
+                        if (state.retryAvailable && !state.busy) {
+                            item { RetryRow(onRetry = onRetryLastExtract) }
+                        }
                     }
-                    if (state.busy) {
-                        item { TypingIndicator(startedAt = state.busyStartedAt) }
-                    } else if (state.lastElapsedMs != null && state.messages.lastOrNull() !is AddMessage.User && state.messages.lastOrNull() !is AddMessage.UserPhoto) {
-                        // Cycle 0031：上一轮 AI 调用耗时小字 — 仅当最后一条不是用户消息
-                        // 时显示（用户已经发新一句话 / 图，旧耗时就别再喧宾夺主）
-                        item { ElapsedHint(state.lastElapsedMs) }
-                    }
-                    // Cycle 0034 v3：上一轮失败时挂一个"重试"按钮 — 用户网断 /
-                    // 服务挂了之后可以一键重发，不用重新打字 / 选图。
-                    if (state.retryAvailable && !state.busy) {
-                        item { RetryRow(onRetry = onRetryLastExtract) }
+                }
+
+                // Cycle 0035 v3：press-hold 录音时半屏毛玻璃只盖聊天区，
+                // Composer 仍在下方可见、可继续按住。
+                if (pressVoiceActive) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(colors.paper.copy(alpha = 0.88f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            AnimatedSoundwave(color = colors.terra)
+                            Spacer(Modifier.height(18.dp))
+                            Text(
+                                text = "录音中…",
+                                color = colors.ink,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "松手发送",
+                                color = colors.sub,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // Composer floats above the global control island. Control island
-        // sits at navigationBarsPadding + 18dp + ~50dp tall; we sit at
-        // 100dp so we're always at least 32dp clear of its top edge.
-        //
-        // Cycle 0014：用 imePadding 替代 navigationBarsPadding — 没键盘时
-        // imePadding 等价 navigationBars，键盘升起时 composer 自动跟着上浮。
-        // bottom 也按是否在用键盘做判断：键盘起时不再给 100dp 控制岛缓冲，
-        // 因为控制岛在键盘下面被挡住了。
-        val imeOpen = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
-        Composer(
-            input = input,
-            onInputChange = { input = it },
-            busy = state.busy,
-            saved = state.saved,
-            pendingPhotos = pendingPhotos,
-            onRemovePending = { uri -> pendingPhotos = pendingPhotos - uri },
-            onSend = {
-                if (pendingPhotos.isNotEmpty()) {
-                    // 一组图片 + 一段文字一起送给 AI；AI 据图分配给物品影集。
-                    onSendPhotos(pendingPhotos, input)
-                } else {
-                    onSendText(input)
-                }
-                input = ""
-                pendingPhotos = emptyList()
-            },
-            onStop = onStopExtract,
-            onTakePhoto = ::launchPhotoFlow,
-            onStartVoice = onStartVoice,
-            onPreviewPending = { idx ->
-                onPreviewPendingPhoto(pendingPhotos.map { it.toString() }, idx)
-            },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .imePadding()
-                .padding(
-                    bottom = if (imeOpen) 8.dp else 100.dp,
-                    start = 14.dp,
-                    end = 14.dp,
-                ),
-        )
+            // Cycle 0035 v3：Composer 直接接在 LazyColumn 下面 — LazyColumn
+            // weight(1) 已经自动让出 Composer 高度，最后一条消息物理上不可能
+            // 被盖住。.imePadding 让键盘弹起时 Composer 跟着上抬。
+            Composer(
+                input = input,
+                onInputChange = { input = it },
+                busy = state.busy,
+                saved = state.saved,
+                pendingPhotos = pendingPhotos,
+                onRemovePending = { uri -> pendingPhotos = pendingPhotos - uri },
+                onSend = {
+                    if (pendingPhotos.isNotEmpty()) {
+                        onSendPhotos(pendingPhotos, input)
+                    } else {
+                        onSendText(input)
+                    }
+                    input = ""
+                    pendingPhotos = emptyList()
+                },
+                onStop = onStopExtract,
+                onTakePhoto = ::launchPhotoFlow,
+                onStartVoice = onStartVoice,
+                onPreviewPending = { idx ->
+                    onPreviewPendingPhoto(pendingPhotos.map { it.toString() }, idx)
+                },
+                aiProfiles = aiProfiles,
+                selectedProfileId = selectedProfileId,
+                onSelectProfile = onSelectProfile,
+                onPickFile = onPickFile,
+                allItems = allItems,
+                onPressVoiceStart = { onStartVoice() },
+                onPressVoiceSend = { onPressVoiceCommit() },
+                onPressVoiceChange = { active -> pressVoiceActive = active },
+                onAddExistingItem = onAddExistingItem,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .onSizeChanged { composerHeightPx = it.height },
+            )
+        }
 
         if (historyOpen) {
             HistoryDropdown(
@@ -1325,7 +1391,28 @@ private fun Waveform(
     }
 }
 
-// ─── composer ─────────────────────────────────────────────────────────
+// ─── composer (cycle 0035 redesign) ───────────────────────────────────
+
+/**
+ * Cycle 0035 — 新版 chatbar:
+ *  - 两个 chip 在最上 (附件 / 模型)
+ *  - 输入栏内部从左到右：mic / text / emoji；外侧右边独立圆形 send 键
+ *  - 抽屉在 chip + input 下方，按需展开 0 → fit-content；整个 Column 锚在底部
+ *    所以抽屉撑高时输入栏会被顶上去
+ *  - 抽屉三种：附件 (3-grid 图/文件/物品) · 模型 (单选) · emoji (grid)
+ */
+private enum class ChatDrawer { None, Attach, Model, Emoji, ItemPicker }
+
+private val EMOJI_PALETTE = listOf(
+    "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣",
+    "😊", "😇", "🙂", "😉", "😌", "😍", "🥰", "😘",
+    "😎", "🤩", "🥳", "😏", "😴", "🤔", "🤨", "🧐",
+    "😱", "😡", "🥺", "😭", "😢", "🤯", "🥵", "🥶",
+    "👍", "👎", "👌", "✌️", "🤝", "🙏", "👏", "🫶",
+    "🔥", "✨", "⭐", "🌟", "💫", "💥", "❤️", "💔",
+    "🎉", "🎊", "🎁", "🎂", "🍰", "☕", "🍺", "🍷",
+    "📷", "🎵", "📚", "📝", "✅", "❌", "⚡", "🌈",
+)
 
 @Composable
 private fun Composer(
@@ -1338,27 +1425,53 @@ private fun Composer(
     onSend: () -> Unit,
     onStop: () -> Unit,
     onTakePhoto: () -> Unit,
-    /** Cycle 0034 v2：长按麦克风进入录音全屏页。 */
     onStartVoice: () -> Unit = {},
-    /** Cycle 0034 v3：点缩略图全屏预览（左右滑切换待发送的图）。 */
     onPreviewPending: (Int) -> Unit = {},
+    aiProfiles: List<com.treasure.data.AiProfile> = emptyList(),
+    selectedProfileId: String? = null,
+    onSelectProfile: (String) -> Unit = {},
+    onPickFile: () -> Unit = {},
+    allItems: List<com.treasure.core.domain.Item> = emptyList(),
+    onAddExistingItem: (String) -> Unit = {},
+    /** Cycle 0035 v2：新的语音流程 — 点击麦克风进语音态，长按输入框直接录音、松手发送。
+     *  这两个回调取代之前 mic 长按入 RecordingOverlay 的全屏流程。 */
+    onPressVoiceStart: () -> Unit = {},
+    onPressVoiceSend: () -> Unit = {},
+    onPressVoiceChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTreasureColors.current
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(colors.card)
-            .border(0.5.dp, colors.line, RoundedCornerShape(22.dp))
-            .padding(horizontal = 14.dp, vertical = 7.dp),
-    ) {
-        // Cycle 0034：pending photos strip — 多张图横滑预览，单张右上 × 删。
-        // 用户可再点 📷 追加更多。AI 见到 N 张图后会按 source_index 分配给草稿。
+    var drawer by remember { mutableStateOf(ChatDrawer.None) }
+    // Cycle 0035 v2：点麦克风进入语音态（输入框变成"长按输入语音"按钮）。
+    var voiceMode by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val selectedProfile = remember(aiProfiles, selectedProfileId) {
+        aiProfiles.firstOrNull { it.id == selectedProfileId } ?: aiProfiles.firstOrNull()
+    }
+
+    // Cycle 0035 v2：点 chip 打开抽屉时同步收输入法（保持画面整洁，且抽屉
+    // 不会被键盘往上挤）。
+    LaunchedEffect(drawer) {
+        if (drawer != ChatDrawer.None) {
+            keyboardController?.hide()
+            focusManager.clearFocus(force = true)
+        }
+    }
+    // Cycle 0035 v2：抽屉开着时 back 键先关抽屉，不要 pop 到 Main。
+    androidx.activity.compose.BackHandler(enabled = drawer != ChatDrawer.None) {
+        drawer = ChatDrawer.None
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        // pending photos strip (kept above chip row)
         if (pendingPhotos.isNotEmpty()) {
             Column(modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 2.dp, bottom = 6.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(colors.card)
+                .border(0.5.dp, colors.line, RoundedCornerShape(18.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 androidx.compose.foundation.lazy.LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1397,108 +1510,196 @@ private fun Composer(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = if (pendingPhotos.size == 1) "可以配一句话一起发" else "${pendingPhotos.size} 张图 · 可再加 📷 / 配一句话一起发",
+                    text = if (pendingPhotos.size == 1) "可以配一句话一起发" else "${pendingPhotos.size} 张图 · 可再加 / 配一句话一起发",
                     color = colors.sub,
                     style = MaterialTheme.typography.labelSmall,
                     fontStyle = FontStyle.Italic,
                 )
             }
+            Spacer(Modifier.height(8.dp))
         }
+
+        // chip row (附件 / 模型)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+        ) {
+            ChatChip(
+                active = drawer == ChatDrawer.Attach,
+                enabled = !saved,
+                onClick = {
+                    drawer = if (drawer == ChatDrawer.Attach) ChatDrawer.None else ChatDrawer.Attach
+                },
+                leading = { Text("＋", style = MaterialTheme.typography.labelSmall) },
+            ) { Text("附件", style = MaterialTheme.typography.labelMedium) }
+            ChatChip(
+                active = drawer == ChatDrawer.Model,
+                enabled = !saved,
+                onClick = {
+                    drawer = if (drawer == ChatDrawer.Model) ChatDrawer.None else ChatDrawer.Model
+                },
+                leading = { Text("✦", style = MaterialTheme.typography.labelSmall) },
+            ) {
+                Text(
+                    text = selectedProfile?.shortLabel() ?: "未配置",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("▾", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+
+        // input row
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clickable(enabled = !saved, onClick = onTakePhoto),
-                contentAlignment = Alignment.Center,
-            ) { CameraGlyph(if (saved) colors.sub.copy(alpha = 0.4f) else colors.sub) }
-            Spacer(Modifier.width(8.dp))
-            Box(
+            // input pill with mic-inside-left + emoji-inside-right
+            Row(
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 28.dp, max = 96.dp),
-                contentAlignment = Alignment.CenterStart,
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(colors.card)
+                    .border(0.5.dp, colors.line, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (input.isEmpty()) {
-                    Text(
-                        text = when {
-                            saved -> "会话已封存 · 已收入图鉴"
-                            pendingPhotos.isNotEmpty() -> "配一句话…（可留空）"
-                            else -> "说说这件东西…"
+                // Cycle 0035 v2：mic 改成点击切换 voiceMode，glyph 用声波而非
+                // 麦克风图标 — 老 MicGlyph 偏丑。
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable(enabled = !saved && !busy) {
+                            voiceMode = !voiceMode
+                            // 进 voice 态时收键盘；退出态保持原状
+                            if (voiceMode) {
+                                keyboardController?.hide()
+                                focusManager.clearFocus(force = true)
+                            }
                         },
-                        color = colors.sub.copy(alpha = if (saved) 0.5f else 1f),
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontStyle = if (saved) FontStyle.Italic else FontStyle.Normal,
+                    contentAlignment = Alignment.Center,
+                ) {
+                    SoundwaveGlyph(
+                        color = when {
+                            saved || busy -> colors.sub.copy(alpha = 0.4f)
+                            voiceMode -> colors.terra
+                            else -> colors.sub
+                        },
                     )
                 }
-                BasicTextField(
-                    value = input,
-                    onValueChange = onInputChange,
-                    enabled = !saved,
-                    cursorBrush = SolidColor(colors.terra),
-                    maxLines = 4,
-                    textStyle = LocalTextStyle.current.copy(
-                        color = if (saved) colors.sub.copy(alpha = 0.5f) else colors.ink,
-                        fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
-                        fontSize = MaterialTheme.typography.bodyLarge.fontSize,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            // Cycle 0034 v2：麦克风键 — 长按进入全屏录音页。短按只是个 hint。
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .pointerInput(saved, busy) {
-                        detectTapGestures(
-                            onLongPress = {
-                                if (!saved && !busy) onStartVoice()
-                            },
-                        )
-                    },
-                contentAlignment = Alignment.Center,
-            ) { MicGlyph(if (saved || busy) colors.sub.copy(alpha = 0.4f) else colors.sub) }
-            Spacer(Modifier.width(8.dp))
-            // Cycle 0031：发送键三态 —
-            //   busy + 输入空：⬛ 停止键（terra 底 + paper 方块）→ 掐请求
-            //   busy + 输入非空：转圈 ring（terra 描边）置灰、不可点
-            //   非 busy：箭头键，有内容才点亮（ink 底）
-            // saved 模式 disable 整个 composer（外层已 disable 文本框、加号、
-            // 这里也要禁用）。
-            val hasContent = input.isNotBlank() || pendingPhotos.isNotEmpty()
-            when {
-                saved -> {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(colors.line),
-                        contentAlignment = Alignment.Center,
-                    ) { ArrowUpGlyph(colors.sub) }
-                }
-                busy && !hasContent -> {
-                    // 停止键
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(colors.terra)
-                            .clickable(onClick = onStop),
-                        contentAlignment = Alignment.Center,
-                    ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 28.dp, max = 96.dp)
+                        .padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    if (voiceMode) {
+                        // Cycle 0035 v2：voice 态下输入框变成"长按输入语音"
+                        // 按钮 — pointerInput 用 awaitPointerEventScope 把按下/
+                        // 抬起拆开做，press 启动录音、release 自动发送。
                         Box(
                             modifier = Modifier
-                                .size(10.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(colors.paper),
+                                .fillMaxWidth()
+                                .heightIn(min = 28.dp)
+                                .pointerInput(saved, busy) {
+                                    if (saved || busy) return@pointerInput
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            val down = awaitFirstDown(requireUnconsumed = false)
+                                            down.consume()
+                                            onPressVoiceChange(true)
+                                            onPressVoiceStart()
+                                            try {
+                                                waitForUpOrCancellation()?.consume()
+                                            } finally {
+                                                onPressVoiceChange(false)
+                                                onPressVoiceSend()
+                                            }
+                                        }
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "长按 · 录音",
+                                color = colors.ink.copy(alpha = 0.85f),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    } else {
+                        if (input.isEmpty()) {
+                            Text(
+                                text = when {
+                                    saved -> "会话已封存 · 已收入图鉴"
+                                    pendingPhotos.isNotEmpty() -> "配一句话…（可留空）"
+                                    else -> "说说这件东西…"
+                                },
+                                color = colors.sub.copy(alpha = if (saved) 0.5f else 1f),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontStyle = if (saved) FontStyle.Italic else FontStyle.Normal,
+                            )
+                        }
+                        BasicTextField(
+                            value = input,
+                            onValueChange = onInputChange,
+                            enabled = !saved,
+                            cursorBrush = SolidColor(colors.terra),
+                            maxLines = 4,
+                            textStyle = LocalTextStyle.current.copy(
+                                color = if (saved) colors.sub.copy(alpha = 0.5f) else colors.ink,
+                                fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
+                                fontSize = MaterialTheme.typography.bodyLarge.fontSize,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable(enabled = !saved) {
+                            drawer = if (drawer == ChatDrawer.Emoji) ChatDrawer.None else ChatDrawer.Emoji
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    EmojiSmileGlyph(
+                        color = if (drawer == ChatDrawer.Emoji) colors.terra else colors.sub,
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            // send button (outside, circle)
+            val hasContent = input.isNotBlank() || pendingPhotos.isNotEmpty()
+            when {
+                saved -> Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(colors.line),
+                    contentAlignment = Alignment.Center,
+                ) { ArrowUpGlyph(colors.sub) }
+                busy && !hasContent -> Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(colors.terra)
+                        .clickable(onClick = onStop),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(colors.paper),
+                    )
+                }
                 busy -> {
-                    // 旋转圈圈占位 — 已经有想发的内容，等当前请求结束
                     val infinite = androidx.compose.animation.core.rememberInfiniteTransition(label = "send-spin")
                     val rotation by infinite.animateFloat(
                         initialValue = 0f,
@@ -1513,13 +1714,13 @@ private fun Composer(
                     )
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
                             .background(colors.line),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Canvas(modifier = Modifier.size(16.dp)) {
-                            val sw = 1.6.dp.toPx()
+                        Canvas(modifier = Modifier.size(18.dp)) {
+                            val sw = 1.8.dp.toPx()
                             val r = size.minDimension / 2f - sw / 2f
                             rotate(rotation) {
                                 drawArc(
@@ -1542,17 +1743,433 @@ private fun Composer(
                     val canSend = hasContent
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
-                            .background(if (canSend) colors.ink else colors.line)
+                            .background(if (canSend) colors.ink else colors.card)
+                            .border(0.5.dp, if (canSend) colors.ink else colors.line, CircleShape)
                             .clickable(enabled = canSend, onClick = onSend),
                         contentAlignment = Alignment.Center,
                     ) { ArrowUpGlyph(if (canSend) colors.paper else colors.sub) }
                 }
             }
         }
+
+        // drawer slot — animated 0 → wrap. Pushes the input upward when open.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = drawer != ChatDrawer.None,
+            enter = androidx.compose.animation.expandVertically(
+                expandFrom = Alignment.Top,
+            ) + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.shrinkVertically(
+                shrinkTowards = Alignment.Top,
+            ) + androidx.compose.animation.fadeOut(),
+        ) {
+            ChatDrawerBody(
+                drawer = drawer,
+                onClose = { drawer = ChatDrawer.None },
+                onPickImage = {
+                    drawer = ChatDrawer.None
+                    onTakePhoto()
+                },
+                onPickFile = {
+                    drawer = ChatDrawer.None
+                    onPickFile()
+                },
+                onSwitchToItemPicker = { drawer = ChatDrawer.ItemPicker },
+                aiProfiles = aiProfiles,
+                selectedProfileId = selectedProfile?.id,
+                onSelectProfile = { id ->
+                    onSelectProfile(id)
+                    drawer = ChatDrawer.None
+                },
+                onPickEmoji = { e -> onInputChange(input + e) },
+                allItems = allItems,
+                onPickExistingItem = { id ->
+                    onAddExistingItem(id)
+                    drawer = ChatDrawer.None
+                },
+            )
+        }
     }
 }
+
+@Composable
+private fun ChatChip(
+    active: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    leading: (@Composable () -> Unit)? = null,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (active) colors.ink else colors.card)
+            .border(0.5.dp, if (active) colors.ink else colors.line, RoundedCornerShape(999.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides
+                if (active) colors.paper else if (enabled) colors.ink else colors.sub,
+        ) {
+            if (leading != null) leading()
+            content()
+        }
+    }
+}
+
+@Composable
+private fun ChatDrawerBody(
+    drawer: ChatDrawer,
+    onClose: () -> Unit,
+    onPickImage: () -> Unit,
+    onPickFile: () -> Unit,
+    onSwitchToItemPicker: () -> Unit,
+    aiProfiles: List<com.treasure.data.AiProfile>,
+    selectedProfileId: String?,
+    onSelectProfile: (String) -> Unit,
+    onPickEmoji: (String) -> Unit,
+    allItems: List<com.treasure.core.domain.Item>,
+    onPickExistingItem: (String) -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.paper)
+            .border(0.5.dp, colors.line, RoundedCornerShape(18.dp)),
+    ) {
+        // header bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterVertically)
+                    .width(28.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(colors.line),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = when (drawer) {
+                    ChatDrawer.Attach -> "添加附件"
+                    ChatDrawer.Model -> "选择模型"
+                    ChatDrawer.Emoji -> "表情"
+                    ChatDrawer.ItemPicker -> "添加已有物品"
+                    ChatDrawer.None -> ""
+                },
+                color = colors.ink,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("✕", color = colors.sub, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        when (drawer) {
+            ChatDrawer.Attach -> AttachGrid(
+                onPickImage = onPickImage,
+                onPickFile = onPickFile,
+                onPickItem = onSwitchToItemPicker,
+            )
+            ChatDrawer.Model -> ModelList(
+                profiles = aiProfiles,
+                selectedId = selectedProfileId,
+                onPick = onSelectProfile,
+            )
+            ChatDrawer.Emoji -> EmojiGrid(onPick = onPickEmoji)
+            ChatDrawer.ItemPicker -> ItemPickerList(
+                items = allItems,
+                onPick = onPickExistingItem,
+            )
+            ChatDrawer.None -> Unit
+        }
+    }
+}
+
+@Composable
+private fun AttachGrid(
+    onPickImage: () -> Unit,
+    onPickFile: () -> Unit,
+    onPickItem: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        // Cycle 0035 v2：换成线描 glyph，跟全局画风对齐（emoji 字符在各家
+        // ROM 上长得差距太大、又破坏 serif/mono 的克制感）。
+        AttachTile(label = "图片", sub = "拍照或相册",
+            onClick = onPickImage, modifier = Modifier.weight(1f),
+        ) { c -> PictureGlyph(c) }
+        AttachTile(label = "文件", sub = "PDF · 文本",
+            onClick = onPickFile, modifier = Modifier.weight(1f),
+        ) { c -> FileGlyph(c) }
+        AttachTile(label = "物品", sub = "已收入图鉴",
+            onClick = onPickItem, modifier = Modifier.weight(1f),
+        ) { c -> CubeGlyph(c) }
+    }
+}
+
+@Composable
+private fun AttachTile(
+    label: String,
+    sub: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    glyph: @Composable (color: Color) -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.card)
+            .border(0.5.dp, colors.line, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp, horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(colors.paper),
+            contentAlignment = Alignment.Center,
+        ) {
+            glyph(colors.ink)
+        }
+        Text(label, color = colors.ink, style = MaterialTheme.typography.labelLarge)
+        Text(sub, color = colors.sub, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun ModelList(
+    profiles: List<com.treasure.data.AiProfile>,
+    selectedId: String?,
+    onPick: (String) -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    if (profiles.isEmpty()) {
+        Text(
+            text = "去 [设置] 添加 AI 服务",
+            color = colors.sub,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+        )
+        return
+    }
+    Column(
+        modifier = Modifier
+            .heightIn(max = 220.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+    ) {
+        profiles.forEach { p ->
+            val on = p.id == selectedId
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (on) colors.ink else Color.Transparent)
+                    .clickable { onPick(p.id) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = p.preset.display,
+                        color = if (on) colors.paper else colors.ink,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = p.effectiveModel,
+                        color = if (on) colors.paper.copy(alpha = 0.7f) else colors.sub,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .border(
+                            width = 1.5.dp,
+                            color = if (on) colors.paper else colors.line,
+                            shape = CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (on) Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(colors.paper),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmojiGrid(onPick: (String) -> Unit) {
+    val colors = LocalTreasureColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 220.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+    ) {
+        EMOJI_PALETTE.chunked(8).forEach { row ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                row.forEach { e ->
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onPick(e) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(e, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ItemPickerList(
+    items: List<com.treasure.core.domain.Item>,
+    onPick: (String) -> Unit,
+) {
+    val colors = LocalTreasureColors.current
+    if (items.isEmpty()) {
+        Text(
+            text = "图鉴里还没有物品",
+            color = colors.sub,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+        )
+        return
+    }
+    var query by remember { mutableStateOf("") }
+    val q = query.trim().lowercase()
+    val filtered = remember(items, q) {
+        if (q.isEmpty()) items else items.filter {
+            "${it.brand} ${it.model}".lowercase().contains(q) ||
+                it.nickname.lowercase().contains(q) ||
+                it.oneLiner.lowercase().contains(q)
+        }
+    }
+    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+        // Cycle 0035 v2：搜索条 — 图鉴大了之后没法翻
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(999.dp))
+                .background(colors.card)
+                .border(0.5.dp, colors.line, RoundedCornerShape(999.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+        ) {
+            if (query.isEmpty()) {
+                Text(
+                    text = "搜物品（品牌 / 型号 / 备注）",
+                    color = colors.sub,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                cursorBrush = SolidColor(colors.terra),
+                textStyle = LocalTextStyle.current.copy(
+                    color = colors.ink,
+                    fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Column(
+            modifier = Modifier
+                .heightIn(max = 200.dp)
+                .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+        ) {
+            if (filtered.isEmpty()) {
+                Text(
+                    text = "没找到匹配的物品",
+                    color = colors.sub,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp),
+                )
+            } else {
+                filtered.forEach { item ->
+                    val itemTitle = "${item.brand} ${item.model}".trim()
+                        .ifBlank { item.nickname }
+                        .ifBlank { "（无标题）" }
+                    val itemSub = item.oneLiner.ifBlank { item.nickname }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onPick(item.id) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = itemTitle,
+                                color = colors.ink,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            if (itemSub.isNotBlank() && itemSub != itemTitle) {
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = itemSub,
+                                    color = colors.sub,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+                        Text("+", color = colors.terra, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 private fun CameraGlyph(color: Color) {
@@ -1609,6 +2226,173 @@ private fun ArrowUpGlyph(color: Color) {
         drawLine(color, Offset(w / 2f, h * 0.20f), Offset(w / 2f, h * 0.80f), strokeWidth = sw)
         drawLine(color, Offset(w * 0.25f, h * 0.45f), Offset(w / 2f, h * 0.20f), strokeWidth = sw)
         drawLine(color, Offset(w * 0.75f, h * 0.45f), Offset(w / 2f, h * 0.20f), strokeWidth = sw)
+    }
+}
+
+// ─── Cycle 0035 v2 chatbar glyphs ─────────────────────────────────────
+
+/** 五条对称声波线 — 取代 mic 图标，跟"声音"语义更直接。 */
+@Composable
+private fun SoundwaveGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(18.dp)) {
+        val sw = 1.5.dp.toPx()
+        val w = size.width
+        val h = size.height
+        // 中间 3 条 + 两边各 1 条；高度按距离中心递减。
+        val xs = listOf(0.18f, 0.34f, 0.50f, 0.66f, 0.82f)
+        val heights = listOf(0.32f, 0.62f, 0.86f, 0.62f, 0.32f)
+        xs.forEachIndexed { i, xRatio ->
+            val x = w * xRatio
+            val hb = h * heights[i]
+            drawLine(
+                color = color,
+                start = Offset(x, (h - hb) / 2f),
+                end = Offset(x, (h + hb) / 2f),
+                strokeWidth = sw,
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+        }
+    }
+}
+
+/** 微笑表情线描 — 比 unicode ☺ 在不同 ROM 上稳定。 */
+@Composable
+private fun EmojiSmileGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(18.dp)) {
+        val sw = 1.4.dp.toPx()
+        val w = size.width
+        val h = size.height
+        drawCircle(color = color, radius = w * 0.45f, center = Offset(w / 2f, h / 2f), style = Stroke(sw))
+        // 两眼
+        drawCircle(color = color, radius = sw * 0.8f, center = Offset(w * 0.36f, h * 0.42f))
+        drawCircle(color = color, radius = sw * 0.8f, center = Offset(w * 0.64f, h * 0.42f))
+        // 嘴 — 用一段曲线近似（drawArc 直接画半圆）
+        drawArc(
+            color = color,
+            startAngle = 20f,
+            sweepAngle = 140f,
+            useCenter = false,
+            topLeft = Offset(w * 0.30f, h * 0.40f),
+            size = Size(w * 0.40f, h * 0.35f),
+            style = Stroke(sw, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+        )
+    }
+}
+
+/** 风景照线描 — 矩形 + 太阳 + 远山。 */
+@Composable
+private fun PictureGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val sw = 1.4.dp.toPx()
+        val w = size.width
+        val h = size.height
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.10f, h * 0.15f),
+            size = Size(w * 0.80f, h * 0.70f),
+            cornerRadius = CornerRadius(2.dp.toPx()),
+            style = Stroke(sw),
+        )
+        drawCircle(color = color, radius = w * 0.07f, center = Offset(w * 0.30f, h * 0.34f), style = Stroke(sw))
+        drawLine(color, Offset(w * 0.18f, h * 0.78f), Offset(w * 0.50f, h * 0.50f), strokeWidth = sw, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(color, Offset(w * 0.50f, h * 0.50f), Offset(w * 0.82f, h * 0.78f), strokeWidth = sw, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    }
+}
+
+/** 文件线描 — 带折角的纸张。 */
+@Composable
+private fun FileGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val sw = 1.4.dp.toPx()
+        val w = size.width
+        val h = size.height
+        val left = w * 0.22f
+        val right = w * 0.78f
+        val top = h * 0.14f
+        val bottom = h * 0.86f
+        val corner = w * 0.20f
+        // 主体（去掉右上角后的轮廓）
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(left, top)
+            lineTo(right - corner, top)
+            lineTo(right, top + corner)
+            lineTo(right, bottom)
+            lineTo(left, bottom)
+            close()
+        }
+        drawPath(path, color, style = Stroke(sw))
+        // 折角小三角
+        drawLine(color, Offset(right - corner, top), Offset(right - corner, top + corner), strokeWidth = sw)
+        drawLine(color, Offset(right - corner, top + corner), Offset(right, top + corner), strokeWidth = sw)
+        // 内部三道文字线
+        drawLine(color, Offset(left + w * 0.10f, h * 0.50f), Offset(right - w * 0.10f, h * 0.50f), strokeWidth = sw * 0.7f)
+        drawLine(color, Offset(left + w * 0.10f, h * 0.62f), Offset(right - w * 0.10f, h * 0.62f), strokeWidth = sw * 0.7f)
+        drawLine(color, Offset(left + w * 0.10f, h * 0.74f), Offset(left + w * 0.50f, h * 0.74f), strokeWidth = sw * 0.7f)
+    }
+}
+
+/** 立方体线描 — 已收入图鉴里的物品。 */
+@Composable
+private fun CubeGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val sw = 1.4.dp.toPx()
+        val w = size.width
+        val h = size.height
+        // 简单 2D 盒子轮廓 + 上面 / 侧面分割线
+        val l = w * 0.18f
+        val r = w * 0.82f
+        val t = h * 0.22f
+        val b = h * 0.82f
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(l, t),
+            size = Size(r - l, b - t),
+            cornerRadius = CornerRadius(1.dp.toPx()),
+            style = Stroke(sw),
+        )
+        // 上盖分割
+        drawLine(color, Offset(l, t + (b - t) * 0.30f), Offset(r, t + (b - t) * 0.30f), strokeWidth = sw)
+        // 上盖中线（开盖 hint）
+        drawLine(color, Offset((l + r) / 2f, t), Offset((l + r) / 2f, t + (b - t) * 0.30f), strokeWidth = sw)
+    }
+}
+
+/** Cycle 0035 v2：press-hold 录音中的视觉反馈 — 9 条声波，按 sin 节奏起伏。 */
+@Composable
+private fun AnimatedSoundwave(color: Color) {
+    val infinite = androidx.compose.animation.core.rememberInfiniteTransition(label = "soundwave")
+    val phase by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * Math.PI).toFloat(),
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(
+                durationMillis = 900,
+                easing = androidx.compose.animation.core.LinearEasing,
+            ),
+        ),
+        label = "soundwave-phase",
+    )
+    Canvas(
+        modifier = Modifier
+            .size(width = 140.dp, height = 64.dp),
+    ) {
+        val barCount = 9
+        val sw = 4.dp.toPx()
+        val gap = (size.width - barCount * sw) / (barCount - 1)
+        val cx = size.height / 2f
+        for (i in 0 until barCount) {
+            val offset = (i - (barCount - 1) / 2.0).toFloat()
+            val ampRatio = (kotlin.math.sin(phase + offset * 0.7).toFloat() + 1f) / 2f
+            val h = (size.height * 0.20f) + ampRatio * (size.height * 0.70f)
+            val x = sw / 2f + i * (sw + gap)
+            drawLine(
+                color = color,
+                start = Offset(x, cx - h / 2f),
+                end = Offset(x, cx + h / 2f),
+                strokeWidth = sw,
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+        }
     }
 }
 

@@ -3,6 +3,9 @@ package com.treasure.core.ai
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -219,7 +222,7 @@ class OpenAiClient(
 
     private fun parseDrafts(body: String): List<DraftAction> {
         val response = json.parseToJsonElement(body).jsonObject
-        val choices = response["choices"]?.jsonArray
+        val choices = response["choices"].asArrayOrNull()
             ?: throw IllegalStateException("response missing 'choices'")
         val first = choices.firstOrNull()?.jsonObject
             ?: throw IllegalStateException("empty choices")
@@ -227,7 +230,7 @@ class OpenAiClient(
             ?: throw IllegalStateException("choice missing 'message'")
 
         // 优先：tool_calls 里第一个的 function.arguments（强制 tool_choice 时一定有）
-        val toolArgs = message["tool_calls"]?.jsonArray
+        val toolArgs = message["tool_calls"].asArrayOrNull()
             ?.firstOrNull()?.jsonObject
             ?.get("function")?.jsonObject
             ?.get("arguments")?.jsonPrimitive?.content
@@ -250,12 +253,17 @@ class OpenAiClient(
     }
 
     private fun parseActionsObject(obj: JsonObject): List<DraftAction> {
-        val actionsArr = obj["actions"]?.jsonArray
-            ?: throw IllegalStateException("tool response missing 'actions'")
+        // Cycle 0035：部分模型返回 actions=null 而不是 []。
+        val actionsArr = obj["actions"].asArrayOrNull() ?: return emptyList()
         return actionsArr.map { el ->
             json.decodeFromJsonElement(DraftAction.serializer(), el)
         }
     }
+
+    /** `JsonNull` 不是 Kotlin null — `?.jsonArray` 会硬抛
+     *  "JsonNull is not a JsonArray"。helper 把两种情况都视为缺失。 */
+    private fun JsonElement?.asArrayOrNull(): JsonArray? =
+        if (this == null || this is JsonNull) null else this.jsonArray
 
     companion object {
         const val DEFAULT_MODEL = "gpt-4o-mini"

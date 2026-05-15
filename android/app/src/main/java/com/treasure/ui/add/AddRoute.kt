@@ -108,6 +108,49 @@ fun AddRoute(
     // 拒绝直接收回 recorder。
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var recorder by remember { mutableStateOf<com.treasure.audio.VoiceRecorder?>(null) }
+
+    // Cycle 0035：chatbar 上的"附件 / 模型" chip 需要的状态。
+    // - aiProfiles：从 SettingsStore 读出当前所有 profiles。Settings 页改完
+    //   后 ON_RESUME 时刷新一次。
+    // - selectedProfileId：本次会话用哪个；默认 = store.defaultProfileId，
+    //   chip 切换时同步写到 store.conversationOverrideProfileId。
+    val appCtx = ctx.applicationContext as com.treasure.TreasureApp
+    var aiProfiles by remember {
+        mutableStateOf(appCtx.settingsStore.profiles)
+    }
+    var selectedProfileId by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf(appCtx.settingsStore.defaultProfileId)
+    }
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                aiProfiles = appCtx.settingsStore.profiles
+                if (selectedProfileId == null ||
+                    aiProfiles.none { it.id == selectedProfileId }) {
+                    selectedProfileId = appCtx.settingsStore.defaultProfileId
+                }
+                vm.refreshAiAvailability()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    // Cycle 0035：文件附件 — 占位实现，把选中的文件名作为一条用户文本扔到对
+    // 话里（"先做成直接就添加进工作区的"），具体多模态文件输入后续 cycle 再做。
+    val pickFileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val name = runCatching {
+                ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                    val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
+                }
+            }.getOrNull() ?: uri.lastPathSegment ?: "附件"
+            vm.sendText("📎 已附加文件：$name")
+        }
+    }
     // Cycle 0034 v6：Android 13+ POST_NOTIFICATIONS — 前台保活 service 没这
     // 个权限时通知不显示，部分 OEM (vivo iManager / 华为 Magic) 会把它当
     // 普通后台进程秒杀。进入录入页时申请一次。
@@ -147,6 +190,16 @@ fun AddRoute(
         val dest = com.treasure.audio.VoiceRecorder.newFile(ctx, convoId)
         val r = com.treasure.audio.VoiceRecorder(ctx, dest)
         runCatching { r.start() }.onSuccess { recorder = r }
+    }
+    /** Cycle 0035 v2：press-and-hold 松手 — 停 recorder + 把音频丢进对话发出。
+     *  没在录音时（recorder 为 null，可能 permission 没拿到）静默忽略。 */
+    fun commitVoiceAndSend() {
+        val r = recorder ?: return
+        val result = r.stop()
+        recorder = null
+        if (result != null) {
+            vm.sendVoiceAudio(result.first.absolutePath, result.second)
+        }
     }
     // Cycle 0031：用户点 DraftCta 卡片进 proposal-preview。proposalCta 非 null
     // 时 AddPreview 渲染 cta.draft（用户可微改），trailing 改成 [采用]。
@@ -231,6 +284,7 @@ fun AddRoute(
                     onSendText = vm::sendText,
                     onSendPhotos = vm::sendPhotos,
                     onStartVoice = { startVoice() },
+                    onPressVoiceCommit = { commitVoiceAndSend() },
                     onRetryLastExtract = vm::retryLastExtract,
                     onGoSettings = onGoSettings,
                     onPreviewPhoto = { tapped ->
@@ -296,6 +350,18 @@ fun AddRoute(
                         // 用户是批量入库，让他们留在录入页继续干。Drawer 会
                         // 自动刷新显示新 SAVED 状态。单条 commit 才跳 Detail。
                         vm.commitAllPendingWorkingItems { _ -> }
+                    },
+                    // Cycle 0035：chatbar chip 用的数据 + 回调
+                    aiProfiles = aiProfiles,
+                    selectedProfileId = selectedProfileId,
+                    onSelectProfile = { id ->
+                        selectedProfileId = id
+                        appCtx.settingsStore.conversationOverrideProfileId = id
+                    },
+                    onPickFile = {
+                        runCatching {
+                            pickFileLauncher.launch(arrayOf("*/*"))
+                        }
                     },
                 )
                 AddMode.Preview -> {
@@ -510,17 +576,10 @@ fun AddRoute(
             )
         }
 
-        // Cycle 0034 v2：录音全屏页 — 覆在最上面，长按麦克风进。
-        recorder?.let { r ->
-            RecordingOverlay(
-                recorder = r,
-                onCancel = { recorder = null },
-                onSend = { path, dur ->
-                    recorder = null
-                    vm.sendVoiceAudio(path, dur)
-                },
-            )
-        }
+        // Cycle 0035 v2：录音改成 press-and-hold —— recorder 在按住时由
+        // startVoice() 启动，AddChat 在 chat 区盖一层半屏毛玻璃做反馈；松手
+        // 时 commitVoiceAndSend() 直接发出。全屏 RecordingOverlay 暂时停用
+        // （文件留着，将来可改回 long-press 模式时复用）。
 
         // Cycle 0033：裁剪界面 — 覆在最上面。Confirm 把归一化 rect 传给 VM，
         // VM 异步落盘到 draft-photos/<convoId>/<uuid>.jpg。

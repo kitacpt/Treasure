@@ -3,6 +3,9 @@ package com.treasure.core.ai
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -171,7 +174,7 @@ class AnthropicClient(
 
     private fun parseDrafts(body: String): List<DraftAction> {
         val response = json.parseToJsonElement(body).jsonObject
-        val content = response["content"]?.jsonArray
+        val content = response["content"].asArrayOrNull()
             ?: throw IllegalStateException("response missing 'content'")
         // 优先：tool_use block（强制 tool_choice 时一定有）
         val toolUse = content.firstOrNull {
@@ -198,12 +201,19 @@ class AnthropicClient(
     }
 
     private fun parseActionsObject(obj: JsonObject): List<DraftAction> {
-        val actionsArr = obj["actions"]?.jsonArray
-            ?: throw IllegalStateException("tool response missing 'actions'")
+        // Cycle 0035：部分模型在 "没东西可提" 时把 actions 当 null 返回而不是
+        // 空数组；之前用 `.jsonArray` 直接对 JsonNull 取数组 → 抛
+        // "JsonNull is not a JsonArray"。容忍 null = 视作空 actions。
+        val actionsArr = obj["actions"].asArrayOrNull() ?: return emptyList()
         return actionsArr.map { el ->
             json.decodeFromJsonElement(DraftAction.serializer(), el)
         }
     }
+
+    /** `JsonNull` 不是 Kotlin null — `?.jsonArray` 不会短路，会硬抛。这个
+     *  helper 同时把这两种情况都视为缺失。 */
+    private fun JsonElement?.asArrayOrNull(): JsonArray? =
+        if (this == null || this is JsonNull) null else this.jsonArray
 
     companion object {
         const val DEFAULT_MODEL = "claude-haiku-4-5-20251001"

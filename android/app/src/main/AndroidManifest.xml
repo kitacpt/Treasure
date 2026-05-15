@@ -24,13 +24,18 @@
         android:name="android.hardware.camera.any"
         android:required="false" />
 
+    <!-- Cycle 0035：用户在设置页可以填自定义 OpenAI-兼容 base URL（Ollama
+         / 自建反代 / 局域网 LLM 服务器都属于这种）。Android 9+ 默认禁明文，
+         打开 cleartext 让 http://10.0.0.5:11434 / http://localhost 之类的本地
+         地址能用；https 仍是优先。 -->
     <application
         android:name=".TreasureApp"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Treasure"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Treasure">
+        android:theme="@style/Theme.Treasure"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
