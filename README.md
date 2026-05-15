@@ -2,73 +2,144 @@
 
 > *a private cabinet of things owned, used, & remembered*
 
-一个 Android 应用，用来记录个人爱好装备：羽毛球拍、相机镜头、租过的车、电子设备 …… 每件东西有它的样貌（一张博物馆线描风的矢量图）、参数表、和一条用过的故事线。
+Treasure 把你拥有过的"心头好"——球拍、相机、镜头、租过的车、咖啡机、酒、电子产品——整理成一本私人的博物馆图鉴。每件物品有它的样貌（一张博物馆线描风的矢量图）、关键参数、和一条用过的故事线。
 
-视觉灵感是 19 世纪自然博物馆的图鉴版画 —— 细线勾勒、淡彩平涂、罗马数字标注线。
+不是清单。不是评测。不是社交。**是一个人收藏自己时间的方式。**
 
-## 从这里开始
+视觉灵感来自 19 世纪自然博物馆的图鉴版画 —— 细线勾勒、淡彩平涂、罗马数字标注。
 
-新人 / 新一轮 agent 进来按这个顺序读：
+GitHub：<https://github.com/kitacpt/Treasure> · 当前 **v1.0**（debug APK / Android 8.0+）
 
-1. [`agent.md`](agent.md) —— 当前状态、做了什么、接下来做啥（**先读这个**）
-2. 浏览器开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) —— v1 视觉规格（主体设计）
-3. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) —— v2 录入页设计稿
-4. [`docs/dev-loop.md`](docs/dev-loop.md) —— 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
-5. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
-6. [`docs/adr/`](docs/adr/) —— 6 份决策记录
-7. [`openspec/`](openspec/) —— cycle 0001-0031 的 proposal / spec / notes
+---
 
-## 当前状态（2026-05-12）
+## ✦ 它能做什么
 
-**cycle 0001 → 0031 全部落地**。14 MB debug APK，装到 vivo X200 Pro mini 上端到端跑通：
+- **6 内建分类**（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描插画
+- **自定义分类**：从相册挑代表图，自建任意"图鉴"（书、文具、香水、模型……都行）
+- **AI 录入**（chat-first）—— 多模态：拍照 / 选图 / 录音 / 粘 URL / 打字一起喂；AI 一次能识别多件物品，按 `photo_assignments` 把图分配给具体物品的影集；后续聊天里描述变更，AI 返回**增量**，代码侧合并到原物品，影集不丢
+- **草稿与工作集**：一段对话 = 一个工作集，多件物品并行；每张 DraftCta 卡片单独 `[保存草稿]` / `[直接录入]`
+- **非破坏裁剪**：原图原样存盘，裁剪框只影响显示；想换裁剪随时可改
+- **多 AI 服务并存**：BYO key（Anthropic / OpenAI / Kimi / DeepSeek / Qwen / GLM / Xiaomi / 自定义 OpenAI-兼容端点）；设置页横滑切换，单个标记为"默认"；录入页 chip 临时切本会话用谁
+- **本地优先**：Room 数据库 + 文件系统，无云依赖；BYO-key 直连模型厂商，不走代理
 
-cycle 0031（一个长 cycle，多轮迭代）的主要肉：
-- **返回栈**：AddRoute / SettingsScreen / DetailScreen 局部 BackHandler，子层 back 不再被 MainScreen 全局兜底推回首页
-- **分类管理拖动复修**：`rememberUpdatedState` 兜 stale lambda、`indexOfFirst(info.id)`、DAO `@Transaction reorder` 单事务 — cycle 0030 留下的"位置弹回去"根治
-- **Theme**：Settings header `☀/☾` icon 切换暗黑 / 明亮
-- **Portal 空态**：换成大门插画 + "点开大门，展示你的专属 treasure"，点门进 manager
-- **Detail 抽屉**：3 页 `HorizontalPager` 横滑；影集 + tile + 长按多选 + 底部 [删除 N] 长条 + 二次确认；drag handle 改文字提示
-- **Grid**：标题动态两行（同行任一两行 → 两个都两行，TextMeasurer 同步），搜索按钮挪 chip 条左侧、点击原地变输入框实时过滤，Edit + 红点跟 Treasure 标题 baseline 对齐
-- **Edit**：参数 / 操作 区名、"+" 单字按钮、spec 行卡片化（key+value 共框 + 中间竖分隔）、divider 提示行去横线
-- **历史**：add/edit 改 `ModalBottomSheet` + 顶部 emoji icon picker（🛒🏆🔧⚙️👋）+ Material `DatePicker` + 中文长日期；row 视觉左圆 emoji + 中标题 + 日期
-- **Draft**：`ItemDraft.history` 加历史栏，AddPreview 复用 `HistorySection`；"手动" → "Draft"
-- **Seeds**：物品 8 → 6（每个内建分类 1 条，新加咖啡 MaraX + 酒水 Margaux 2015）；fresh-install 用 `SeedCategoriesCallback` 补分类种子（cycle 0026 那 migration 只覆盖升级用户）
+---
 
-- 6 个内建品类（羽毛球 / 摄影 / 汽车 / 电子产品 / 咖啡 / 酒水），16 张博物馆线描风插画；**cycle 0026 起在图鉴页右上小红点入口可以管理分类显示/隐藏 + 自定义新分类**（Schema v9 加 `category_prefs` 表，含 Migration 种子）；**cycle 0027 起自定义分类真正能装物品** —`Item.category` 由 enum 改 String id，AI prompt 喂动态 categoryHints，删自定义分类时把物品 rehome 到电子产品兜底；**cycle 0028 起 Manager 改长按拖动**（同段拖动改排序 / 跨分割线 toggle 隐藏），编辑页顶部插画必填，Portal doorway 永远用分类的"基础图"；**cycle 0029 起分类编辑器拆全屏路由**（跟物品 Edit 同款 BackArrow / EditPageHeader）；**cycle 0030 起分类代表图改从相册挑**（PickVisualMedia，Schema v10 加 `hero_photo_path` 列）— 自定义新建必须挑图，内建可选覆盖默认线描；Manager 拖动算法 divider 当 row-height 块（不再"飞到不知道哪儿"）
-- 主屏 4 tab 横滑切换：门厅 / 图鉴 / 录入 / 设置（HorizontalPager）；Detail / Edit / Search / CategoryEditor 都是 push 上来的覆盖屏（NavHost）
-- **cycle 0029** 起加 BackHandler：非 Portal tab 按返回回 Portal；Manager 抽屉打开先收抽屉
-- **cycle 0029** 起 Grid 右上加搜索 icon，push SearchRoute（auto-focus 搜索框 + brand/model/nickname 实时过滤 + 命中段 terra 高亮 + 2 列 grid 结果）
-- Detail 抽屉（历史 / 参数 / 影集）+ 明信片翻面；影集点缩略图 → 全屏 viewer（横滑翻页 / 双指缩放 / 长按图加注 / 长按已有标注改或删，cycle 0012）
-- Detail 右上点 → Edit 单页表单，与手动录入共用 EditPageHeader + SectionDivider；状态 / 品类 / 历史类型用统一的 `InlineDropdown`，不再换行
-- Edit 实拍：📷 拍照（FileProvider + 直调系统相机）+ + 多选照片（最多 9 张）
-- Add (RECORD) chat-first：对话已落 Room（add_conversations / add_messages）；切回历史抽屉里点旧对话能 reload；**cycle 0022 起进入 Record tab 默认续上次对话**（不再每次新建空壳）；发 URL 时聊天里实时显示 "正在抓取 jd.com…" → "✓ 已抓取 jd.com · 1.2K 字" / "⚠ 防爬挡住"；**cycle 0023 起聊天里发的图片单击可全屏预览**（复用影集那边的 FullscreenPhotoViewer，多图可横滑）；**cycle 0024 起"会话 = 草稿"**：AI 提案先以 DraftCta 落到聊天里给 [采用]/[不要]，采用后才升格成 confirmedDraft，下一次 AI 在它上面叠加而不是重写；"手动" 按钮也走 Refine 改 confirmedDraft；"确认收入" 才真把草稿固化成 Item
-- AI：多轮 — `extractItemDraft` 现在带 `priorTurns`，把当前对话最后 20 条文字作为上下文喂回模型；Anthropic / OpenAI / Kimi · Moonshot / DeepSeek / 通义千问 / 智谱 GLM / Xiaomi MiLM / 自定义 共 8 个 preset，BYO key 存 EncryptedSharedPreferences；Settings 抽屉 "高阶" 段可调 temperature 和 thinking（cycle 0014）；cycle 0022 起 Settings 摘要卡 / 编辑抽屉根据 model 名启发式显示「🖼 多模态 / 纯文本」 pill；cycle 0023 起 prompt 放开 hero spec 模板（AI 按物品挑最重要的 4 条），草稿页全面镜像 Edit 页 — AI 填什么字段就显什么，不再固定 9 行
-- 手动录入：4 品类模板，顶部居中 124dp 大插画 + 56dp 横滚选项；italic tagline + 每个字段单位 / 示例 hint
-- Settings：单张摘要卡 + 连通 pill + 底部抽屉编辑
-- 真实照片存 `filesDir/photos/<itemId>/<uuid>.jpg`；相机直拍中转 `filesDir/captures/`；callout 数据 `Map<path, List<{x, y, text}>>` 跟 item 一起入库
-- Schema **v10**（Room；cycle 0030 加 `hero_photo_path` 列；cycle 0026 加 `category_prefs` 表 + Migration 种子 6 内建分类）；从 cycle 0010 起 `exportSchema = true`，Migration 写在 `core/room/Migrations.kt`，schema JSON 在 `core/schemas/`，不再 destructive — 见 [ADR-0006](docs/adr/0006-schema-migrations.md)
-- 16 个博物馆线描插画（含 cycle 0011 加的 espresso machine / coffee grinder / coffee bean / wine bottle / cocktail glass）+ 平面圆环 app 图标（cycle 0026 回到 cycle 0013 那版：23px 圆 + gold gradient + rune/tick 装饰，3D 几版尝试作废）
-- 8 条种子数据（首启写入），edge-to-edge，控制岛在 Detail / Edit 屏自然隐藏
+## ✦ App 一日游
 
-GitHub：<https://github.com/kitacpt/Treasure>
+| 屏 | 干什么 |
+|---|---|
+| **Portal**（门厅） | 大字 Treasure + 总数三连 + 4 扇分类大门 + Latest entry。仪式感的家 |
+| **Grid**（图鉴） | 某分类的 2 列卡片网格；右上 🔍 搜索 / 🔧 分类管理；长按进编辑态，可批量选 / 拖动调序 / 删除 / 一键扔到录入页 |
+| **Detail**（明信片） | Hero 线描 + 4 行关键参数；点 hero 翻面看真实照片影集；上滑抽屉切参数 / 历史 / 影集三 tab |
+| **Edit**（编辑） | 单页表单：基础 / 标签 / 插画 / 参数（拖动选前 4 hero）/ 历史 / 实拍（拍照或多选）/ DANGER ZONE |
+| **Record**（录入） | chat-first。chip 行 `[+ 附件]` `[✦ 模型]`；附件抽屉 = 图片 / 文件 / 物品三选一；语音是点击麦克风进语音态、长按输入框录、松手发；emoji 在输入框内右；模型 chip 切换本会话用谁 |
+| **Settings**（设置） | 横滑切多份 AI 服务；幽灵卡 → 添加 provider；每份卡有连通灯 / 调整 / 设为默认；编辑抽屉内含移除 |
 
-## 仓库布局
+主屏底部是 4 颗胶囊的"控制岛"，4 个 tab 横滑切换。Detail / Edit / Search / CategoryEditor / Crop 是 NavHost push 路由，控制岛在那些屏自然隐藏。
+
+---
+
+## ✦ 技术栈
+
+| 维度 | 选择 |
+|---|---|
+| 平台 | Android 原生（API 26+），Kotlin 2.0 + Jetpack Compose（BOM 2024.10） |
+| 模块 | `:app`（UI / 导航 / 主题 / 插画）+ `:core`（纯 Kotlin/JVM：domain / Room / repo / AI / web） |
+| 数据 | Room v16（exportSchema，从 v5 起 5 条 Migration，没再 destructive） |
+| 序列化 | kotlinx-serialization-json（specs / history / photos / callouts / photo_crops / photo_assignments / AI profiles 都是 JSON 列） |
+| 加密 | `androidx.security:security-crypto`（API key 存 EncryptedSharedPreferences） |
+| 网络 | 手写 OkHttp 客户端，直连 Anthropic / OpenAI / OpenAI-兼容端点 |
+| 图片 | Coil（影集 + 头像 + crop 显示） |
+| 音频 | MediaRecorder（AAC m4a） / MediaPlayer，前台保活 service（API 34+ `FOREGROUND_SERVICE_DATA_SYNC`） |
+| DI | 不引 Hilt/Koin，手写 ServiceLocator（`TreasureApp`） |
+
+---
+
+## ✦ 给 AI agent / 新人开发者
+
+**进来按这个顺序读，先全局再局部。**
+
+1. **[`agent.md`](agent.md)** —— 当前状态、做完了什么、下一刀候选。**滚动更新，先看这个**
+2. **[`docs/README.md`](docs/README.md)** —— 文档分布索引
+3. **[`docs/dev-loop.md`](docs/dev-loop.md)** —— 构建 / 装机 / vivo 调试 / 内循环 / adb 速查
+4. **[`docs/architecture.md`](docs/architecture.md)** —— 模块划分 / 数据流 / Schema 演化 / AI 流水线 / 拖动与录入数据流
+5. **[`docs/product.md`](docs/product.md)** —— 产品定位与不做什么
+6. **[`docs/visual-language.md`](docs/visual-language.md)** —— 配色 / 字体 / 插画规则 / 控制岛规格
+7. **[`docs/adr/`](docs/adr/)** —— 6 份钉死的决策记录（推翻要写新 ADR supersede）
+8. **[`openspec/`](openspec/)** —— cycle 0001-0031 的 proposal / spec / notes（0032+ 写在 [`agent.md`](agent.md) 里）
+9. **[`prototype/`](prototype/)** —— Claude Design 导出的可点击 HTML 原型，**视觉规格的唯一权威**
+
+**改视觉之前**先打开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) 对照（双击在浏览器打开）。
+
+**改 schema 之前**先读 [`docs/adr/0006-schema-migrations.md`](docs/adr/0006-schema-migrations.md) —— 从 v5 起 Migration 是硬规矩，绝不 destructive。
+
+**改 AI prompt 之前**先看 [`android/core/src/main/java/com/treasure/core/ai/Prompts.kt`](android/core/src/main/java/com/treasure/core/ai/Prompts.kt) 和 [`agent.md`](agent.md) 里"会话 = 草稿 / MODIFY 增量"的协议描述。
+
+---
+
+## ✦ 仓库布局
 
 ```
 treasure/
-├── prototype/      Claude Design 导出的可点击 HTML 原型，作为活的视觉规格
-├── android/        Android app（Kotlin + Jetpack Compose；:app + :core）
-├── backend/        FastAPI 同步服务（占位，cycle 0003+ 才会接通）
-├── docs/           长期指引 —— product / architecture / visual-language / dev-loop / ADRs
-├── openspec/       变更周期提案（一个 cycle 一个文件夹）
-├── scripts/        bootstrap.sh / prototype-serve.sh / serve-apk.sh
-└── agent.md        滚动更新的现状交接
+├── README.md          这一份（人类入口）
+├── agent.md           滚动更新的现状交接
+├── docs/              长期指引（product / architecture / visual-language / dev-loop + 6 ADR）
+├── openspec/          cycle 0001-0031 提案历史（0032+ 在 agent.md）
+├── prototype/         Claude Design 导出的 HTML 原型（活的视觉规格）
+├── android/           Android app
+│   ├── app/           :app — Compose 屏幕 / 导航 / 主题 / 插画 / 数据存储 / 音频 / 后台 service
+│   ├── core/          :core — 领域模型 / Room / Repository / AI 客户端 / PageFetcher（纯 Kotlin/JVM）
+│   └── gradle/        version catalog
+├── backend/           FastAPI 同步占位（未启用，预留给 ADR-0003 的可选同步层）
+└── scripts/           bootstrap.sh / serve-apk.sh
 ```
 
-## 关键决策（一句话版）
+---
 
-- **平台**：Android 原生，Kotlin + Jetpack Compose（[ADR-0001](docs/adr/0001-android-native.md)、[ADR-0002](docs/adr/0002-jetpack-compose.md)）
-- **数据**：Local-first，Room 为权威源；FastAPI 同步层可选，先搭脚手架（[ADR-0003](docs/adr/0003-local-first-with-optional-sync.md)）
-- **AI**：用户自带 API key（Anthropic / 模型 / Key），设备直连 provider，不走代理（[ADR-0004](docs/adr/0004-byo-ai-key.md)）
-- **插画**：种子物品的 SVG 打包进 app；用户新增物品的插画由配置好的 AI 生成（[ADR-0005](docs/adr/0005-museum-illustration.md)）
-- **Schema**：从 cycle 0010 起停止 destructive，每改 schema 必须 bump version + 写 Migration + 提交 schema JSON（[ADR-0006](docs/adr/0006-schema-migrations.md)）
+## ✦ Quick start
+
+```bash
+# Linux 开发机（首次）— 详细见 docs/dev-loop.md
+sudo apt install openjdk-17-jdk-headless adb
+export ANDROID_HOME=$HOME/Android/Sdk
+
+# 构建 debug APK
+cd android
+./gradlew :app:assembleDebug
+# → android/app/build/outputs/apk/debug/app-debug.apk（~14 MB，debug-signed）
+
+# 装到当前连着的 Android 设备
+./gradlew :app:installDebug
+adb shell am start -n com.treasure/.MainActivity
+```
+
+启动后：**设置 tab → 调整 → 粘 Anthropic / OpenAI / 国内兼容端点的 API key → 测试连接**。然后就能用 AI 录入了。
+
+---
+
+## ✦ 一句话决策记录
+
+来自 [`docs/adr/`](docs/adr/)（推翻请新写一份 supersede，不要改老的）：
+
+- **平台**：Android 原生，Kotlin + Jetpack Compose（[ADR-0001](docs/adr/0001-android-native.md) · [ADR-0002](docs/adr/0002-jetpack-compose.md)）
+- **数据**：Local-first，Room 是权威源；FastAPI 同步层可选先搭脚手架（[ADR-0003](docs/adr/0003-local-first-with-optional-sync.md)）
+- **AI**：BYO key，设备直连 provider，不走代理（[ADR-0004](docs/adr/0004-byo-ai-key.md)）
+- **插画**：种子物品的 SVG 打包进 app；用户新增物品的插画由 AI 生成（[ADR-0005](docs/adr/0005-museum-illustration.md)）
+- **Schema**：从 v5 起停止 destructive，每改 schema 必须 bump + 写 Migration + 提交 schema JSON（[ADR-0006](docs/adr/0006-schema-migrations.md)）
+
+---
+
+## ✦ 项目纪事
+
+| 里程碑 | 日期 |
+|---|---|
+| Cycle 0001 — MVP（Portal + Grid + Detail + Room） | 2026-05-06 |
+| Cycle 0010 — Schema migration 制度落地（v5 起 exportSchema） | 2026-05-08 |
+| Cycle 0024 — "会话 = 草稿"协议重构（DraftCta + baseline） | 2026-05-10 |
+| Cycle 0029 — 全屏 CategoryEditor + Search 路由 + BackHandler 栈 | 2026-05-11 |
+| Cycle 0032 — AI 多 action 协议（一次返多件 + create/modify） | 2026-05-13 |
+| Cycle 0034 — 多模态：多图 + 语音 + 非破坏裁剪 + MODIFY 增量合并 | 2026-05-14 |
+| **v1.0 release** | **2026-05-14** |
+| Cycle 0035 — 多 AI 服务管理 + 录入页 chip/drawer 重做 + Grid 拖动重写 | 2026-05-15 |
+
+完整 cycle 索引见 [`openspec/README.md`](openspec/README.md) 和 [`agent.md`](agent.md) 的 "Cycle 一览" 表。

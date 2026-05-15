@@ -71,7 +71,7 @@
 **Compose 实现要点**：原型用 SVG。Compose 里两条路：
 
 1. 直接把 SVG 当 `ImageVector` 加载（`androidx.compose.ui.res.vectorResource` + Android Vector Drawable，`drawable/`）—— SVG 必须先转 VectorDrawable XML（用 Android Studio 的 `New > Vector Asset`，或 `svg2android` CLI）
-2. 用 Compose Canvas 重绘 —— 给每个品类一个 `@Composable HeroIllustration(item)` 函数，参数化 palette。**这条路更贴近原型**（原型本来就是参数化绘的），cycle 0001 选这一条。
+2. 用 Compose Canvas 重绘 —— 给每个品类一个 `@Composable HeroIllustration(item)` 函数，参数化 palette。**这条路更贴近原型**（原型本来就是参数化绘的），cycle 0001 起用这一条，[`../android/app/src/main/java/com/treasure/illust/`](../android/app/src/main/java/com/treasure/illust/) 下 16 张插画都是 Compose Canvas 实现。
 
 ## 控制岛（Bottom Floating Island）
 
@@ -100,17 +100,17 @@
   - 中部最近收入物的矢量缩略
   - 底部细线分隔后：中文名（serif 18）+ `count pcs · english_name`（sub）
 
-## 抽屉行为（cycle 0001 不实现，先记下来）
+## 抽屉行为（cycle 0002 起实现，cycle 0031 / 0034 调整）
 
 来自原型对话："参考网易云的层叠卡片"：
 
-- 默认半隐藏，详情屏底部留一条 64px 的提示条（"上滑查看 历史/参数/影集"）
-- 上滑展开到 ~78–85% 屏高
-- 顶部三 tab：**历史 / 参数 / 影集**
+- 默认半隐藏，详情屏底部留一条 ~52px 的提示条（"↑ 上拖看详情"）
+- 上滑展开到 ~78% 屏高
+- 顶部三 tab：**参数 / 历史 / 影集**（cycle 0034 v9 改成参数在前）
 - 抽屉内卡片是各 tab 的内容
-- 再下滑收起
+- 再下滑收起；cycle 0035 起抽屉展开时 back 键先收回 `partialExpand()` 不 pop 到 Main
 
-## 翻面（cycle 0001 不实现）
+## 翻面（cycle 0002 起实现）
 
 来自原型："明信片翻面"：
 

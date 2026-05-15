@@ -48,7 +48,7 @@ cd android
 ./gradlew :app:assembleDebug
 ```
 
-输出在 `android/app/build/outputs/apk/debug/app-debug.apk`（cycle 0030 ~14 MB，debug 签名 → 直接装手机）。
+输出在 `android/app/build/outputs/apk/debug/app-debug.apk`（v1.0 ~14 MB，debug 签名 → 直接装手机）。
 
 第一次构建会 download AGP / Kotlin / Compose / Room / KSP 等依赖（~5 min）；后续增量构建 ~10–30s。
 
@@ -159,42 +159,57 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 8. 改昵称 / 拖动 spec 改 hero 顺序 / 上传一张实拍 → 保存 → 回 Detail 看更新
 9. DANGER ZONE 删除 → 弹确认 → 取消（不删）
 
-**录入路径**
+**录入路径（cycle 0035 新 chatbar）**
 
-10. 控制岛 ⊕ 录入 → 看到 **RECORD** header（副标 = 当前对话标题，cycle 0018 起；进入默认续上次对话，cycle 0022 起）
-11. 点 📷 → （首次）弹 READ_MEDIA_IMAGES 权限 → 选一张图 → AI 解析 → DraftCta 卡片（Pending 状态）
-12. （cycle 0017 暂去掉了麦克风按钮，云端 STT 兜底是 cycle 0031 候选）
-13. DraftCta 卡片：[采用]/[不要]（cycle 0024）；[采用] → 卡片置灰 + 下方出现 "✓ 已采用 · N 字段" 行 + confirmedDraft 升格
-14. 继续聊："颜色是红色" → AI 在 confirmedDraft 上叠加，新 DraftCta 出现，旧的标 Rejected
-15. 点 [手动] → push Refine 页（confirmedDraft 编辑器）→ 改字段 → [确认收入] → AlertDialog 二次确认 → 写 Room → 新对话
-16. composer 多行输入 4 行 → 不溢出，不压控制岛胶囊
-17. 头部 🕐 → 历史 ModalBottomSheet（cycle 0018）：列最近 20 段，点旧的 reload
-18. 发 URL（如京东商品链接）→ 聊天里 SystemNote "正在抓取 jd.com…" → "✓ 已抓取 jd.com · 1.2K 字" / "⚠ 防爬挡住"
+10. 控制岛 ⊕ 录入 → **RECORD** header；副标 = 当前对话标题，进入默认续上次对话
+11. chip 行 `[+ 附件]` `[✦ <模型名>]`；点附件 → 抽屉 3 选一：**图片 / 文件 / 物品**
+    - 图片 → PickVisualMedia 多选最多 9 张
+    - 文件 → OpenDocument 占位（落 SystemNote 提示已附加）
+    - 物品 → 抽屉里搜索框 + 现有物品列表，点 `+` 加进工作集
+12. 输入框内部布局：左 mic / 中文本 / 右 emoji；外侧右 send 圆按钮
+13. 点 mic → 进语音态（文本框变 "长按 · 录音"）→ 长按 → 聊天区盖一层半屏毛玻璃 + 9 条声波 + "松手发送" → 松手即 stop + 发送
+14. emoji 按钮 → 抽屉里 8×8 emoji grid，点哪个就插到输入末尾
+15. 抽屉一展开自动收 IME；back 键先关抽屉而不是退应用
+16. 发 URL（如京东链接）→ 聊天里 SystemNote `正在抓取 jd.com…` → `✓ 已抓取 jd.com · 1.2K 字` / `⚠ 防爬挡住`
+17. AI 多 action：一段输入识别出多件物品 → 落多张 DraftCta 卡（cycle 0032）；MODIFY action 显示"修改后完整状态"而非 raw delta（cycle 0034 v9）
+18. DraftCta 卡上 [保存草稿] = 落工作集 PENDING（不跳屏）/ [直接录入] = 落工作集 + commit Item + 跳 Detail / [不要] = Rejected
+19. 头部 🕐 → 历史 ModalBottomSheet：列最近 20 段，点旧的 reload
+20. 工作集 drawer（头部 list icon + 红点角标计数）→ 显示所有 PENDING / MODIFIED / SAVED 行；右上 [一键录入 N] 批量 commit；长按胶囊弹删除二次确认
 
-**搜索 + 分类管理（cycle 0026-0030）**
+**搜索 + 分类管理**
 
-19. 图鉴页右上 [🔍][小红点] 两个图标；点 🔍 → SearchRoute → 输入"yon" → 立刻 2 列结果，标题里 "yon" terra 加粗
-20. 点小红点 → ModalBottomSheet Manager：6 内建分类显示中 + divider + 已隐藏（空）
-21. 长按某行 ≡ 拖动跨过 divider → 实时进入"已隐藏"段 → 回 Portal / Grid 它消失
-22. 点行右侧小红点 → push CategoryEditor 全屏：内建有插画兜底；自定义必须从相册挑图才能 [新建]
-23. 自定义"图书"创建后 → 录入页对 AI 说"《时间简史》" → AI 应自动选 category = custom-xxx → DraftCta → [采用] → [确认收入] → 物品落到 "图书" 分类
+21. 图鉴页右上 [🔍][🔧]；点 🔍 → SearchRoute → 输入"yon" → 实时 2 列结果，标题里 "yon" terra 加粗
+22. 点 🔧 → CategoryManager（ModalBottomSheet）：6 内建分类显示中 + divider + 已隐藏
+23. 长按某行 ≡ 握把拖动跨过 divider → 实时进 "已隐藏" 段 → 回 Portal / Grid 它消失
+24. 点行右侧小红点 → push CategoryEditor 全屏（cycle 0029）：自定义必须从相册挑图才能 [新建]
+25. 自定义"图书"创建后 → 录入页对 AI 说"《时间简史》" → AI 选 category = `custom-xxx` → DraftCta → 直接录入 → 落到 "图书"
 
-**设置 + AI**
+**图鉴编辑态拖动（cycle 0033 起；cycle 0035 重写）**
 
-24. 控制岛 ⊕ 设置 → 切 Provider chips（Anthropic / OpenAI / Custom 等 8 个 preset）→ 填 Model + Base URL（按 provider 显隐）+ API Key → 摘要卡显示 🖼 多模态 / 纯文本 pill（按 model 名启发式）→ 保存 → 测试连接（应返回 OK）
-25. 清除 key → 录入页再点 📷 → 草稿不出现，AI 提示未配置
+26. Grid 卡片长按 → 进编辑态（小红点选中 + EditHeader 显示 `[完成] · 已选 N · [删除] [编辑]`）
+27. 长按某张卡再按住 → 卡片"抬起"动画（scale 1.08 + shadow + 轻微 -2° 倾斜）；拖动到其他卡之上 → 其他卡 insert-shift 顺移
+28. 拖到屏幕上下 96dp 内 → LazyColumn 自动滚动；松手才确认位置；中途不会被打断
+29. 点 [编辑(N)] → 把选中物品扔进录入页起新会话作为 SAVED 行（可对 AI 说"删掉电池标签"做批量修改）
+
+**设置 + 多 AI 服务（cycle 0035）**
+
+30. 控制岛 ⊕ 设置 → HorizontalPager 横滑多份 AI 配置卡；底部分页 dot 含一个空心 ghost dot
+31. 滑到末尾的虚线幽灵卡 → 点开 → bottom sheet 选 Anthropic / OpenAI / Kimi / DeepSeek / Qwen / 智谱 / Xiaomi / 自定义 → 自动建新 profile + 进入编辑抽屉
+32. 编辑抽屉首屏：**名称**（默认 = provider 显示名，可改）/ Provider / Base URL（按 provider 显隐）/ Model + 多模态 pill / API Key（显示/隐藏切换）/ Temperature / Thinking toggle / [保存] [测试连接] / 底部"移除此服务"（仅 size>1 时显示）
+33. 测试连接 → 摘要卡灯由黄变绿（lastTestPassed 持久化到 profile）
+34. 多张 profile 在卡片底部能看到 [设为默认] / [★ 默认]；只一份是默认；
+35. 回录入页 chip `[✦ <名称>]` → 抽屉选另一份 → 这一段会话临时用它（不影响默认）
 
 **持久化 / 图标 / Schema**
 
-26. **杀进程**（`adb shell am force-stop com.treasure`）重启 → 数据还在
-27. 桌面查看图标：cycle 0026 回到的平面圆环 + gold gradient + 顶/底 paper-color rune + 两侧 tick
-28. `adb shell pm clear com.treasure` 重启 → 种子重新写入（v10 schema 直接 create，含 category_prefs 表 6 内建种子）
-29. （可选）装 cycle 0030 之前的旧 APK 跑一次再覆盖装新版 → migration 5_6 / 6_7 / 7_8 / 8_9 / 9_10 链按需触发，数据不丢
+36. **杀进程**（`adb shell am force-stop com.treasure`）重启 → 数据还在
+37. `adb shell pm clear com.treasure` 重启 → 种子重新写入（v16 schema 直接 create，含 category_prefs 6 内建种子 + 6 物品 SeedItems）
+38. （可选）装老 APK 跑一次再覆盖装新版 → migration 5→16 链按需触发，数据不丢
 
 ## 常见踩坑
 
 - **build 卡 dl.google.com**：偶尔某个 .aar TLS 抖一下挂掉。删那个目录重试：`rm -rf ~/.gradle/caches/modules-2/files-2.1/<group>/<artifact>/<version>; ./gradlew :app:assembleDebug`
-- **schema 升级丢数据**：cycle 0010 起切了真 migration（[ADR-0006](adr/0006-schema-migrations.md)），当前 v10，链路完整：5→6→7→8→9→10。`fallbackToDestructiveMigrationOnDowngrade()` 还开着，**只**在用户从更高版本降回老 APK 时才会清库（dev 环境 OK，线上几乎不会发生）。每加 schema 改动必 bump + 写 Migration + 提交 schemas/N.json。
+- **schema 升级丢数据**：cycle 0010 起切了真 migration（[ADR-0006](adr/0006-schema-migrations.md)），当前 v16，链路完整：5→6→7→8→9→10→11→12→13→14→15→16。`fallbackToDestructiveMigrationOnDowngrade()` 还开着，**只**在用户从更高版本降回老 APK 时才会清库（dev 环境 OK，线上几乎不会发生）。每加 schema 改动必 bump + 写 Migration + 提交 schemas/N.json。
 - **vivo 装非商店 APK 弹安全检测**：每装一次都会弹（"应用未经过 vivo 安全检测"），点继续安装。习惯就好。
 - **覆盖装签名冲突**：debug 签名固定（Android Debug keystore），同包名同签名直接覆盖；除非你换了 keystore（不会发生）
 - **真 STT 在国行 ROM 不可用**：vivo / 华为部分机型没装 Google App，`SpeechRecognizer.isRecognitionAvailable` 返回 false → 走 `onUnavailable` 回退（占位语音消息）。这是预期行为，不要拆掉 fallback。

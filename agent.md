@@ -2,14 +2,14 @@
 
 每次工作结束更新这一份。新人 / 新一轮 agent 进来先读它。
 
-## 当前状态 · 2026-05-14
+## 当前状态 · 2026-05-15
 
-**cycle 0001 → 0034 全部落地。v1.0 出 release。**
+**cycle 0001 → 0035 全部落地。v1.0 release 在 GitHub。**
 
-- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （v1.0.0，debug 签名，13.8 MB）
+- APK：`android/app/build/outputs/apk/debug/app-debug.apk` （~14 MB，debug 签名）
 - GitHub：<https://github.com/kitacpt/Treasure>（main 分支） + Release v1.0
-- Schema：**v16**（cycle 0034 加 `items.photo_crops_json`；cycle 0034 加 `add_messages.voice_path`；cycle 0034 加 `add_messages.photo_assignments_json`；cycle 0033 加 `items.sort_order`；cycle 0032 加 `add_messages.action_kind/target_id`；cycle 0031 加 `conversation_items` 表；cycle 0030 加 `hero_photo_path`；v5→v16 全程 `addMigrations`，没再 destructive）
-- Seeds：6 物品（每内建分类 1 条样例）+ 6 内建分类。fresh install 经 `SeedCategoriesCallback` 写分类、`ItemRepository.ensureSeeded` 写物品；老升级用户经 Migration_8_9。用户清掉后不会再生
+- Schema：**v16**（cycle 0035 没动 schema）
+- Seeds：6 物品 + 6 内建分类
 - 测试设备：vivo X200 Pro mini（Android 15）
 
 ## 端到端能跑通的功能
@@ -182,59 +182,67 @@ AI:
 
 ```
 treasure/
-├── android/                   Kotlin + Jetpack Compose（Gradle 8.10.2 / AGP 8.7.2 / Kotlin 2.0.21）
-│   ├── app/                   :app — 屏幕 / VM / 主题 / 插画 / voice / data
+├── android/                   Kotlin + Jetpack Compose（AGP 8.7.2 / Kotlin 2.0.21）
+│   ├── app/                   :app — 屏幕 / VM / 主题 / 插画 / audio / data / background
 │   │   src/main/java/com/treasure/
 │   │   ├── ui/
 │   │   │   ├── nav/           Routes + TreasureNavHost (Main / Detail / Edit /
 │   │   │   │                   Search / CategoryNew / CategoryEdit)
 │   │   │   ├── main/          MainScreen + ControlIsland + BackHandler
 │   │   │   ├── portal/        PortalScreen + PortalViewModel
-│   │   │   ├── grid/          GridScreen + GridViewModel + 右上工具栏 + 搜索 icon
-│   │   │   ├── detail/        DetailScreen + DetailViewModel
-│   │   │   ├── edit/          EditScreen + (用 DetailViewModel 复用)
-│   │   │   ├── add/           AddRoute + AddChat + AddPreview + AddViewModel
-│   │   │   │                   + CategoryTemplate + CategoryForm (cycle 0024
-│   │   │   │                   起退役但文件还在)
-│   │   │   ├── settings/      SettingsRoute + SettingsViewModel
-│   │   │   ├── search/        SearchRoute (cycle 0029 新加)
-│   │   │   ├── category/      CategoryManager (cycle 0026 起的抽屉) +
-│   │   │   │                   CategoryEditorRoute (cycle 0029 拆出) +
+│   │   │   ├── grid/          GridScreen + GridViewModel + 右上工具栏 + 搜索
+│   │   │   │                   icon + GridDragState（cycle 0035 重写父层手势）
+│   │   │   ├── detail/        DetailScreen + DetailViewModel + 抽屉 BackHandler
+│   │   │   ├── edit/          EditScreen
+│   │   │   ├── add/           AddRoute + AddChat (cycle 0035 chip+drawer 重做)
+│   │   │   │                   + AddPreview + AddViewModel + RecordingOverlay
+│   │   │   │                   (cycle 0035 停用) + CategoryTemplate +
+│   │   │   │                   CategoryForm (cycle 0024 退役)
+│   │   │   ├── settings/      SettingsRoute (cycle 0035 多 profile pager) +
+│   │   │   │                   SettingsViewModel
+│   │   │   ├── search/        SearchRoute
+│   │   │   ├── category/      CategoryManager + CategoryEditorRoute +
 │   │   │   │                   CategoryManagerViewModel
-│   │   │   ├── photo/         FullscreenPhotoViewer
+│   │   │   ├── photo/         FullscreenPhotoViewer + CropScreen (cycle 0033) +
+│   │   │   │                   CroppedPhoto (cycle 0034 graphicsLayer 应用 rect)
 │   │   │   └── components/    EditPageHeader / BackArrow / ControlIsland /
 │   │   │                       HeroAvatar / HeroAvatarPicker / InlineDropdown
 │   │   │                       / Ornament / SectionDivider
 │   │   ├── illust/            16 个 Compose Canvas 博物馆插画
-│   │   ├── voice/             SpeechRecognizer 封装
-│   │   ├── data/              SettingsStore + AiProviderPreset
+│   │   ├── audio/             VoiceRecorder (m4a AAC) + VoicePlayer (cycle 0034)
+│   │   ├── background/        AiKeepAliveService (cycle 0031；API 34+ DATA_SYNC)
+│   │   ├── data/              SettingsStore (cycle 0035 多 profile JSON) +
+│   │   │                       AiProfile + AiProviderPreset
 │   │   ├── theme/             Theme / Color / Type
-│   │   ├── TreasureApp.kt     Application：ServiceLocator 装 repo + 仓库
-│   │   └── MainActivity.kt    + Share intent consume
-│   └── core/                  :core — 域模型 / Room / Repo / Seed / AI / Web
+│   │   ├── TreasureApp.kt     Application：ServiceLocator + aiClient() 工厂
+│   │   └── MainActivity.kt    + Share intent consume + enableEdgeToEdge
+│   └── core/                  :core — 域 / Room / Repo / Seed / AI / Web
 │       src/main/java/com/treasure/core/
-│       ├── domain/            Item / Category / CategoryInfo / HeroVector /
-│       │                       HeroSpec / HistoryEvent / ItemStatus / PhotoCallout
-│       ├── ai/                AiClient + AnthropicClient + OpenAiClient +
-│       │                       Prompts (CategoryHint / SYSTEM_PROMPT +
-│       │                       buildSystemWithBaseline) + ItemDraft (data class)
+│       ├── domain/            Item (含 photoCrops / sortOrder) / Category /
+│       │                       CategoryInfo / HeroVector / HeroSpec /
+│       │                       HistoryEvent / ItemStatus / PhotoCallout / PhotoCrop
+│       ├── ai/                AiClient + AnthropicClient + OpenAiClient (JsonNull-
+│       │                       safe asArrayOrNull, cycle 0035) +
+│       │                       Prompts (submit_drafts tool + buildSystemWithBaseline +
+│       │                       WORKING SET 块 + MODIFY=delta-only)
 │       ├── repo/              ItemRepository + AddConversationRepository +
 │       │                       CategoryRepository
-│       ├── room/              TreasureDatabase v10 + 4 entities + 3 daos +
-│       │                       Migrations.ALL（5 个 migration）
-│       ├── seed/              SeedItems：8 条种子物品
+│       ├── room/              TreasureDatabase v16 + 6 entities + 5 daos +
+│       │                       Migrations.ALL（11 个 migration：5_6 → 15_16）
+│       ├── seed/              SeedItems：6 条种子物品（每内建分类 1 条）
 │       └── web/               PageFetcher（cycle 0020-0022）
-│   schemas/com.treasure.core.room.TreasureDatabase/  5–10.json（exportSchema）
+│   schemas/com.treasure.core.room.TreasureDatabase/  5–16.json（exportSchema）
 ├── prototype/                 Claude Design 原型（活的视觉规格）
 │   ├── project/               原版 8 画板（cycle 0001–0006）
-│   └── add-page-v2/           录入页 v2 设计稿（cycle 0007，HANDOFF.md 解释差异）
-├── docs/                      长期指引（product / architecture / visual-language / dev-loop / 6 ADRs）
-├── openspec/                  变更周期（0001–0030，每个 1 文件夹 3 文档）
+│   └── add-page-v2/           录入页 v2 设计稿（cycle 0007；cycle 0035 已重做 chatbar，
+│                              原型仅作色板 / 字号 / 控制岛规格参考）
+├── docs/                      长期指引（product / architecture / visual-language /
+│                              dev-loop / 6 ADRs）
+├── openspec/                  变更周期文件夹（0001–0031）；0032+ 写在本文件
 ├── scripts/                   bootstrap.sh / prototype-serve.sh / serve-apk.sh
-├── backend/                   FastAPI 占位（始终是空脚手架，本地没起，
-│                              ADR-0003 留的同步接口未真接）
-├── README.md
-└── agent.md                   这一份
+├── backend/                   FastAPI 占位（始终是空脚手架，ADR-0003 留的同步接口未真接）
+├── README.md                  展示型 + AI 阅读路线（cycle 0035 重写）
+└── agent.md                   这一份（滚动更新的现状交接）
 ```
 
 ## Cycle 一览
@@ -275,6 +283,7 @@ treasure/
 | 0033 | (a) 录入页编辑/草稿入口接入影集管理 — `ItemDraft.photos`/`avatarPhotoPath` + `addDraftPhoto/setDraftAvatar/removeDraftPhoto/persistDraftPhoto`，`AddPreview` 的 `HeroAvatarPicker` 接 photo callbacks；(b) 拍 / 选照片走新 `CropScreen` 做基础裁剪（free-form 矩形 + 4 角 / 4 边 drag）后落 `filesDir/draft-photos/<convoId>/<uuid>.jpg`；(c) commitDraft 把 draft.photos / avatar 带进 Item，MODIFIED 行 commit 时保留原 item id / createdAt / photos；(d) Drawer flash 修复 — SAVED 行点击 / Refine 进入时显式 `itemDrawerOpen = false`，跨导航用 `reopenDrawerOnResume` 配合 `Lifecycle.Event.ON_RESUME` 回来重开；(e) Grid 长按 → 编辑态：`GridViewModel.selecting/selectedIds/enterEditMode/exitEditMode/toggleSelection/deleteSelected/reorder`、`EditHeader` 替换 [Edit + 红点] 为 `[完成] · 已选 N · [删除(N)] [编辑(N)]`、1-列 `EditReorderableList` 长按拖把手调序；(f) Schema v13 — `items.sort_order`（默认回填 `-created_at`、`ItemDao` 排序改 `sort_order ASC, acquired DESC`、新物品 commit 取 `min - 1`、MODIFY commit 保持原 sortOrder）；(g) 新 `gridIntake: MutableStateFlow<List<String>?>` + `AddViewModel.startConversationFromItems` — 编辑态 [编辑] 把选中物品扔到 AddRoute 起新会话，自动开 drawer | done |
 | 0032 | 多 action 录入协议（核心修复用户报的"4 件物品 AI 只录入一件 + 覆盖上一个草稿"）：(a) 协议从 `extractItemDraft` 改 `extractItemDrafts` 返 `List<DraftAction>`，tool 名 `submit_drafts`、actions[]、kind=create/modify、target_id；(b) system prompt 加 `[CONVERSATION WORKING SET]` 块（每行 id + status + 标题 + category + oneLiner + specs），AI 据此判断 create vs modify；(c) 中间形态 v1：AI 一回复就把所有 actions 落工作集（drawer 直接刷 N 件）；(d) v2 复修：用户要求"先逐张确认"——一个 action 对应一张 DraftCta 卡，accept 才落到工作集（[applyAcceptedCta](android/app/src/main/java/com/treasure/ui/add/AddViewModel.kt)）；(e) Schema v12 — `add_messages` 加 `action_kind` / `target_id` 两列（旧行 NULL → Create）；(f) DraftCta 卡片渲染 "修改 ·" / "新增" 标签；(g) max_tokens 1024 → 4096（thinking 8192），原 1024 在 4 件物品 × 8 specs 时 JSON 截断；(h) drawer `rememberSaveable` + drawer 状态点 SAVED 行不主动收（AddChat 整体隐藏 = drawer 跟着隐，回 Chat 自动复现）；(i) ItemListDrawer 长按胶囊弹删除二次确认 — SAVED 只从工作集移除（不动物品）/ PENDING+MODIFIED 丢草稿；(j) ListIcon 替换 Draft 胶囊 + 工作集计数小红点 | done |
 | 0031 | 长 cycle，多轮迭代：(a) 返回栈优先级 — AddRoute / SettingsScreen / DetailScreen 各自局部 BackHandler 拦截子层；(b) 拖动数学复修 — CategoryManager 按"预览终态布局"渲染 + `rememberUpdatedState` 兜 stale lambda + `indexOfFirst(info.id)` + DAO `@Transaction reorder(orderedIds, hiddenIds)` 单事务避免中间态 emit；(c) HeroVector 去重 — `canonical()` + `uniqueHeroVectors`，picker 不再 3/4、7/8、10/12 重复；(d) 历史对话删 current 改 resume 上一段不再 spawn 空壳 + ✎/✕ 36dp visibility；(e) Theme 切换 — `darkModeOverride: MutableStateFlow` 在 Settings header `☀/☾` icon；(f) Portal 空态新 [Door](android/app/.../illust/Door.kt) 大门 + "点开大门，展示你的专属 treasure"；(g) Detail 抽屉 3 页 `HorizontalPager` + 影集 + tile + 长按多选 + 底部删除条 + 二次确认 + drag-handle hint 文字 + 抽屉删书签；(h) Grid 标题动态两行（`TextMeasurer` 同行同步）+ 搜索按钮挪到 chip 条最左、点击原地变 `SearchInputBar` 实时过滤 + Edit + 红点 跟 Treasure 标题 baseline 对齐；(i) Edit 页大美化 — "参数" / "操作" 区名，"+" 单字号按钮，spec 行卡片化（key+value 共框 + 中间竖分隔 + 握把/✕ 不带框），DANGER ZONE 注释删，divider 提示行去掉两侧横线；(j) 历史 add/edit 抽屉化 — `ModalBottomSheet` + 顶部 emoji icon picker（🛒🏆🔧⚙️👋）+ Material3 `DatePicker` + 中文长日期 `2026 年 5 月 12 日`；(k) `ItemDraft.history` + `setDraftHistory` + AddPreview 复用 `HistorySection`（提为 internal）；(l) AddChat "手动" → "Draft"；(m) Schema 不变；(n) `SeedCategoriesCallback` 补 fresh-install 分类种子（cycle 0026 那 migration 只覆盖升级用户）；(o) 物品种子 8 → 6（每个内建分类 1 条，新增咖啡 MaraX + 酒水 Margaux 2015） | done |
+| 0035 | **多 AI 服务 + chatbar / drawer 重做 + Grid 拖动重写**：(a) 多 profile —— `AiProfile`（@Serializable，含 `displayName` 可改）+ `SettingsStore.profiles/defaultProfileId/conversationOverrideProfileId` + legacy 单 profile migration；`TreasureApp.aiClient()` 走 `effectiveProfile`；Settings 页改成 `HorizontalPager` 卡片 + 末尾虚线幽灵卡 → AddProfileSheet 新建；编辑抽屉首屏加"名称"字段，底部"移除此服务" + 二次确认；卡片底部左 [设为默认/★默认]，右 [调整→]；幽灵卡内容自适应居中。(b) 录入页 chatbar 全部重写 —— 顶 chip 行 `[+ 附件]` `[✦ <模型名>]`；输入 pill 内部 mic-inside-left / 文本 / emoji-inside-right，send 外侧；四种 `ChatDrawer`（Attach / Model / Emoji / ItemPicker），抽屉打开同步收 IME (LocalSoftwareKeyboardController.hide + focusManager.clearFocus) + BackHandler 拦截；线描 glyphs (`SoundwaveGlyph` / `EmojiSmileGlyph` / `PictureGlyph` / `FileGlyph` / `CubeGlyph` / `AnimatedSoundwave`) 取代 emoji 字符；ItemPicker 含搜索框（按 brand/model/nickname/oneLiner 过滤）。(c) 语音流程改写 —— 点麦克风进 voiceMode，输入框变 "长按 · 录音"；press-and-hold 用 `awaitPointerEventScope { waitForUpOrCancellation() }` 检测起止；按下时 `pressVoiceActive=true` 在聊天区盖一层 88% paper 半屏遮罩 + 9 条 sin 节奏声波 + "松手发送"；松手 `commitVoiceAndSend()` 停 recorder 直接送；老 RecordingOverlay 全屏页停用。(d) chat 布局重做 —— 之前 Composer 浮在 LazyColumn 上方靠 contentPadding 估算高度，最后一条消息容易被盖；改成 Header → LazyColumn(weight 1) → Composer 串在 Column 里，Column 底 padding = `if (imeOpen) bottomImeInset else 72.dp`（72 收紧到底部胶囊近一些 + edge-to-edge 下手动 IME 推上去）+ `LaunchedEffect(imeBottomDp) animateScrollToItem(末尾)` 弹键盘时聊天跟着上抬。(e) Grid 拖动重写 —— pointerInput 从 per-tile 提到 LazyColumn 父 Box（之前 row key 一变 row 被销毁，drag 协程跟着 cancel）；`detectDragGesturesAfterLongPress`；`GridDragState.translationFor` 用 `dragStartScreenPos + offset - currentLayoutPos`，swap 后 pre-emptive `bounds[id]=hoverOldPos` 避免抖动；insert-shift；scale 1.08 spring + shadowElevation 28dp + rotationZ -2.2° 拖起感；`userScrollEnabled = draggingId == null` 不与 LazyColumn 自身 scrollable 抢；拖到屏幕上下 96dp 内 `autoScrollDir = ±1` + `LaunchedEffect` 调 `listState.scrollBy(±8f)`，`applyScrollDelta(consumed)` 校正起点。(f) DetailScreen BackHandler —— 抽屉展开时 back 走 `sheetState.partialExpand()` 不 pop 到 Main。(g) AndroidManifest 加 `usesCleartextTraffic="true"` —— 用户自定义 http base URL（Ollama / 局域网反代）能用；公网 https 仍优先。(h) `parseDrafts` JsonNull-safe —— `asArrayOrNull()` helper 把 `actions=null` / `tool_calls=null` / `choices=null` 视为空，避免 "JsonNull is not a JsonArray" 抛错。(i) AiProviderPreset：保留 8 个 preset；显示名可由用户在编辑抽屉里覆盖（`AiProfile.displayName`） | done |
 
 详见 [`openspec/`](openspec/) 各 cycle 的 proposal / spec / notes。
 
@@ -283,29 +292,32 @@ treasure/
 进来按这个顺序读：
 
 1. **本文件** — 当前状态（你在看）
-2. [`README.md`](README.md) — 60 秒概览 + 关键决策
-3. [`docs/dev-loop.md`](docs/dev-loop.md) — 构建 / 装机 / vivo 调试 / 内循环 / 权限调试
-4. 浏览器开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) — 视觉规格（v1，主体设计）
-5. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) — 录入页 v2 设计稿
-6. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md) → [`docs/architecture.md`](docs/architecture.md)
-7. [`docs/adr/`](docs/adr/) — 6 份决策记录
-8. [`openspec/`](openspec/) — cycle 0001-0031 提案 / 规格 / 笔记
+2. [`README.md`](README.md) — 项目全貌 / 技术栈 / AI 阅读路线
+3. [`docs/README.md`](docs/README.md) — 文档分布索引
+4. [`docs/dev-loop.md`](docs/dev-loop.md) — 构建 / 装机 / vivo 调试 / 内循环 / smoke test
+5. [`docs/architecture.md`](docs/architecture.md) — 模块 / 数据流 / Schema v5→v16 / `:core` `:app` 目录 / 多 profile / AI 流水线
+6. 浏览器开 [`prototype/project/Treasure.html`](prototype/project/Treasure.html) — 视觉规格（v1 主体）
+7. 浏览器开 [`prototype/add-page-v2/project/Treasure.html`](prototype/add-page-v2/project/Treasure.html) — 录入页 v2（注意 cycle 0035 已重做 chatbar，原型仅作色板 / 字号 / 控制岛规格参考）
+8. [`docs/product.md`](docs/product.md) → [`docs/visual-language.md`](docs/visual-language.md)
+9. [`docs/adr/`](docs/adr/) — 6 份钉死决策
+10. [`openspec/`](openspec/) + 本文件 "Cycle 一览" — 0001-0031 在 openspec/，0032+ 写在本文件
 
-## 下一刀候选（cycle 0035）
+## 下一刀候选
 
-1. **专用拍照 launcher**：当前 Refine / proposal-preview 的拍照按钮其实都退到 PickVisualMedia；想要真的"开相机一拍即录"，用 `ActivityResultContracts.TakePicture` + `FileProvider`
+1. **专用拍照 launcher**：当前所有拍照按钮其实都退到 PickVisualMedia；想要真"开相机一拍即录"用 `ActivityResultContracts.TakePicture` + `FileProvider`
 2. **CropScreen 旋转 / aspect lock**：当前只 free-form 矩形
-3. **死代码清理**：CategoryForm.kt / ManualCategoryPicker / AddViewModel.saveManual / 旧 sendVoice (STT 路径) / `EditReorderableList`（已被 v8 2-列布局取代）
+3. **死代码清理**：`CategoryForm.kt` / `ManualCategoryPicker` / `AddViewModel.saveManual` / 旧 `voice/VoiceCapture.kt` (STT 路径) / `EditReorderableList`（已被 v8 2-列布局取代）/ `RecordingOverlay.kt`（cycle 0035 起停用）
 4. **撤销采用 / 撤销 commit**：DraftCta accept / 直接录入后想反悔，目前要靠 drawer 长按删 + Detail 编辑改回去
 5. **AI prompt 的 hero spec 模板提示按自定义分类适配**：当前只有 6 个内建 example
 6. **PageFetcher headless 渲染**：被 detectBlock 拦的拼多多 / SPA 页 fall back 到 WebView
-7. **流式输出**：forced tool-use 拆 SSE delta（cycle 0014 推迟，看是否到时机）
-8. **MigrationTest CI**：CI 跑 v5→v6→…→v16 全链路；v16 schema JSON 已提交
+7. **流式输出**：forced tool-use 拆 SSE delta（cycle 0014 推迟，cycle 0022 明令不做，是否回归看时机）
+8. **MigrationTest CI**：CI 跑 v5→v6→…→v16 全链路；v16 schema JSON 已提交，只需要补 CI workflow
 9. **vivo 自启动引导**：app 内引导用户去 iManager 开自启动 — 即使有 foreground service，被剥夺 autostart 仍会被冷态秒杀
-10. **历史会话的图清理**：现在 conversation-photos / draft-photos 的图删会话不清；磁盘会缓慢累积
+10. **历史会话的图清理**：conversation-photos / draft-photos 删会话不清；磁盘会缓慢累积
 11. **录入页 picker 拒绝处理**：用户拒绝 RECORD_AUDIO / POST_NOTIFICATIONS 后没有 fallback 提示
-12. **OpenAI gpt-4o-audio 预设**：Settings preset 列表里加一个，方便用户跳过手填 model
-13. **Settings preset 校准** — Xiaomi MiLM 没公开端点
+12. **AI profile 排序**：cycle 0035 Settings pager 加了多 profile，但没法手动调 profile 顺序
+13. **同步层**：`backend/` 一直是空脚手架，按 [ADR-0003](docs/adr/0003-local-first-with-optional-sync.md) 是 cycle 0035+ 候选；接通时只需新建 `core/repo/source/RemoteItemSource` + `core/sync/SyncWorker` + Settings 加同步开关
+14. **文件附件真喂 AI**：当前 OpenDocument 选了文件只在聊天里发 `📎 已附加文件：xxx.pdf` 文本，AI 没有真读到内容；后续接 Anthropic `document` block 或 OCR 兜底
 
 ## 给下一个 agent 的备忘
 
@@ -334,6 +346,16 @@ treasure/
 
 | 日期 | 摘要 |
 |---|---|
+| 2026-05-15 | 文档总整理（README / docs/* / agent.md / openspec/README）：根 README 重写成展示型 + AI 阅读路线；架构文档刷到 schema v16 / 多 profile / 新 chatbar 与 grid 拖动；dev-loop smoke test 加 cycle 0035 新流程；openspec/README 索引 0001-0035 全量。**注：cycle 0032+ 不再单独建 openspec/ 文件夹，写在本文件 cycle 一览 + 历史里** |
+| 2026-05-15 | cycle 0035 (i)：IME 弹起聊天没跟着上抬 — Column 缩高后 LazyColumn 自维护 scroll position，最后一条被推出底部；`LaunchedEffect(imeBottomDp) animateScrollToItem(末尾)` 主动滚到尾 |
+| 2026-05-15 | cycle 0035 (h)：图鉴长按拖动彻底重写 —— pointerInput 从 per-tile 提到 LazyColumn 父 Box（row key 变 row 销毁，per-tile detector 跟着 cancel 是中途打断根因）；`GridDragState` 双轨 bounds（实时 hit-test）+ pre-emptive update（swap 后立即把 `bounds[id]=hoverOldPos` 避免抖动）；`translationFor = dragStartScreenPos + offset - currentLayoutPos`；`userScrollEnabled = draggingId == null` 不跟 LazyColumn scrollable 抢手势；拖到上下 96dp 内 `autoScrollDir = ±1` + `LaunchedEffect` 调 `listState.scrollBy(±8f)`，`applyScrollDelta(consumed)` 校正起点 |
+| 2026-05-15 | cycle 0035 (g)：输入框与底部胶囊距离 100 → 72dp；edge-to-edge 下 `adjustResize` 不再自动 push，手动 `padding(bottom = if (imeOpen) bottomImeInset else 72.dp)` 让键盘弹起时整列上抬 |
+| 2026-05-15 | cycle 0035 (f)：聊天底部覆盖问题 —— Composer 从 Box 浮层挪进 Column 末尾，LazyColumn `weight(1)` 自动让位，再不会被盖住；contentPadding 公式 hack 拆掉 |
+| 2026-05-15 | cycle 0035 (e)：13 处反馈 —— 幽灵卡变矮居中、抽屉打开同步收 IME、附件/emoji/模型 BackHandler 退、Detail 抽屉 BackHandler `partialExpand`、AI 配置名称可改（`AiProfile.displayName`）、添加物品搜索框、移除按钮从卡片搬进编辑抽屉、新增 AI sheet 加 96dp 底 padding、新声波 / 笑脸 / 图片 / 文件 / 立方体线描 glyphs、`AnimatedSoundwave` 9 条 sin 节奏、`AndroidManifest usesCleartextTraffic="true"` 让自定义 http URL 能用、`asArrayOrNull()` 救 `JsonNull is not a JsonArray` |
+| 2026-05-15 | cycle 0035 (d)：语音流程改写 — mic 改点击进 voiceMode、文本框变 "长按 · 录音"；press-and-hold (`awaitPointerEventScope { waitForUpOrCancellation() }`) 起止；按住时聊天区盖一层 88% paper 半屏遮罩 + `AnimatedSoundwave` + "松手发送"；松手 `commitVoiceAndSend()` 停 recorder 直接 send；老 RecordingOverlay 全屏页停用 |
+| 2026-05-15 | cycle 0035 (c)：录入页 chatbar 全部重写 — chip 行 `[+ 附件]` `[✦ <模型名>]`，输入 pill mic-inside-left / 文本 / emoji-inside-right + send 外侧；四种 `ChatDrawer`（Attach 3-tile 图 / 文件 / 物品 + Model 多 profile 单选 + Emoji 8×8 grid + ItemPicker 带搜索）；onSizeChanged 跟踪 Composer 高度做底部 padding 动态让位 |
+| 2026-05-15 | cycle 0035 (b)：多 AI 服务大改 — `AiProfile`（@Serializable）+ `SettingsStore.profiles/defaultProfileId/conversationOverrideProfileId`；legacy 单 profile 自动 migrate 成 profiles[0]；`TreasureApp.aiClient()` 走 `effectiveProfile()`；Settings 改 `HorizontalPager` 卡片 + 虚线幽灵卡 + add-provider sheet；编辑抽屉首屏加"名称"（默认 = provider 显示名，可改） |
+| 2026-05-15 | cycle 0035 (a)：录入页 chat-bar 重新设计 —— 实现来自 Claude Design [Record.html](https://api.anthropic.com/v1/design/h/i9EiWaZrLqIPq9bSmnktGw) handoff 包；附件 / 模型抽屉 + emoji 表情；模型 chip 切换本会话用谁 |
 | 2026-05-14 | **v1.0 出 release** · cycle 0034 v9：MODIFY merge 提前到 runExtract（卡片标题 / 字段数 / 影集直接显示"修改后是什么样"）· proposal-preview / accept 简化无再 merge · Detail 抽屉 tab 改 参数 → 历史 → 影集 · 展示参数表去掉 hero/tail terra 分割线 · versionName 0.11.0 → 1.0.0（versionCode 14） |
 | 2026-05-14 | cycle 0034 v8：proposal-preview 开"+ 添加照片"（`saveDraftPhotoFile` 纯 I/O + saveable `cropTargetDraft` 标志位 dispatch）· `mergeDraftOntoDraft` 处理 PENDING / MODIFIED baseline · 卡片缩略图条移除 · Grid 编辑态长按拖修（`combinedClickable.onLongClick = null` 让出长按给 detectDragGesturesAfterLongPress） |
 | 2026-05-14 | cycle 0034 v7：prompt MODIFY 改 **delta-only**（之前要求 AI 全字段重述，导致影集被空覆盖；新 prompt 明令"omitted = keep baseline"）· `mergeDraftOntoItem` 合并 AI delta 到 baseline · Card "采用" → "保存草稿" + 新 "直接录入"（`acceptAndCommitProposal` 一锤子录）· 一键录入完成后不再跳 Detail |

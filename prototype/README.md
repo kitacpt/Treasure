@@ -1,25 +1,26 @@
-# CODING AGENTS: READ THIS FIRST
+# prototype/ · Claude Design 导出原型
 
-This is a **handoff bundle** from Claude Design (claude.ai/design).
+这一目录里的 HTML/CSS/JS 文件是 [Claude Design](https://claude.ai/design) 在 2026-05 期间为 Treasure 产出的可点击原型。**视觉规格的唯一权威**就在这些 HTML 里 —— 改视觉前先打开它们对照。
 
-A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported this bundle so a coding agent can implement the designs for real.
+## 怎么用
 
-## What you should do — IMPORTANT
+浏览器开 [`project/Treasure.html`](project/Treasure.html)（双击即可），看 cycle 0001–0006 的主体设计；开 [`add-page-v2/project/Treasure.html`](add-page-v2/project/Treasure.html) 看录入页 v2（cycle 0007）。
 
-**Read the chat transcripts first.** There are 1 chat transcript(s) in `treasure/chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+颜色 token / 字号 / 间距 / 插画规则 / 控制岛规格都在源文件里可读 —— 不要靠截图，直接读 HTML / JSX 里的 props。
 
-**Read `treasure/project/Treasure.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+## 当前状态（cycle 0035）
 
-**If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
+- **色板 / 字体 / 控制岛 / 插画规则**：仍以原型为准
+- **录入页 chatbar**：cycle 0035 重新设计（chip + drawer），跟原型已经偏离 —— 实现以 [Record.html design handoff](https://api.anthropic.com/v1/design/h/i9EiWaZrLqIPq9bSmnktGw)（已落到代码里）和 [`../docs/architecture.md`](../docs/architecture.md) 描述为准
+- **Settings 多 profile pager**：cycle 0035 新加，原型不含
 
-## About the design files
+## 文件分布
 
-The design medium is **HTML/CSS/JS** — these are prototypes, not production code. Your job is to **recreate them pixel-perfectly** in whatever technology makes sense for the target codebase (React, Vue, native, whatever fits). Match the visual output; don't copy the prototype's internal structure unless it happens to fit.
+- [`README.md`](README.md) — 这一份
+- [`chats/`](chats/) — 用户与 Claude Design 助手的对话记录（"用户原本想要什么"的来源）
+- [`project/`](project/) — v1 8 张画板（cycle 0001–0006）
+- [`add-page-v2/`](add-page-v2/) — 录入页 v2 设计稿（cycle 0007）；同目录 `HANDOFF.md` 详述与 v1 的差异
 
-**Don't render these files in a browser or take screenshots unless the user asks you to.** Everything you need — dimensions, colors, layout rules — is spelled out in the source. Read the HTML and CSS directly; a screenshot won't tell you anything they don't.
+## 这一目录不再演进
 
-## Bundle contents
-
-- `treasure/README.md` — this file
-- `treasure/chats/` — conversation transcripts (read these!)
-- `treasure/project/` — the `Treasure` project files (HTML prototypes, assets, components)
+视觉规格演进改写在 [`../agent.md`](../agent.md) 和具体代码里（不会再回过头改这一目录的 HTML）。原型保留作历史快照。
