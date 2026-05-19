@@ -104,6 +104,10 @@ fun DetailScreen(
     var fullscreenIndex by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf<Int?>(null)
     }
+    // Cycle 0038：分享卡片底部抽屉的开关 — 由 TopBar 的 share icon 触发。
+    var shareSheetOpen by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
 
     if (!state.loaded) {
         Box(modifier = Modifier.fillMaxSize().background(colors.paper))
@@ -167,8 +171,17 @@ fun DetailScreen(
                 .padding(innerPadding)
                 .statusBarsPadding(),
         ) {
-            DetailFront(item = item, onBack = onBack, onEdit = onEdit)
+            DetailFront(
+                item = item,
+                onBack = onBack,
+                onEdit = onEdit,
+                onShare = { shareSheetOpen = true },
+            )
         }
+    }
+
+    if (shareSheetOpen) {
+        ShareCardSheet(item = item, onDismiss = { shareSheetOpen = false })
     }
 
     fullscreenIndex?.let { idx ->
@@ -207,12 +220,12 @@ private fun DetailSheetHandle(isExpanded: Boolean) {
 }
 
 @Composable
-private fun DetailFront(item: Item, onBack: () -> Unit, onEdit: () -> Unit) {
+private fun DetailFront(item: Item, onBack: () -> Unit, onEdit: () -> Unit, onShare: () -> Unit) {
     LazyColumn(
         contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        item { TopBar(onBack = onBack, onEdit = onEdit) }
+        item { TopBar(onBack = onBack, onEdit = onEdit, onShare = onShare) }
         item { Spacer(Modifier.height(20.dp)) }
         item { FlippableHero(item) }
         item { Spacer(Modifier.height(24.dp)) }
@@ -224,7 +237,7 @@ private fun DetailFront(item: Item, onBack: () -> Unit, onEdit: () -> Unit) {
 }
 
 @Composable
-private fun TopBar(onBack: () -> Unit, onEdit: () -> Unit) {
+private fun TopBar(onBack: () -> Unit, onEdit: () -> Unit, onShare: () -> Unit) {
     val colors = LocalTreasureColors.current
     Row(
         modifier = Modifier
@@ -234,6 +247,18 @@ private fun TopBar(onBack: () -> Unit, onEdit: () -> Unit) {
     ) {
         BackArrow(color = colors.ink, onClick = onBack)
         Spacer(Modifier.weight(1f))
+        // Cycle 0038：share icon 在 Edit 红点的左边 — 线描风（上箭头 + 底盘），
+        // 跟 PictureGlyph / FileGlyph 同一画风。点击 → 弹分享卡片底部抽屉。
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable(onClick = onShare)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            ShareGlyph(color = colors.ink)
+        }
+        Spacer(Modifier.width(2.dp))
         // Cycle 0031：和图鉴页右上 Edit + 小红点同款 — terra Edit 字 + 12dp
         // 0xFFC5392E 红圆点 + 整行 clickable 进编辑。
         Row(
@@ -256,6 +281,72 @@ private fun TopBar(onBack: () -> Unit, onEdit: () -> Unit) {
                     .background(androidx.compose.ui.graphics.Color(0xFFC5392E)),
             )
         }
+    }
+}
+
+/**
+ * Cycle 0038：分享 icon — 线描风（一个上升箭头从底盘里抬出来）。20dp 画板、
+ * 1.4dp stroke，跟 [PictureGlyph] / [FileGlyph] 同款画风。
+ */
+@Composable
+private fun ShareGlyph(color: androidx.compose.ui.graphics.Color) {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val sw = 1.4.dp.toPx()
+        val w = size.width
+        val h = size.height
+        // 底部托盘（开口向上的 U）
+        val trayLeft = w * 0.18f
+        val trayRight = w * 0.82f
+        val trayTop = h * 0.50f
+        val trayBottom = h * 0.86f
+        drawLine(
+            color = color,
+            start = androidx.compose.ui.geometry.Offset(trayLeft, trayTop),
+            end = androidx.compose.ui.geometry.Offset(trayLeft, trayBottom),
+            strokeWidth = sw,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = androidx.compose.ui.geometry.Offset(trayRight, trayTop),
+            end = androidx.compose.ui.geometry.Offset(trayRight, trayBottom),
+            strokeWidth = sw,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = androidx.compose.ui.geometry.Offset(trayLeft, trayBottom),
+            end = androidx.compose.ui.geometry.Offset(trayRight, trayBottom),
+            strokeWidth = sw,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+        // 上升箭头杆
+        val midX = w * 0.50f
+        val arrowTop = h * 0.16f
+        val arrowBottom = h * 0.62f
+        drawLine(
+            color = color,
+            start = androidx.compose.ui.geometry.Offset(midX, arrowTop),
+            end = androidx.compose.ui.geometry.Offset(midX, arrowBottom),
+            strokeWidth = sw,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+        // 箭头双翼
+        val headHalf = w * 0.18f
+        drawLine(
+            color = color,
+            start = androidx.compose.ui.geometry.Offset(midX - headHalf, arrowTop + headHalf),
+            end = androidx.compose.ui.geometry.Offset(midX, arrowTop),
+            strokeWidth = sw,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = androidx.compose.ui.geometry.Offset(midX + headHalf, arrowTop + headHalf),
+            end = androidx.compose.ui.geometry.Offset(midX, arrowTop),
+            strokeWidth = sw,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
     }
 }
 

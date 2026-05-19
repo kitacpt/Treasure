@@ -4,4 +4,7 @@
          the camera app a content:// uri via FileProvider, then copy the
          file into the item's photos folder. -->
     <files-path name="captures" path="captures/" />
+    <!-- Cycle 0038：Detail 分享卡片生成的 PNG 落这里，再通过 FileProvider
+         交给系统分享面板（微信 / 朋友圈 / 邮件等）。 -->
+    <files-path name="share-cards" path="share-cards/" />
 </paths>
