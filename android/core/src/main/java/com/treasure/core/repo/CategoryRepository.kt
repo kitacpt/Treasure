@@ -36,6 +36,12 @@ interface CategoryRepository {
 
     /** Cycle 0030：设置 / 清除分类代表图。传 null 清除。 */
     suspend fun setHeroPhotoPath(id: String, path: String?)
+
+    /**
+     * Cycle 0037：备份恢复整体覆盖。先清空 category_prefs 再写回。内建 6 行 +
+     * 自定义都从备份里读，调用方负责把数据带齐。
+     */
+    suspend fun replaceAll(infos: List<CategoryInfo>)
 }
 
 class RoomCategoryRepository internal constructor(
@@ -110,6 +116,26 @@ class RoomCategoryRepository internal constructor(
 
     override suspend fun setHeroPhotoPath(id: String, path: String?) {
         dao.setHeroPhotoPath(id, path)
+    }
+
+    override suspend fun replaceAll(infos: List<CategoryInfo>) {
+        dao.deleteAll()
+        val now = System.currentTimeMillis()
+        infos.forEach { info ->
+            dao.upsert(
+                CategoryPrefEntity(
+                    id = info.id,
+                    built_in = if (info.isBuiltIn) 1 else 0,
+                    name_zh = info.nameZh,
+                    name_en = info.nameEn,
+                    hero_vector = info.heroVector.name,
+                    hidden = if (info.hidden) 1 else 0,
+                    sort_order = info.sortOrder,
+                    created_at = now,
+                    hero_photo_path = info.heroPhotoPath,
+                ),
+            )
+        }
     }
 
     companion object {

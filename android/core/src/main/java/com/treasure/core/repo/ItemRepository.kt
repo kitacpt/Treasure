@@ -19,6 +19,8 @@ interface ItemRepository {
     /** Cycle 0033：批量重排 — orderedIds 按用户拖完的次序，从某个起点开始
      *  顺序递增写 sort_order。同一批一次性生效（避免中途观察到中间态）。 */
     suspend fun reorder(orderedIds: List<String>)
+    /** Cycle 0037：备份恢复整体覆盖前先清空。 */
+    suspend fun deleteAll()
 }
 
 class RoomItemRepository internal constructor(
@@ -59,6 +61,10 @@ class RoomItemRepository internal constructor(
             dao.setSortOrder(id, order)
             order += 1L
         }
+    }
+
+    override suspend fun deleteAll() {
+        dao.deleteAll()
     }
 
     companion object {

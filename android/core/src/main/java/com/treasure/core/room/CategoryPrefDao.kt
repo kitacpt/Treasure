@@ -60,4 +60,8 @@ internal interface CategoryPrefDao {
     /** Cycle 0030：设/清分类代表图。传 null 清掉。 */
     @Query("UPDATE category_prefs SET hero_photo_path = :path WHERE id = :id")
     suspend fun setHeroPhotoPath(id: String, path: String?)
+
+    /** Cycle 0037：备份恢复整体覆盖前清空。 */
+    @Query("DELETE FROM category_prefs")
+    suspend fun deleteAll()
 }

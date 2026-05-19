@@ -38,4 +38,8 @@ internal interface ItemDao {
 
     @Query("UPDATE items SET sort_order = :order WHERE id = :id")
     suspend fun setSortOrder(id: String, order: Long)
+
+    /** Cycle 0037：备份恢复前整体清空。 */
+    @Query("DELETE FROM items")
+    suspend fun deleteAll()
 }

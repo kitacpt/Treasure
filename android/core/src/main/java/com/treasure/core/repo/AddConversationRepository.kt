@@ -127,6 +127,12 @@ interface AddConversationRepository {
     suspend fun upsertItem(item: ConversationItem)
     suspend fun deleteItem(itemId: String)
     suspend fun nextSortOrder(conversationId: String): Int
+
+    /** Cycle 0037：备份 / 恢复用 — 一次性拉全量会话（无 limit），不走 Flow。 */
+    suspend fun loadAllConversations(): List<AddConversation>
+
+    /** Cycle 0037：清空所有会话 + 消息 + 工作集（导入恢复时整体覆盖）。 */
+    suspend fun deleteAllConversations()
 }
 
 class RoomAddConversationRepository internal constructor(
@@ -189,6 +195,15 @@ class RoomAddConversationRepository internal constructor(
     ) {
         dao.clearMessages(conversationId)
         messages.forEach { dao.upsertMessage(it.toEntity(conversationId, json)) }
+    }
+
+    override suspend fun loadAllConversations(): List<AddConversation> =
+        dao.loadAllConversations().map { it.toDomain() }
+
+    override suspend fun deleteAllConversations() {
+        dao.deleteAllMessages()
+        dao.deleteAllConversationItems()
+        dao.deleteAllConversations()
     }
 
     companion object {

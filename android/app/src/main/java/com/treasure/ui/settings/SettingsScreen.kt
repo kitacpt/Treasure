@@ -145,7 +145,9 @@ fun SettingsScreen(
                 onOpenEditor = onOpenEditor,
                 onSetAsDefault = onSetAsDefault,
             )
-            Spacer(Modifier.height(38.dp))
+            Spacer(Modifier.height(28.dp))
+            BackupEntry(modifier = Modifier.padding(horizontal = 22.dp))
+            Spacer(Modifier.height(28.dp))
             DangerZone(onReset = onResetAll, modifier = Modifier.padding(horizontal = 22.dp))
         }
 
@@ -669,6 +671,53 @@ private fun AddProfileSheet(
                 }
             }
         }
+    }
+}
+
+// ─── backup / restore entry ───────────────────────────────────────────
+
+/**
+ * Cycle 0037：数据备份 / 恢复入口。
+ *
+ * 点击 → 弹 [com.treasure.backup.BackupSheet]，所有功能（导出 / 导入 /
+ * 进度 / 二次确认）在里面完成。这一行只做"进门"。
+ */
+@Composable
+private fun BackupEntry(modifier: Modifier = Modifier) {
+    val colors = LocalTreasureColors.current
+    var open by remember { mutableStateOf(false) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text("DATA", color = colors.sub, style = MaterialTheme.typography.labelSmall)
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(colors.card)
+                .border(0.5.dp, colors.line, RoundedCornerShape(14.dp))
+                .clickable { open = true }
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "数据备份 / 恢复",
+                    color = colors.ink,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "EXPORT · RESTORE",
+                    color = colors.sub,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            Text("→", color = colors.ink, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+
+    if (open) {
+        com.treasure.backup.BackupSheet(onClose = { open = false })
     }
 }
 

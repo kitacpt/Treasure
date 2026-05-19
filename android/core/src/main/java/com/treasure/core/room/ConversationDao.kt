@@ -26,4 +26,18 @@ internal interface ConversationDao {
 
     @Query("SELECT * FROM add_messages WHERE conversation_id = :conversationId ORDER BY created_at ASC")
     suspend fun loadMessages(conversationId: String): List<ConversationMessageEntity>
+
+    /** Cycle 0037：备份导出 — 一次拉全量，不分页。 */
+    @Query("SELECT * FROM add_conversations ORDER BY updated_at DESC")
+    suspend fun loadAllConversations(): List<ConversationEntity>
+
+    /** Cycle 0037：导入前整体清空。 */
+    @Query("DELETE FROM add_messages")
+    suspend fun deleteAllMessages()
+
+    @Query("DELETE FROM add_conversations")
+    suspend fun deleteAllConversations()
+
+    @Query("DELETE FROM conversation_items")
+    suspend fun deleteAllConversationItems()
 }
