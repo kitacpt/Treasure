@@ -55,5 +55,13 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.coil.compose)
     implementation(libs.androidx.security.crypto)
+    // Cycle 0036：AI 助手气泡 markdown 渲染（标题 / 加粗 / 列表 / 链接 / 代码
+    // 块 / 表格 / 引用），只用 m3 核心 — image transformer 暂不接，AI 文本里
+    // 出现图片的几率极低，节省 ~100KB 包体。
+    implementation(libs.multiplatform.markdown.renderer.m3)
+    // Cycle 0036 v2：客户端从 PDF 文件附件里提取文本，作为 user-turn 上下文
+    // 喂给 AI（所有 provider 都吃）。约 +3MB 包体；纯文本 / 源代码类文件不
+    // 经过它，直接 UTF-8 读。
+    implementation(libs.pdfbox.android)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

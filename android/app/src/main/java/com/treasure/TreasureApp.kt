@@ -72,6 +72,13 @@ class TreasureApp : Application() {
         categoryRepository = RoomCategoryRepository.create(this)
         settingsStore = SettingsStore(this)
         darkModeOverride.value = settingsStore.darkMode
+        // Cycle 0036 v2：PdfBox-Android 用 asset 里的 cmaps 字体表做文字提取，
+        // 在用前必须 init 一下。放 IO 线程做 — 它要解几个内置资源 jar。
+        appScope.launch {
+            runCatching {
+                com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext)
+            }
+        }
         appScope.launch { repository.ensureSeeded() }
     }
 

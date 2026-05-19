@@ -6,6 +6,8 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -80,8 +82,23 @@ import com.treasure.illust.HeroIllustration
 import com.treasure.ui.components.HeroAvatar
 import com.treasure.theme.Cormorant
 import com.treasure.theme.LocalTreasureColors
+import kotlinx.coroutines.launch
 
 private const val DEFAULT_TITLE = "New entry"
+
+/**
+ * Cycle 0036：composer 上方的"待发送附件" — 图片和文件统一进同一条 staging
+ * 列表。用户从附件抽屉选完图片 / 文件后落到这里，等用户按发送时一起送出。
+ */
+internal sealed interface PendingAttachment {
+    data class Photo(val uri: android.net.Uri) : PendingAttachment
+    data class File(
+        val uri: android.net.Uri,
+        val displayName: String,
+        val mimeType: String?,
+        val sizeBytes: Long,
+    ) : PendingAttachment
+}
 
 @Composable
 fun AddChat(
@@ -94,7 +111,13 @@ fun AddChat(
     onRenameConversation: (id: String, newTitle: String) -> Unit,
     onDeleteConversation: (String) -> Unit,
     onSendText: (String) -> Unit,
-    onSendPhotos: (List<android.net.Uri>, String) -> Unit,
+    /** Cycle 0036：图 + 文件 + 文字一起发的统一入口，取代 onSendPhotos。
+     *  (photoUris, files, caption) — 任一非空都允许发送。 */
+    onSendAttachments: (
+        photos: List<android.net.Uri>,
+        files: List<com.treasure.ui.add.FileAttachment>,
+        caption: String,
+    ) -> Unit,
     onStartVoice: () -> Unit,
     /** Cycle 0035 v2：press-and-hold 语音松手 — stop recorder + send。 */
     onPressVoiceCommit: () -> Unit,
@@ -124,7 +147,6 @@ fun AddChat(
     aiProfiles: List<com.treasure.data.AiProfile>,
     selectedProfileId: String?,
     onSelectProfile: (String) -> Unit,
-    onPickFile: () -> Unit,
 ) {
     val colors = LocalTreasureColors.current
     val context = LocalContext.current
@@ -162,13 +184,42 @@ fun AddChat(
         }
     }
 
-    // Cycle 0034：可一次挑多张图作为同一轮 user-turn 的附件 — AI 在系统提示
-    // 的 [ATTACHED PHOTOS] 里看到 N 张，分配给具体物品的影集。pendingPhotos
-    // 暂存到 send 时一并发送；用户可再点一次 + 追加；每张缩略图有 ✕ 删除。
-    var pendingPhotos by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    // Cycle 0034 / 0036：composer 上方的待发送附件 — 图 + 文件统一入此列表。
+    // [ATTACHED PHOTOS] system-prompt 块按里头的 Photo 顺序计数；文件作为
+    // 上下文 hint 拼到 user-turn 文本（[AddViewModel.sendAttachments]）。
+    var pendingAttachments by remember { mutableStateOf<List<PendingAttachment>>(emptyList()) }
     val pickPhoto = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 9),
-    ) { uris -> if (uris.isNotEmpty()) pendingPhotos = pendingPhotos + uris }
+    ) { uris ->
+        if (uris.isNotEmpty()) pendingAttachments = pendingAttachments + uris.map { PendingAttachment.Photo(it) }
+    }
+    // Cycle 0036：文件 picker 直接在这儿注册，选完落 staging（替代 cycle 0035
+    // 的"选完就直发"行为）。
+    val pickFile = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            // 拉文件元数据：display name + size + mime type
+            val (name, size) = runCatching {
+                context.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                    val nameIdx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    val sizeIdx = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (c.moveToFirst()) {
+                        val n = if (nameIdx >= 0) c.getString(nameIdx) else null
+                        val s = if (sizeIdx >= 0) c.getLong(sizeIdx) else 0L
+                        n to s
+                    } else null
+                }
+            }.getOrNull() ?: (uri.lastPathSegment to 0L)
+            val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+            pendingAttachments = pendingAttachments + PendingAttachment.File(
+                uri = uri,
+                displayName = name ?: uri.lastPathSegment ?: "附件",
+                mimeType = mime,
+                sizeBytes = size ?: 0L,
+            )
+        }
+    }
 
     val photoPermission = rememberPhotoPermissionName()
     val photoPermLauncher = rememberLauncherForActivityResult(
@@ -240,6 +291,12 @@ fun AddChat(
                 androidx.compose.foundation.text.selection.SelectionContainer(
                     modifier = Modifier.fillMaxSize(),
                 ) {
+                    // Cycle 0036：连续的 DraftCta 段合成一张 GroupCard（horizontal
+                    // pager + 状态点）；非 DraftCta 维持单条渲染。group 边界 = 上
+                    // 下两端是非 DraftCta 消息（或列表首尾）。
+                    val groups = remember(state.messages) {
+                        groupConsecutiveCtas(state.messages)
+                    }
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -251,16 +308,24 @@ fun AddChat(
                         ),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(state.messages.size) { idx ->
-                            val message = state.messages[idx]
-                            MessageRow(
-                                message = message,
-                                onPreviewProposal = onPreviewProposal,
-                                onPreviewPhoto = onPreviewPhoto,
-                                onAcceptProposal = onAcceptProposal,
-                                onAcceptAndCommitProposal = onAcceptAndCommitProposal,
-                                onRejectProposal = onRejectProposal,
-                            )
+                        items(groups.size) { i ->
+                            when (val g = groups[i]) {
+                                is RenderItem.Single -> MessageRow(
+                                    message = g.message,
+                                    onPreviewProposal = onPreviewProposal,
+                                    onPreviewPhoto = onPreviewPhoto,
+                                    onAcceptProposal = onAcceptProposal,
+                                    onAcceptAndCommitProposal = onAcceptAndCommitProposal,
+                                    onRejectProposal = onRejectProposal,
+                                )
+                                is RenderItem.CtaGroup -> DraftCtaGroupCard(
+                                    ctas = g.ctas,
+                                    onAcceptProposal = onAcceptProposal,
+                                    onAcceptAndCommitProposal = onAcceptAndCommitProposal,
+                                    onRejectProposal = onRejectProposal,
+                                    onPreviewProposal = onPreviewProposal,
+                                )
+                            }
                         }
                         if (state.busy) {
                             item { TypingIndicator(startedAt = state.busyStartedAt) }
@@ -309,27 +374,45 @@ fun AddChat(
                 onInputChange = { input = it },
                 busy = state.busy,
                 saved = state.saved,
-                pendingPhotos = pendingPhotos,
-                onRemovePending = { uri -> pendingPhotos = pendingPhotos - uri },
+                composerLocked = state.composerLocked,
+                pendingCtaCount = state.pendingCtaCount,
+                pendingAttachments = pendingAttachments,
+                onRemovePending = { att -> pendingAttachments = pendingAttachments - att },
                 onSend = {
-                    if (pendingPhotos.isNotEmpty()) {
-                        onSendPhotos(pendingPhotos, input)
+                    val photos = pendingAttachments
+                        .filterIsInstance<PendingAttachment.Photo>()
+                        .map { it.uri }
+                    val files = pendingAttachments
+                        .filterIsInstance<PendingAttachment.File>()
+                        .map {
+                            com.treasure.ui.add.FileAttachment(
+                                uri = it.uri,
+                                displayName = it.displayName,
+                                mimeType = it.mimeType,
+                                sizeBytes = it.sizeBytes,
+                            )
+                        }
+                    if (photos.isNotEmpty() || files.isNotEmpty()) {
+                        onSendAttachments(photos, files, input)
                     } else {
                         onSendText(input)
                     }
                     input = ""
-                    pendingPhotos = emptyList()
+                    pendingAttachments = emptyList()
                 },
                 onStop = onStopExtract,
                 onTakePhoto = ::launchPhotoFlow,
                 onStartVoice = onStartVoice,
                 onPreviewPending = { idx ->
-                    onPreviewPendingPhoto(pendingPhotos.map { it.toString() }, idx)
+                    val photoUris = pendingAttachments
+                        .filterIsInstance<PendingAttachment.Photo>()
+                        .map { it.uri.toString() }
+                    if (photoUris.isNotEmpty()) onPreviewPendingPhoto(photoUris, idx)
                 },
                 aiProfiles = aiProfiles,
                 selectedProfileId = selectedProfileId,
                 onSelectProfile = onSelectProfile,
-                onPickFile = onPickFile,
+                onPickFile = { pickFile.launch(arrayOf("*/*")) },
                 allItems = allItems,
                 onPressVoiceStart = { onStartVoice() },
                 onPressVoiceSend = { onPressVoiceCommit() },
@@ -967,13 +1050,65 @@ private fun AssistantBubble(text: String) {
                 .border(0.5.dp, colors.line)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
-            Text(
-                text = text,
+            // Cycle 0036：AI 文本气泡走 markdown 渲染（标题 / 加粗 / 列表 /
+            // 链接 / 代码块 / 表格 / 引用）。正文沿用 Cormorant italic 16sp 保
+            // 持 v1.0 观感；标题非斜体加阶梯字号；代码块切 JetBrainsMono。
+            val baseStyle = MaterialTheme.typography.bodyLarge.copy(
+                fontFamily = Cormorant,
+                fontStyle = FontStyle.Italic,
+                fontSize = 16.sp,
                 color = colors.ink,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontFamily = Cormorant,
-                    fontStyle = FontStyle.Italic,
-                    fontSize = 16.sp,
+            )
+            com.mikepenz.markdown.m3.Markdown(
+                content = text,
+                // Cycle 0036：GFM flavour — 启用表格 / 删除线 / 任务列表。默认
+                // CommonMarkFlavourDescriptor 不识别表格语法（| col | col |）。
+                flavour = org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor(),
+                colors = com.mikepenz.markdown.m3.markdownColor(
+                    text = colors.ink,
+                    codeText = colors.ink,
+                    inlineCodeText = colors.ink,
+                    linkText = colors.terra,
+                    codeBackground = colors.paper,
+                    inlineCodeBackground = colors.paper,
+                    dividerColor = colors.line,
+                ),
+                typography = com.mikepenz.markdown.m3.markdownTypography(
+                    text = baseStyle,
+                    paragraph = baseStyle,
+                    quote = baseStyle.copy(color = colors.sub),
+                    h1 = baseStyle.copy(
+                        fontStyle = FontStyle.Normal,
+                        fontSize = 22.sp,
+                    ),
+                    h2 = baseStyle.copy(
+                        fontStyle = FontStyle.Normal,
+                        fontSize = 20.sp,
+                    ),
+                    h3 = baseStyle.copy(
+                        fontStyle = FontStyle.Normal,
+                        fontSize = 18.sp,
+                    ),
+                    h4 = baseStyle.copy(
+                        fontStyle = FontStyle.Normal,
+                        fontSize = 17.sp,
+                    ),
+                    h5 = baseStyle.copy(fontStyle = FontStyle.Normal),
+                    h6 = baseStyle.copy(fontStyle = FontStyle.Normal),
+                    bullet = baseStyle,
+                    list = baseStyle,
+                    ordered = baseStyle,
+                    code = baseStyle.copy(
+                        fontStyle = FontStyle.Normal,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 14.sp,
+                    ),
+                    inlineCode = baseStyle.copy(
+                        fontStyle = FontStyle.Normal,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 14.sp,
+                    ),
+                    link = baseStyle.copy(color = colors.terra),
                 ),
             )
         }
@@ -1098,29 +1233,32 @@ private fun DraftCtaCard(
             ?.let { CategoryTemplates.forCategory(it) }
             ?: CategoryTemplates.forCategory(com.treasure.core.domain.Category.TECH)
     }
-    // Cycle 0034 v3：采用前先用 AI 分配的"准头像"做预览 — 优先取一条标了
-    // isAvatar=true 的 photo_assignment，没有就取第一条；用它的 sourceUri 当
-    // 卡片上的小图。注意：这里还没真正落盘裁好，所以展示的是源图全幅；点
-    // 采用后 applyAcceptedCta 会把按 crop 裁好的副本写进 draft.photos /
-    // avatarPhotoPath，工作集 / 图鉴里看到的就是裁过的版。
-    // Cycle 0034 v4：从 photo_assignments 里挑一条做卡片头像（标了 isAvatar
-    // 的优先，没有就第一条），并把它的 crop rect 也带上 — HeroAvatar 会读
-    // photoCrops[avatarPhotoPath] 应用裁剪，所以卡片直接显示"裁剪后的效果"。
-    val previewAssignment = remember(message.photoAssignments) {
-        message.photoAssignments.firstOrNull { it.isAvatar }
-            ?: message.photoAssignments.firstOrNull()
-    }
-    val previewAvatar = previewAssignment?.sourceUri
-    val previewCropMap = remember(previewAssignment) {
-        if (previewAssignment != null && previewAvatar != null) {
-            mapOf(
+    // Cycle 0036 v2：cta.draft 在 runExtract.onSuccess 阶段已被 mergeWithAssignments
+    // 合并完整 —— base.photos / base.avatarPhotoPath（来自 baseline 工作集那
+    // 行）+ AI 本轮 photo_assignments 物理拷贝过来的新图 都已经合进
+    // draft.photos / draft.avatarPhotoPath / draft.photoCrops。所以卡片头像直
+    // 接读 draft 字段就够，且能正确显示"MODIFY 第二轮无新图但工作集那行已有
+    // 老头像"的情况（之前只看 photoAssignments 会丢头像）。
+    //
+    // 升级兼容兜底：cycle 0036 之前持久化的 pending 卡片可能 draft.photos 空
+    // 但 photoAssignments 非空，这种回到旧逻辑取 assignment 的 sourceUri。
+    val draftAvatar = message.draft.avatarPhotoPath
+        ?: message.draft.photos.firstOrNull()
+    val previewAvatar: String? = draftAvatar
+        ?: message.photoAssignments.firstOrNull { it.isAvatar }?.sourceUri
+        ?: message.photoAssignments.firstOrNull()?.sourceUri
+    val previewCropMap = remember(message.draft.photoCrops, previewAvatar, message.photoAssignments) {
+        if (draftAvatar != null) {
+            // draft 路径优先 — 用 draft.photoCrops 里已记的 crop
+            message.draft.photoCrops
+        } else if (previewAvatar != null) {
+            // 兼容旧 pending 卡：从 assignment 里拼 crop
+            val ass = message.photoAssignments.firstOrNull { it.sourceUri == previewAvatar }
+            if (ass != null) mapOf(
                 previewAvatar to com.treasure.core.domain.PhotoCrop(
-                    x = previewAssignment.cropX,
-                    y = previewAssignment.cropY,
-                    w = previewAssignment.cropW,
-                    h = previewAssignment.cropH,
+                    x = ass.cropX, y = ass.cropY, w = ass.cropW, h = ass.cropH,
                 ),
-            )
+            ) else emptyMap()
         } else emptyMap()
     }
     val previewItem = remember(message.draft, template, previewAvatar, previewCropMap) {
@@ -1135,7 +1273,7 @@ private fun DraftCtaCard(
             status = com.treasure.core.domain.ItemStatus.OWNED,
             palette = template.palette,
             oneLiner = "",
-            heroVector = template.heroVector,
+            heroVector = message.draft.heroVector ?: template.heroVector,
             specs = emptyList(),
             history = emptyList(),
             photos = listOfNotNull(previewAvatar),
@@ -1420,8 +1558,12 @@ private fun Composer(
     onInputChange: (String) -> Unit,
     busy: Boolean,
     saved: Boolean,
-    pendingPhotos: List<android.net.Uri>,
-    onRemovePending: (android.net.Uri) -> Unit,
+    /** Cycle 0036：还有未决策的 AI 提案卡时，整条 composer 锁住 — 输入 + 发
+     *  送 + 录音都不可用，附件 / 模型 chip 仍开（让用户能"先准备"）。 */
+    composerLocked: Boolean,
+    pendingCtaCount: Int,
+    pendingAttachments: List<PendingAttachment>,
+    onRemovePending: (PendingAttachment) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     onTakePhoto: () -> Unit,
@@ -1464,8 +1606,15 @@ private fun Composer(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        // pending photos strip (kept above chip row)
-        if (pendingPhotos.isNotEmpty()) {
+        // Cycle 0036：待发送附件缩略图栏 — 图片和文件混排。Photo 渲染缩略；
+        // File 渲染线描文件卡 + 名称 + 大小。
+        if (pendingAttachments.isNotEmpty()) {
+            // 仅 Photo 索引列表 — 单击预览时给上游回调用
+            val photoIndices = remember(pendingAttachments) {
+                pendingAttachments.mapIndexedNotNull { i, a ->
+                    if (a is PendingAttachment.Photo) i else null
+                }
+            }
             Column(modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
@@ -1477,46 +1626,125 @@ private fun Composer(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    items(pendingPhotos.size) { idx ->
-                        val uri = pendingPhotos[idx]
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(colors.paper)
-                                .border(0.5.dp, colors.line, RoundedCornerShape(8.dp))
-                                .clickable { onPreviewPending(idx) },
-                        ) {
-                            coil.compose.AsyncImage(
-                                model = uri,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            )
-                            Box(
+                    items(pendingAttachments.size) { idx ->
+                        when (val att = pendingAttachments[idx]) {
+                            is PendingAttachment.Photo -> Box(
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(2.dp)
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.ink.copy(alpha = 0.75f))
-                                    .clickable { onRemovePending(uri) },
-                                contentAlignment = Alignment.Center,
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(colors.paper)
+                                    .border(0.5.dp, colors.line, RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        // 把当前 idx 转成 Photo-only index
+                                        val photoIdx = photoIndices.indexOf(idx).coerceAtLeast(0)
+                                        onPreviewPending(photoIdx)
+                                    },
                             ) {
-                                Text("✕", color = colors.paper, style = MaterialTheme.typography.labelSmall)
+                                coil.compose.AsyncImage(
+                                    model = att.uri,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(2.dp)
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.ink.copy(alpha = 0.75f))
+                                        .clickable { onRemovePending(att) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text("✕", color = colors.paper, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            is PendingAttachment.File -> Box(
+                                modifier = Modifier
+                                    .width(120.dp)
+                                    .height(64.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(colors.paper)
+                                    .border(0.5.dp, colors.line, RoundedCornerShape(8.dp))
+                                    .padding(8.dp),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    FileGlyph(colors.ink)
+                                    Spacer(Modifier.width(6.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = att.displayName,
+                                            color = colors.ink,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                        )
+                                        val sz = com.treasure.ui.add.formatFileSize(att.sizeBytes)
+                                        Text(
+                                            text = sz.ifBlank { att.mimeType.orEmpty() },
+                                            color = colors.sub,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(2.dp)
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.ink.copy(alpha = 0.75f))
+                                        .clickable { onRemovePending(att) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text("✕", color = colors.paper, style = MaterialTheme.typography.labelSmall)
+                                }
                             }
                         }
                     }
                 }
                 Spacer(Modifier.height(4.dp))
+                val photoCount = pendingAttachments.count { it is PendingAttachment.Photo }
+                val fileCount = pendingAttachments.count { it is PendingAttachment.File }
+                val parts = mutableListOf<String>()
+                if (photoCount > 0) parts += "${photoCount} 张图"
+                if (fileCount > 0) parts += "${fileCount} 个文件"
                 Text(
-                    text = if (pendingPhotos.size == 1) "可以配一句话一起发" else "${pendingPhotos.size} 张图 · 可再加 / 配一句话一起发",
+                    text = if (parts.isEmpty()) "" else "${parts.joinToString(" · ")} · 配一句话一起发",
                     color = colors.sub,
                     style = MaterialTheme.typography.labelSmall,
                     fontStyle = FontStyle.Italic,
                 )
             }
             Spacer(Modifier.height(8.dp))
+        }
+        // Cycle 0036：未决策草稿卡片时，整条 composer 锁住，输入栏顶上方
+        // 显示一行 italic 提示。附件 / 模型 chip 不锁（让用户能预备下一轮）。
+        if (composerLocked) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(colors.terra),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "请先采用或拒绝上方 $pendingCtaCount 张草稿",
+                    color = colors.sub,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFamily = Cormorant,
+                        fontStyle = FontStyle.Italic,
+                    ),
+                )
+            }
         }
 
         // chip row (附件 / 模型)
@@ -1571,7 +1799,7 @@ private fun Composer(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .clickable(enabled = !saved && !busy) {
+                        .clickable(enabled = !saved && !busy && !composerLocked) {
                             voiceMode = !voiceMode
                             // 进 voice 态时收键盘；退出态保持原状
                             if (voiceMode) {
@@ -1583,7 +1811,7 @@ private fun Composer(
                 ) {
                     SoundwaveGlyph(
                         color = when {
-                            saved || busy -> colors.sub.copy(alpha = 0.4f)
+                            saved || busy || composerLocked -> colors.sub.copy(alpha = 0.4f)
                             voiceMode -> colors.terra
                             else -> colors.sub
                         },
@@ -1604,8 +1832,8 @@ private fun Composer(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 28.dp)
-                                .pointerInput(saved, busy) {
-                                    if (saved || busy) return@pointerInput
+                                .pointerInput(saved, busy, composerLocked) {
+                                    if (saved || busy || composerLocked) return@pointerInput
                                     awaitPointerEventScope {
                                         while (true) {
                                             val down = awaitFirstDown(requireUnconsumed = false)
@@ -1625,7 +1853,7 @@ private fun Composer(
                         ) {
                             Text(
                                 text = "长按 · 录音",
-                                color = colors.ink.copy(alpha = 0.85f),
+                                color = colors.ink.copy(alpha = if (composerLocked) 0.4f else 0.85f),
                                 style = MaterialTheme.typography.bodyLarge,
                             )
                         }
@@ -1634,22 +1862,23 @@ private fun Composer(
                             Text(
                                 text = when {
                                     saved -> "会话已封存 · 已收入图鉴"
-                                    pendingPhotos.isNotEmpty() -> "配一句话…（可留空）"
+                                    composerLocked -> "等你决策上方草稿…"
+                                    pendingAttachments.isNotEmpty() -> "配一句话…（可留空）"
                                     else -> "说说这件东西…"
                                 },
-                                color = colors.sub.copy(alpha = if (saved) 0.5f else 1f),
+                                color = colors.sub.copy(alpha = if (saved || composerLocked) 0.5f else 1f),
                                 style = MaterialTheme.typography.bodyLarge,
-                                fontStyle = if (saved) FontStyle.Italic else FontStyle.Normal,
+                                fontStyle = if (saved || composerLocked) FontStyle.Italic else FontStyle.Normal,
                             )
                         }
                         BasicTextField(
                             value = input,
                             onValueChange = onInputChange,
-                            enabled = !saved,
+                            enabled = !saved && !composerLocked,
                             cursorBrush = SolidColor(colors.terra),
                             maxLines = 4,
                             textStyle = LocalTextStyle.current.copy(
-                                color = if (saved) colors.sub.copy(alpha = 0.5f) else colors.ink,
+                                color = if (saved || composerLocked) colors.sub.copy(alpha = 0.5f) else colors.ink,
                                 fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
                                 fontSize = MaterialTheme.typography.bodyLarge.fontSize,
                             ),
@@ -1675,7 +1904,9 @@ private fun Composer(
             Spacer(Modifier.width(8.dp))
 
             // send button (outside, circle)
-            val hasContent = input.isNotBlank() || pendingPhotos.isNotEmpty()
+            // Cycle 0036：has content = 文字 + 图 + 文件 三者任一；
+            // composerLocked 也直接禁用发送（pending cta 未决策时不能进新轮）。
+            val hasContent = input.isNotBlank() || pendingAttachments.isNotEmpty()
             when {
                 saved -> Box(
                     modifier = Modifier
@@ -1740,7 +1971,7 @@ private fun Composer(
                     }
                 }
                 else -> {
-                    val canSend = hasContent
+                    val canSend = hasContent && !composerLocked
                     Box(
                         modifier = Modifier
                             .size(42.dp)
@@ -2942,6 +3173,214 @@ private fun ItemPickerRow(
             text = "+",
             color = colors.terra,
             style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
+// ─── Cycle 0036: DraftCta group rendering ─────────────────────────────
+
+/** 列表渲染时把连续的 DraftCta 段折成一组。 */
+private sealed interface RenderItem {
+    data class Single(val message: AddMessage) : RenderItem
+    data class CtaGroup(val ctas: List<AddMessage.DraftCta>) : RenderItem
+}
+
+private fun groupConsecutiveCtas(messages: List<AddMessage>): List<RenderItem> {
+    val out = mutableListOf<RenderItem>()
+    var buf = mutableListOf<AddMessage.DraftCta>()
+    fun flush() {
+        if (buf.isNotEmpty()) {
+            out += RenderItem.CtaGroup(buf.toList())
+            buf = mutableListOf()
+        }
+    }
+    messages.forEach { m ->
+        if (m is AddMessage.DraftCta) buf += m
+        else { flush(); out += RenderItem.Single(m) }
+    }
+    flush()
+    return out
+}
+
+/**
+ * Cycle 0036：把 AI 一次返的多张 DraftCta 折成 horizontal pager 大卡 —
+ * 左右滑切换不同物品，底部 N 个状态点（灰=pending / 红=rejected / 绿=accepted），
+ * 当前页 dot 外加 ring 高亮。顶部右侧 [全部采用] 仅在仍有 Pending 时启用，
+ * 二次确认后批量录入。N=1 时退化为不带 dots 的单卡。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DraftCtaGroupCard(
+    ctas: List<AddMessage.DraftCta>,
+    onAcceptProposal: (String) -> Unit,
+    onAcceptAndCommitProposal: (String) -> Unit,
+    onRejectProposal: (String) -> Unit,
+    onPreviewProposal: (AddMessage.DraftCta) -> Unit,
+) {
+    if (ctas.isEmpty()) return
+    val colors = LocalTreasureColors.current
+    val pagerState = rememberPagerState(pageCount = { ctas.size })
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var confirmingAcceptAll by remember { mutableStateOf(false) }
+
+    val pendingCount = ctas.count { it.status == com.treasure.core.repo.DraftCtaStatus.Pending }
+    val acceptedCount = ctas.count { it.status == com.treasure.core.repo.DraftCtaStatus.Accepted }
+    val rejectedCount = ctas.count { it.status == com.treasure.core.repo.DraftCtaStatus.Rejected }
+
+    /** 决策完一张后自动跳到下一张 Pending。 */
+    fun jumpToNextPending(fromIndex: Int) {
+        if (ctas.size <= 1) return
+        val nextIdx = (1..ctas.lastIndex).asSequence()
+            .map { (fromIndex + it) % ctas.size }
+            .firstOrNull { ctas[it].status == com.treasure.core.repo.DraftCtaStatus.Pending }
+        if (nextIdx != null) {
+            scope.launch { pagerState.animateScrollToPage(nextIdx) }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(4.dp))
+            .background(colors.card)
+            .border(0.5.dp, colors.line),
+    ) {
+        // 顶部：N 件草稿 · 全部采用
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val summary = buildString {
+                append("AI 提议 · ${ctas.size} 件草稿")
+                val deltas = mutableListOf<String>()
+                if (acceptedCount > 0) deltas += "${acceptedCount} 已采用"
+                if (rejectedCount > 0) deltas += "${rejectedCount} 已拒绝"
+                if (pendingCount > 0 && (acceptedCount > 0 || rejectedCount > 0)) {
+                    deltas += "${pendingCount} 待决策"
+                }
+                if (deltas.isNotEmpty()) append(" · ${deltas.joinToString(" · ")}")
+            }
+            Text(
+                text = summary,
+                color = colors.sub,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = Cormorant,
+                    fontStyle = FontStyle.Italic,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+            if (ctas.size > 1 && pendingCount > 0) {
+                Text(
+                    text = "全部采用",
+                    color = colors.terra,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable { confirmingAcceptAll = true }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+        }
+
+        // pager
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxWidth(),
+        ) { page ->
+            val cta = ctas[page]
+            DraftCtaCard(
+                message = cta,
+                onOpen = { onPreviewProposal(cta) },
+                onAccept = {
+                    onAcceptProposal(cta.id)
+                    jumpToNextPending(page)
+                },
+                onAcceptAndCommit = {
+                    onAcceptAndCommitProposal(cta.id)
+                    jumpToNextPending(page)
+                },
+                onReject = {
+                    onRejectProposal(cta.id)
+                    jumpToNextPending(page)
+                },
+            )
+        }
+
+        // 状态点（N=1 时不显示）
+        if (ctas.size > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ctas.forEachIndexed { idx, cta ->
+                    val dotColor = when (cta.status) {
+                        com.treasure.core.repo.DraftCtaStatus.Pending -> colors.sub
+                        com.treasure.core.repo.DraftCtaStatus.Rejected -> Color(0xFFB85450)
+                        // Cycle 0036：采用 = 苔绿（跟工作集 SAVED 胶囊同色），
+                        // 不再用 terra — terra 是品牌强调色，作"成功"信号容易
+                        // 跟普通强调混；绿色对"完成 / 通过"语义更直接。
+                        com.treasure.core.repo.DraftCtaStatus.Accepted -> Color(0xFF3F6B4A)
+                    }
+                    val active = idx == pagerState.currentPage
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 5.dp)
+                            .size(16.dp)
+                            .clickable { scope.launch { pagerState.animateScrollToPage(idx) } },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (active) {
+                            // 高亮 ring：外圈 16dp，0.8dp terra 描边
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .border(0.8.dp, colors.terra, CircleShape),
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(dotColor),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (confirmingAcceptAll) {
+        val pendingIds = ctas.filter { it.status == com.treasure.core.repo.DraftCtaStatus.Pending }
+            .map { it.id }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmingAcceptAll = false },
+            title = { Text("采用所有草稿？") },
+            text = {
+                Text(
+                    text = "把这 ${pendingIds.size} 张草稿一并采用，落到右上工作集 — 可以再回去逐张录入或一键录入。",
+                    color = colors.sub,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirmingAcceptAll = false
+                    pendingIds.forEach { onAcceptProposal(it) }
+                }) { Text("全部采用", color = colors.terra) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirmingAcceptAll = false }) {
+                    Text("取消")
+                }
+            },
+            containerColor = colors.paper,
+            titleContentColor = colors.ink,
+            textContentColor = colors.sub,
         )
     }
 }

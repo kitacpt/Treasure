@@ -114,20 +114,36 @@ data class FakeConversation(
 )
 
 /**
- * Cycle 0024：一个会话 = 一个草稿。
- *   - [confirmedDraft]：用户已"采用"的最新版本，所有 AI 提案和"确认收入"
- *     都基于它做下一步。null 表示这段对话还没生成过任何被接受的草稿。
- *   - [proposedDraft]：AI 最新的提案，未被采用。用户点 [采用] 时它升格
- *     为 confirmedDraft；点 [不要] 时丢弃。同时 [pendingCtaId] 指向触发
- *     这次提案的 DraftCta，决定它什么时候置灰。
+ * Cycle 0036：录入页 chatbar 里 staging 的文件附件元数据。文件 picker 选完
+ * 后 AddChat 自己把 (uri / displayName / mimeType / sizeBytes) 拢一起放进
+ * Composer 上方的待发送缩略图栏；点发送时随同 photos 一起送出去（[AddViewModel.sendAttachments]）。
+ *
+ * 本轮 OTA 不把文件**内容**喂给 AI（协议改动留下一刀），只把"用户附了哪些
+ * 文件"作为上下文 hint 拼到 user-turn 文本里。
+ */
+data class FileAttachment(
+    val uri: android.net.Uri,
+    val displayName: String,
+    val mimeType: String?,
+    val sizeBytes: Long,
+)
+
+/**
+ * Cycle 0036：工作集 = 真草稿（已决策），AI 卡片 = 增量预览（未决策）。
+ *   - [items]：会话工作集（ConversationItem 表），SAVED / PENDING / MODIFIED
+ *     三态。AI 下一轮看到的 baseline 就是这里。
+ *   - [confirmedDraft]：Refine 屏当前编辑的本地副本 + 500ms debounce 写回工
+ *     作集那行（[editingCiId] 锁定）；proposal-preview 走 AddRoute 内的
+ *     proposalDraft，跟它无关。
+ *
+ * 老字段 proposedDraft / pendingCtaId（cycle 0024 残留）已删 — 改由 messages
+ * 流里 DraftCta.status == Pending 直接判定。
  */
 data class AddUiState(
     val conversationId: String = "",
     val messages: List<AddMessage> = emptyList(),
     val conversationTitle: String = DEFAULT_TITLE,
     val confirmedDraft: ItemDraft? = null,
-    val proposedDraft: ItemDraft? = null,
-    val pendingCtaId: String? = null,
     val busy: Boolean = false,
     val errorMessage: String? = null,
     val aiAvailable: Boolean = false,
@@ -150,6 +166,13 @@ data class AddUiState(
      *  不再锁，所以这两个永远是 false / null。保留以兼容 UI。 */
     val saved: Boolean get() = false
     val savedItemId: String? get() = null
+    /** Cycle 0036：还有未决策的 AI 提案卡片时锁住输入栏 —— 用户必须先采用
+     *  或拒绝完所有草稿才能继续聊。强制让 AI 下一轮看到的 baseline = 已决
+     *  策状态，避免"未决策草稿污染下轮上下文"。 */
+    val pendingCtaCount: Int get() = messages.count {
+        it is AddMessage.DraftCta && it.status == DraftCtaStatus.Pending
+    }
+    val composerLocked: Boolean get() = pendingCtaCount > 0
 }
 
 private const val DEFAULT_TITLE = "New entry"
@@ -465,45 +488,29 @@ class AddViewModel(
         } else {
             msgs
         }
-        val drafts = deriveDraftsFromMessages(effectiveMessages)
+        val confirmed = deriveConfirmedDraftFromMessages(effectiveMessages)
         val key = getApplication<TreasureApp>().settingsStore.hasKey()
         _state.value = AddUiState(
             conversationId = c.id,
             messages = effectiveMessages,
             conversationTitle = c.title,
-            confirmedDraft = drafts.confirmed,
-            proposedDraft = drafts.proposed,
-            pendingCtaId = drafts.pendingCtaId,
+            confirmedDraft = confirmed,
             aiAvailable = key,
         )
     }
 
     /**
-     * 从消息流里推导出会话当前的 confirmed / proposed 状态。规则：
-     *   - 最近一条 DraftConfirmed = confirmedDraft（用户接受过的最新版）
-     *   - 在它之后 / 没有 DraftConfirmed 时整个历史里，最新一条 Pending 状态
-     *     的 DraftCta = proposedDraft（待用户处理的 AI 提案）
+     * Cycle 0036：从消息流里挖出最后一条 DraftConfirmed 当 confirmedDraft 的
+     * 兼容回填值。新流程下 confirmedDraft 只作为 Refine 屏的编辑副本；这里
+     * 拿一份做 ensureDraftForManual 的起始态。Pending cta 不再喂 proposedDraft
+     * （已删字段），UI 直接读 messages 里 cta.status。
      */
-    private data class DerivedDrafts(
-        val confirmed: ItemDraft?,
-        val proposed: ItemDraft?,
-        val pendingCtaId: String?,
-    )
-
-    private fun deriveDraftsFromMessages(msgs: List<AddMessage>): DerivedDrafts {
+    private fun deriveConfirmedDraftFromMessages(msgs: List<AddMessage>): ItemDraft? {
         var confirmed: ItemDraft? = null
         msgs.forEach { m ->
             if (m is AddMessage.DraftConfirmed) confirmed = m.draft
         }
-        // pending = 最后一条 status=Pending 的 DraftCta（用户没采用 / 没拒绝）
-        val pendingCta = msgs.lastOrNull {
-            it is AddMessage.DraftCta && it.status == DraftCtaStatus.Pending
-        } as AddMessage.DraftCta?
-        return DerivedDrafts(
-            confirmed = confirmed,
-            proposed = pendingCta?.draft,
-            pendingCtaId = pendingCta?.id,
-        )
+        return confirmed
     }
 
     fun refreshAiAvailability() {
@@ -610,13 +617,80 @@ class AddViewModel(
     /** 删一段对话（历史抽屉里 ✕ 按钮）。
      *  Cycle 0031：删的是当前会话时不再自动开"New entry · HH:MM"空壳 — 之
      *  前用户反馈"删了发现位置上又冒了一条新的，以为没删干净"。改成：把
-     *  current 滑到剩下里最新一段；剩下都没了才 newConversation。 */
+     *  current 滑到剩下里最新一段；剩下都没了才 newConversation。
+     *  Cycle 0036 v2：删会话同时把它名下的本地文件全删（chat 里发的图、语音、
+     *  草稿照片、草稿目录），免得磁盘累积。 */
     fun deleteConversation(id: String) {
         viewModelScope.launch {
+            // 先把会话里引用到的文件路径收集出来 — delete 之后就拿不到了。
+            val msgs = runCatching { conversations.loadMessages(id) }.getOrDefault(emptyList())
             conversations.delete(id)
+            launch(Dispatchers.IO) { cleanupConversationFiles(id, msgs) }
             if (id == _state.value.conversationId) {
                 val next = conversations.observeRecent(limit = 1).first().firstOrNull()
                 if (next != null) resumeConversation(next) else newConversation()
+            }
+        }
+    }
+
+    /**
+     * Cycle 0036 v2：单段会话的本地文件清理。删除的目标：
+     *  - chat 里发的图（filesDir/conversation-photos/ 下被这条会话 UserPhoto
+     *    引用到的 file://path）— 这个目录是所有会话共享的，按 path 精确删；
+     *  - 用户附的语音（filesDir/voice-cache/<convoId>/）— 整目录删；
+     *  - 草稿照片（filesDir/draft-photos/<convoId>/）— 整目录删；
+     *  - chat-files/<convoId>/（cycle 0035 早期占位目录，现在不再创建但兼容
+     *    旧版本留下的残留）。
+     *
+     *  调用方在 IO scope 起；失败静默（删不掉就当落盘满了，不影响主流程）。
+     */
+    private fun cleanupConversationFiles(
+        convoId: String,
+        messages: List<com.treasure.core.repo.AddConversationMessage>,
+    ) {
+        val app = getApplication<TreasureApp>()
+        // 1) chat-photos：精确删 UserPhoto.uri 指向的文件
+        messages.forEach { m ->
+            when (m) {
+                is com.treasure.core.repo.AddConversationMessage.UserPhoto -> {
+                    runCatching {
+                        val uri = android.net.Uri.parse(m.uri)
+                        if ("file".equals(uri.scheme, ignoreCase = true)) {
+                            uri.path?.let { p ->
+                                val f = java.io.File(p)
+                                // 只删 conversation-photos 目录下的，避免误伤 share
+                                // intent 带来的外部路径
+                                if (f.exists() && f.parentFile?.name == "conversation-photos") {
+                                    f.delete()
+                                }
+                            }
+                        }
+                    }
+                }
+                is com.treasure.core.repo.AddConversationMessage.UserVoice -> {
+                    m.audioPath?.let { p ->
+                        runCatching {
+                            val f = java.io.File(p)
+                            if (f.exists() && f.parentFile?.parentFile?.name == "voice-cache") {
+                                f.delete()
+                            }
+                        }
+                    }
+                }
+                else -> Unit
+            }
+        }
+        // 2) draft-photos/<convoId>/、voice-cache/<convoId>/、chat-files/<convoId>/
+        //    整目录递归删（每个会话独享自己那个子目录，删干净）
+        val dirsToWipe = listOf(
+            "draft-photos/$convoId",
+            "voice-cache/$convoId",
+            "chat-files/$convoId",
+        )
+        dirsToWipe.forEach { rel ->
+            runCatching {
+                val d = java.io.File(app.filesDir, rel)
+                if (d.exists()) d.deleteRecursively()
             }
         }
     }
@@ -630,8 +704,13 @@ class AddViewModel(
         if (id == _state.value.conversationId) return
         viewModelScope.launch {
             val msgs = conversations.loadMessages(id).map(::toUiMessage)
-            val drafts = deriveDraftsFromMessages(msgs)
-            val titleFromDraft = (drafts.confirmed ?: drafts.proposed)?.let { d ->
+            val confirmed = deriveConfirmedDraftFromMessages(msgs)
+            // 标题优先从最近的 Pending cta 取（用户当前还在决策中），否则用
+            // confirmedDraft，再否则用存储的标题。
+            val latestPendingDraft = msgs.lastOrNull {
+                it is AddMessage.DraftCta && it.status == DraftCtaStatus.Pending
+            }?.let { (it as AddMessage.DraftCta).draft }
+            val titleFromDraft = (confirmed ?: latestPendingDraft)?.let { d ->
                 listOf(d.brand, d.model).filter { it.isNotBlank() }
                     .joinToString(" ").ifBlank { null }
             }
@@ -640,9 +719,8 @@ class AddViewModel(
                     conversationId = id,
                     messages = msgs,
                     conversationTitle = titleFromDraft ?: storedTitle,
-                    confirmedDraft = drafts.confirmed,
-                    proposedDraft = drafts.proposed,
-                    pendingCtaId = drafts.pendingCtaId,
+                    confirmedDraft = confirmed,
+                    editingCiId = null,
                 )
             }
         }
@@ -772,27 +850,91 @@ class AddViewModel(
 
     /** Cycle 0034：一次发多张图。每张分别 persist 到 conversation-photos，
      *  作为单独 UserPhoto 消息入库；source_index 对应 photos 顺序，供 AI 在
-     *  photo_assignments 里引用。 */
-    fun sendPhotos(uris: List<Uri>, caption: String = "") {
-        if (_state.value.busy || uris.isEmpty()) return
+     *  photo_assignments 里引用。
+     *  Cycle 0036：兼容 wrapper —— 真正的入口是 [sendAttachments]。 */
+    fun sendPhotos(uris: List<Uri>, caption: String = "") =
+        sendAttachments(photoUris = uris, files = emptyList(), caption = caption)
+
+    /** Cycle 0031 compat：单图 wrapper — 部分代码（旧 callsite）仍 sendPhoto。 */
+    fun sendPhoto(uri: Uri, caption: String = "") = sendPhotos(listOf(uri), caption)
+
+    /**
+     * Cycle 0036：图 + 文件 + 文本一并发送的统一入口。Chatbar 把"附件抽屉"
+     * 里选的图片 / 文件先 staging 在 composer 上方，用户再决定何时送出 — 不
+     * 再像 cycle 0035 那样一选就直发。
+     *
+     * - photoUris：本轮的图片附件，按顺序 persist + 喂 AI；
+     * - files：文件附件元数据（uri / 名称 / mime / 大小）；本轮**不**把内容
+     *   真喂 AI（协议改动留下一刀），只 append 一条 User 文本说明该文件存
+     *   在，便于 AI 在上下文里识别"这条消息提到了一个文件"；
+     * - caption：用户在输入框里加的文字，作为本轮 user-turn 的主文本。
+     */
+    fun sendAttachments(
+        photoUris: List<Uri>,
+        files: List<FileAttachment>,
+        caption: String,
+    ) {
+        if (_state.value.busy) return
+        val trimmed = caption.trim()
+        if (photoUris.isEmpty() && files.isEmpty() && trimmed.isEmpty()) return
         val app = getApplication<TreasureApp>()
         viewModelScope.launch {
             val persisted = withContext(Dispatchers.IO) {
-                uris.map { u -> runCatching { persistChatPhoto(app, u) }.getOrNull() ?: u }
+                photoUris.map { u -> runCatching { persistChatPhoto(app, u) }.getOrNull() ?: u }
             }
             persisted.forEach { appendMessage(AddMessage.UserPhoto(it)) }
-            val trimmed = caption.trim()
             if (trimmed.isNotEmpty()) appendMessage(AddMessage.User(trimmed))
-            val effectiveText = trimmed.ifBlank {
-                if (persisted.size == 1) "（用户附了一张照片，请识别）"
-                else "（用户附了 ${persisted.size} 张照片，请按物品逐张分配 / 按需切 crop）"
+            // Cycle 0036 v2：文件内容用 FileTextExtractor 提取成纯文本，所有
+            // provider 都吃同一份。聊天里仍 append 一条用户气泡 "📎 文件名 (size)"
+            // 让用户看见"我附了什么"；真正的文件内容拼到 user-turn 文本里送 AI。
+            val fileExtracts: List<Pair<FileAttachment, com.treasure.data.FileTextExtractor.Result>> =
+                files.map { f -> f to com.treasure.data.FileTextExtractor.extract(app, f.uri, f.mimeType) }
+            files.forEach { f ->
+                val sizeStr = formatFileSize(f.sizeBytes)
+                val suffix = if (sizeStr.isBlank()) "" else " ($sizeStr)"
+                appendMessage(AddMessage.User("📎 已附加文件：${f.displayName}$suffix"))
+            }
+            val effectiveText = buildString {
+                if (trimmed.isNotEmpty()) {
+                    append(trimmed)
+                } else if (persisted.isNotEmpty() || files.isNotEmpty()) {
+                    if (persisted.size == 1) append("（用户附了一张照片，请识别）")
+                    else if (persisted.size > 1) append("（用户附了 ${persisted.size} 张照片，请按物品逐张分配 / 按需切 crop）")
+                }
+                fileExtracts.forEach { (f, result) ->
+                    appendLine()
+                    appendLine()
+                    append("===== [FILE: ${f.displayName}")
+                    if (!f.mimeType.isNullOrBlank()) append(" · ${f.mimeType}")
+                    if (f.sizeBytes > 0) append(" · ${formatFileSize(f.sizeBytes)}")
+                    append("] =====")
+                    appendLine()
+                    when (result) {
+                        is com.treasure.data.FileTextExtractor.Result.Text -> {
+                            append(result.content.trim())
+                            if (result.truncated) {
+                                appendLine()
+                                append("…（文件内容超出客户端上限，已截断）")
+                            }
+                            if (result.pages != null) {
+                                appendLine()
+                                append("（PDF 共 ${result.pages} 页${if (result.truncated) "，仅提取前 ${kotlin.math.min(result.pages, 50)} 页" else ""}）")
+                            }
+                        }
+                        is com.treasure.data.FileTextExtractor.Result.Unsupported -> {
+                            append("（客户端暂不解析此类型文件：${result.mime ?: "未知 MIME"} — 仅作为元数据 hint）")
+                        }
+                        is com.treasure.data.FileTextExtractor.Result.Failed -> {
+                            append("（读取失败：${result.message}）")
+                        }
+                    }
+                    appendLine()
+                    append("===== [/FILE] =====")
+                }
             }
             runExtract(text = effectiveText, imageUris = persisted)
         }
     }
-
-    /** Cycle 0031 compat：单图 wrapper — 部分代码（旧 callsite）仍 sendPhoto。 */
-    fun sendPhoto(uri: Uri, caption: String = "") = sendPhotos(listOf(uri), caption)
 
     /** Cycle 0034 v2：用户长按麦克风录的音频。[audioPath] 是 m4a 完整路径
      *  （已在 filesDir/voice-cache/<convo>/），duration 形如 "0:03"。把音频
@@ -886,7 +1028,13 @@ class AddViewModel(
             lastTurnPhotoUris = imageUris
             // Cycle 0032：构造工作集摘要喂给 AI。SAVED 行从 itemsRepo 拉真物
             // 品摘要；PENDING / MODIFIED 直接用 ConversationItem.draft 的字段。
-            val workingSetSummary = buildWorkingSetSummary(_state.value.items)
+            // Cycle 0036 v2：直接从 Room 拉一次，而不是读 _state.value.items —
+            // 后者是 observeItems Flow 的快照，刚 accept 完 ci upsert 到 Flow
+            // 再灌回 state 有 tick 延迟，用户秒发"补充参数"会让 AI 看到空 baseline。
+            val convoIdForWS = _state.value.conversationId
+            val workingItemsForAi = if (convoIdForWS.isBlank()) emptyList()
+                else conversations.loadItems(convoIdForWS)
+            val workingSetSummary = buildWorkingSetSummary(workingItemsForAi)
             // Cycle 0034 v2：把音频字节加载进来，作为 input_audio block 送 AI。
             val audioBytes = audioPath?.let { path ->
                 runCatching {
@@ -928,12 +1076,16 @@ class AddViewModel(
                     // 反查到 lastTurnPhotoUris 拿到本地 file:// path。AI 给出
                     // 的 crop 已是归一化 0..1 矩形；UI / accept 时直接拿。
                     val turnUris = lastTurnPhotoUris
-                    // Cycle 0034 v9：MODIFY 的 cta.draft 在这儿就和 baseline 合
-                    // 并，存"合并后"的完整 draft 到卡上。这样卡片标题 / 字段数
-                    // / 影集 都直接显示"修改后是什么样" — 跟用户的口径一致。
-                    // 下游 (acceptProposal / acceptAndCommit / proposal-preview)
-                    // 拿到的 cta.draft 都已经是 full state，不用再 merge。
-                    val workingItems = _state.value.items
+                    // Cycle 0034 v9 / 0036：cta.draft 在这儿就和 baseline + AI
+                    // 的 photo_assignments 一起合并成终态 — 卡片显示的就是
+                    // "采用后的完整模样"。下游 acceptProposal / acceptAndCommit
+                    // / proposal-preview 拿到的 cta.draft 已经是 full state，
+                    // 包含 base.photos + assignment 拷贝过来的新照片 + 正确
+                    // avatar。再不会有"MODIFY 时 AI 加图被吞"的 bug。
+                    // Cycle 0036 v2：从 Room 拉最新工作集做 merge baseline，
+                    // 避免 _state.items Flow 回灌延迟。
+                    val workingItems = if (convoIdForWS.isBlank()) emptyList()
+                        else conversations.loadItems(convoIdForWS)
                     val itemMap = runCatching { repo.items.first() }
                         .getOrDefault(emptyList())
                         .associateBy { it.id }
@@ -950,17 +1102,14 @@ class AddViewModel(
                                 isAvatar = pa.setAsAvatar,
                             )
                         }
-                        val mergedDraft = if (a.kind == com.treasure.core.ai.ActionKind.MODIFY &&
-                            !a.targetId.isNullOrBlank()) {
-                            val ci = workingItems.firstOrNull { it.id == a.targetId }
-                            val refItem = ci?.itemRef?.let { itemMap[it] }
-                            val baseDraft = ci?.draft
-                            when {
-                                refItem != null -> mergeDraftOntoItem(a.draft, refItem)
-                                baseDraft != null -> mergeDraftOntoDraft(a.draft, baseDraft)
-                                else -> a.draft
-                            }
-                        } else a.draft
+                        val mergedDraft = mergeWithAssignments(
+                            diff = a.draft,
+                            actionKind = a.kind,
+                            targetId = a.targetId,
+                            workingItems = workingItems,
+                            itemMap = itemMap,
+                            assignments = resolved,
+                        )
                         AddMessage.DraftCta(
                             id = UUID.randomUUID().toString(),
                             draft = mergedDraft,
@@ -1013,16 +1162,32 @@ class AddViewModel(
                         err is kotlinx.coroutines.CancellationException ||
                             err.message?.contains("Canceled", ignoreCase = true) == true ||
                             err.message?.contains("Socket closed", ignoreCase = true) == true
+                    // Cycle 0036 v2：ChatOnly 返回 "null" / 极短无意义文本是
+                    // 模型在多图 / 长上下文下偶发崩，过去会直接渲染成 Assistant
+                    // 气泡显示"null"让用户莫名其妙。检测到这类垃圾响应转 SystemNote
+                    // + 允许重试。
+                    val chatOnly = err as? com.treasure.core.ai.ChatOnlyResponseException
+                    val chatText = chatOnly?.text?.trim().orEmpty()
+                    val isGarbledChatOnly = chatOnly != null && (
+                        chatText.isEmpty() ||
+                            chatText.equals("null", ignoreCase = true) ||
+                            chatText.equals("undefined", ignoreCase = true) ||
+                            (chatText.length < 3 && !chatText.any { it.isLetterOrDigit() })
+                    )
                     val msg = when {
                         cancelled -> AddMessage.SystemNote("已停止")
-                        err is com.treasure.core.ai.ChatOnlyResponseException ->
-                            AddMessage.Assistant(err.text.ifBlank { "嗯。" })
+                        isGarbledChatOnly -> AddMessage.SystemNote(
+                            text = "模型返回内容异常，可能因为图片过多或上下文超长 · 可重试或减少图片",
+                            tone = NoteTone.Warning,
+                        )
+                        chatOnly != null -> AddMessage.Assistant(chatText.ifBlank { "嗯。" })
                         else -> AddMessage.Assistant("出错了：${err.message ?: "未知错误"}")
                     }
                     // Cycle 0034 v3：真错（网断 / 服务返码 / 模型不接图音）允许
                     // 重试上一轮 — 把入参全存 lastFailedExtract，UI 加 "重试" 按
-                    // 钮。Cancel / chat-only 不进重试态。
-                    val canRetry = !cancelled && err !is com.treasure.core.ai.ChatOnlyResponseException
+                    // 钮。Cancel / 正常 chat-only 不进重试态；但 garbled chat-only
+                    // 允许重试（cycle 0036 v2）。
+                    val canRetry = !cancelled && (chatOnly == null || isGarbledChatOnly)
                     lastFailedExtract = if (canRetry) {
                         ExtractArgs(text = text, imageUris = imageUris, audioPath = audioPath)
                     } else null
@@ -1065,20 +1230,24 @@ class AddViewModel(
         val cta = current.messages.firstOrNull {
             it is AddMessage.DraftCta && it.id == ctaId
         } as AddMessage.DraftCta? ?: return
-        val newMessages = current.messages.map { m ->
-            if (m is AddMessage.DraftCta && m.id == ctaId) {
-                m.copy(status = DraftCtaStatus.Accepted)
-            } else m
-        }
-        _state.update { it.copy(messages = newMessages) }
         viewModelScope.launch {
+            // Cycle 0036 v2：先把 ci 真的 upsert 到工作集，再把 cta status 改
+            // Accepted。这样 composer 解锁的同一刻 _state.items 已含新行 →
+            // 用户立刻发"补充参数"时 buildWorkingSetSummary 能拿到正确 baseline，
+            // AI 看到 [CONVERSATION WORKING SET] 才不糊涂。
+            // （倒过来的话：messages.update 立刻让 pendingCtaCount=0 → composer
+            //  解锁 → 用户秒发新消息 → 工作集 Flow 还没更新 → AI 看到空 baseline）
+            applyAcceptedCta(cta, cta.draft)
+            val newMessages = _state.value.messages.map { m ->
+                if (m is AddMessage.DraftCta && m.id == ctaId) {
+                    m.copy(status = DraftCtaStatus.Accepted)
+                } else m
+            }
+            _state.update { it.copy(messages = newMessages) }
             val accepted = newMessages.firstOrNull {
                 it is AddMessage.DraftCta && it.id == ctaId
             } as AddMessage.DraftCta?
             accepted?.let { upsertCtaStatus(it) }
-            // Cycle 0034 v9：cta.draft 已经是合并后的 full state（runExtract 阶
-            // 段就 merge 过）— 这儿不用再合并，直接 apply。
-            applyAcceptedCta(cta, cta.draft)
         }
     }
 
@@ -1095,19 +1264,20 @@ class AddViewModel(
         val cta = current.messages.firstOrNull {
             it is AddMessage.DraftCta && it.id == ctaId
         } as AddMessage.DraftCta? ?: return
-        val newMessages = current.messages.map { m ->
-            if (m is AddMessage.DraftCta && m.id == ctaId) {
-                m.copy(status = DraftCtaStatus.Accepted)
-            } else m
-        }
-        _state.update { it.copy(messages = newMessages) }
         viewModelScope.launch {
+            // Cycle 0036 v2：先 ci upsert + commit Item，再 mark cta Accepted —
+            // 跟 acceptProposal 同理，避免 composer 解锁后 baseline 还没到位。
+            val ciId = applyAcceptedCta(cta, cta.draft)
+            val newMessages = _state.value.messages.map { m ->
+                if (m is AddMessage.DraftCta && m.id == ctaId) {
+                    m.copy(status = DraftCtaStatus.Accepted)
+                } else m
+            }
+            _state.update { it.copy(messages = newMessages) }
             val accepted = newMessages.firstOrNull {
                 it is AddMessage.DraftCta && it.id == ctaId
             } as AddMessage.DraftCta?
             accepted?.let { upsertCtaStatus(it) }
-            // Cycle 0034 v9：cta.draft 已经是合并后的 full state。
-            val ciId = applyAcceptedCta(cta, cta.draft)
             if (ciId == null) return@launch
             // 找到刚 upsert 的 ConversationItem，commit 成 Item，标记 SAVED。
             val convoId = _state.value.conversationId
@@ -1135,7 +1305,7 @@ class AddViewModel(
         }
     }
 
-    /** Cycle 0024：用户点 [不要]。clear proposed，不写 DraftConfirmed 快照。 */
+    /** Cycle 0024：用户点 [不要]。把卡片标 Rejected，不写工作集。 */
     fun rejectProposal(ctaId: String) {
         val current = _state.value
         val newMessages = current.messages.map { m ->
@@ -1143,13 +1313,7 @@ class AddViewModel(
                 m.copy(status = DraftCtaStatus.Rejected)
             } else m
         }
-        _state.update {
-            it.copy(
-                messages = newMessages,
-                proposedDraft = if (it.pendingCtaId == ctaId) null else it.proposedDraft,
-                pendingCtaId = if (it.pendingCtaId == ctaId) null else it.pendingCtaId,
-            )
-        }
+        _state.update { it.copy(messages = newMessages) }
         viewModelScope.launch {
             val rejected = newMessages.firstOrNull {
                 it is AddMessage.DraftCta && it.id == ctaId
@@ -1230,8 +1394,14 @@ class AddViewModel(
     }
 
     /**
-     * Cycle 0032 v2：把"已采用"的 DraftCta 落到 conversation_items 工作集。
-     * 这是 [acceptProposal] / [acceptProposalWithEdits] 的公共后半段。
+     * Cycle 0036：把"已采用"的 DraftCta 落到 conversation_items 工作集。
+     *
+     * cta.draft 在 runExtract.onSuccess 阶段已经走过 [mergeWithAssignments]
+     * —— photoAssignments 已经被物理拷贝到 draft-photos/<convo>/、合进
+     * draft.photos / avatarPhotoPath / photoCrops。这里只做 path 正规化
+     * （proposal-preview 用户可能改了 photos，需要统一到 draft-photos/）。
+     * 不再走"if photos else assignments"的互斥分支，杜绝 cycle 0034 v9
+     * 残留的"MODIFY 时 AI 加图被吞"bug。
      *
      * - Create → 新建一行 PENDING（递增 sortOrder）
      * - Modify + target 存在：覆盖 draft；SAVED → MODIFIED，否则保持 status
@@ -1243,22 +1413,12 @@ class AddViewModel(
     ): String? {
         val convoId = _state.value.conversationId.ifBlank { return null }
         val now = System.currentTimeMillis()
-        // Cycle 0034：先把 AI 分配的图按 crop 抄到 filesDir/draft-photos/<convo>/，
-        // 拿到本端 file:// 路径，merge 进 draft.photos / avatarPhotoPath。这步
-        // 在 upsertItem 之前做完，让落到工作集的就是终态。
-        // Cycle 0034 v4：proposal-preview 路径 — 用户已经在 preview 里把 cta
-        // 的 photo_assignments 预填进 proposalDraft 并可能 select 头像 / 删了
-        // 几张；这时 draft.photos 非空，跳过 applyPhotoAssignmentsToDraft
-        // （否则把 conversation-photos 路径再复制一次 + crop 元数据丢）。
-        // Cycle 0034 v5：proposal 路径里 draft.photos 是 file:// URI 字符串
-        // （cta.photoAssignments.sourceUri.toString() 给的形式）；commit 时
-        // migratePhotosToItemOwned 用 java.io.File(src) 直接解释为绝对路径，
-        // 撞不到对应文件 → 影集落空。这里统一走 materializeDraftPhotos 把
-        // 所有路径正规化到 filesDir/draft-photos/<convoId>/<uuid>.jpg。
-        val draftWithPhotos = when {
-            draft.photos.isNotEmpty() -> materializeDraftPhotos(draft)
-            cta.photoAssignments.isNotEmpty() -> applyPhotoAssignmentsToDraft(draft, cta.photoAssignments)
-            else -> draft
+        // Cycle 0036：路径正规化 + avatar 守卫一致化。merge 阶段已合好 photos，
+        // 这里仅做"非 draft-photos 路径搬家"，幂等；空 photos 跳过省 I/O。
+        val draftWithPhotos = if (draft.photos.isEmpty()) {
+            draft.normalizedAvatar()
+        } else {
+            materializeDraftPhotos(draft).normalizedAvatar()
         }
         val existing = conversations.loadItems(convoId).associateBy { it.id }
         val target = cta.targetCiId?.let { existing[it] }
@@ -1350,11 +1510,34 @@ class AddViewModel(
             if (savedPath != null) mapping[src] = savedPath
         }
         if (mapping.isEmpty()) return@withContext draft
-        val newPhotos = draft.photos.mapNotNull { mapping[it] }
-        val newCrops = draft.photoCrops.mapNotNull { (old, rect) ->
-            mapping[old]?.let { it to rect }
-        }.toMap()
-        val newAvatar = draft.avatarPhotoPath?.let { mapping[it] }
+        // Cycle 0036：拷贝失败的路径不再静默丢 —— 保留原路径让用户至少在 UI
+        // 上还能看到（缩略图可能失败，但 Item 行不消失）；如果连原路径也
+        // 已被回收，commit 时的 migratePhotosToItemOwned 会做兜底过滤。
+        var failed = 0
+        val newPhotos = draft.photos.map { src ->
+            val mapped = mapping[src]
+            if (mapped != null) mapped
+            else { failed++; src }
+        }
+        // photoCrops 跟 photos 同步：新路径用映射后的；映射失败的保留原 key
+        // （这样 UI 至少不会把 crop 信息丢）。
+        val newCrops = draft.photoCrops.mapKeys { (old, _) -> mapping[old] ?: old }
+        // avatar 必须落在 photos 里 —— 拷贝失败就保留原 path（normalizedAvatar
+        // 会在外层兜底过滤悬空头像）。
+        val newAvatar = draft.avatarPhotoPath?.let { mapping[it] ?: it }
+        if (failed > 0) {
+            // 主线程 update — 给用户可见信号，不影响后续逻辑。
+            withContext(Dispatchers.Main.immediate) {
+                _state.update { st ->
+                    st.copy(
+                        messages = st.messages + AddMessage.SystemNote(
+                            text = "⚠ ${failed} 张图本地化失败 · 已尽量保留原引用",
+                            tone = NoteTone.Warning,
+                        ),
+                    )
+                }
+            }
+        }
         draft.copy(
             photos = newPhotos,
             photoCrops = newCrops,
@@ -1502,67 +1685,96 @@ class AddViewModel(
     }
 
     /**
-     * Cycle 0034 v7：把 AI 给的 MODIFY delta 应用到一个已有 Item，得到一份
-     * "增量 + baseline" 的完整 ItemDraft。
+     * Cycle 0036：把 AI 的 delta + AI 分配的新图，**一起**合并到 baseline，
+     * 给 DraftCta 卡片一份完整终态 draft。这是 cycle 0034 v7-v9 演化下来的
+     * 最终设计：
      *
-     *  - 空字段 / 空数组 = 不变（沿用 base）
-     *  - 非空 brand/model/nickname/oneLiner/category/heroVector = 覆盖 base
-     *  - specs：按 label 合并 — diff 里的 label 覆盖；base 里有但 diff 没列
-     *    的 label 保留
-     *  - history：base + diff append（AI 这一轮新提的事件叠到老历史末尾）
-     *  - photos / photoCrops / avatarPhotoPath：始终沿用 base（AI 通过
-     *    photo_assignments 而不是 draft 来动影集；在外层另算）
+     *   - 字段层：空字段 / 空数组 = 不变（沿用 base），非空 = 覆盖 base
+     *   - specs：按 label 合并 — diff 里 label 覆盖，base 里独有的保留
+     *   - history：base + diff append
+     *   - photos：base.photos 不动 + AI 的 photo_assignments 物理拷贝到本端
+     *     draft-photos/<convo>/ 后 append（**关键修复**：以前 MODIFY 时 AI
+     *     加图会被 applyAcceptedCta 的互斥分支吞掉，现在 merge 就合好）
+     *   - avatarPhotoPath：AI 标 set_as_avatar 的优先；否则沿用 base
+     *   - photoCrops：base + AI 给的新 crop 矩形 append
      *
-     *  这条逻辑修复 cycle 0034 v6 的"MODIFY 后影集消失"bug：AI 默认只发增量，
-     *  之前代码直接拿 cta.draft 当全量用，photos / specs / history 都被清空。
+     * CREATE 走 base = ItemDraft()（空）的同条路径，统一管线。
      */
-    /** Cycle 0034 v8：[mergeDraftOntoItem] 的 draft-baseline 版本 — MODIFY
-     *  cta 目标可能是 PENDING / MODIFIED 工作集行（itemRef 为空，只有 draft
-     *  baseline）。同样合并语义，photos / photoCrops / avatarPhotoPath 全
-     *  来自 base.draft 不变。 */
-    internal fun mergeDraftOntoDraft(diff: ItemDraft, base: ItemDraft): ItemDraft {
+    internal suspend fun mergeWithAssignments(
+        diff: ItemDraft,
+        actionKind: com.treasure.core.ai.ActionKind,
+        targetId: String?,
+        workingItems: List<com.treasure.core.repo.ConversationItem>,
+        itemMap: Map<String, Item>,
+        assignments: List<com.treasure.core.repo.ResolvedPhotoAssignment>,
+    ): ItemDraft {
+        // 找 baseline：MODIFY 时找工作集那行（PENDING/MODIFIED 用 ci.draft，
+        // SAVED 用 itemRef.toDraft）；CREATE 或找不到 target 时 base 为空。
+        val base: ItemDraft = if (actionKind == com.treasure.core.ai.ActionKind.MODIFY &&
+            !targetId.isNullOrBlank()) {
+            val ci = workingItems.firstOrNull { it.id == targetId }
+            val refItem = ci?.itemRef?.let { itemMap[it] }
+            when {
+                refItem != null -> refItem.toDraftBaseline()
+                ci?.draft != null -> ci.draft!!
+                else -> ItemDraft()
+            }
+        } else ItemDraft()
+
+        // Cycle 0036 v2：AI 偶尔会把"不变"字段写成字符串 "null" / "undefined"
+        // 而不是空 ""（prompt 已说明用空字符串表示不变，但小模型不一定守规）。
+        // 把这两种当空看待，沿用 baseline 值；否则用户会看到字段变成 "null"。
+        fun String.meaningful(): String =
+            if (this.equals("null", ignoreCase = true) ||
+                this.equals("undefined", ignoreCase = true)) "" else this
+        // 字段层合并
         val diffSpecsByLabel = diff.specs.filter { it.label.isNotBlank() }.associateBy { it.label }
         val mergedSpecs = base.specs.map { existing ->
             diffSpecsByLabel[existing.label] ?: existing
         } + diff.specs.filter { d ->
             d.label.isNotBlank() && d.label !in base.specs.map { it.label }
         }
-        return ItemDraft(
-            category = diff.category?.takeIf { it.isNotBlank() } ?: base.category,
-            brand = diff.brand.ifBlank { base.brand },
-            model = diff.model.ifBlank { base.model },
-            nickname = diff.nickname.ifBlank { base.nickname },
-            oneLiner = diff.oneLiner.ifBlank { base.oneLiner },
-            specs = mergedSpecs,
+        val fieldsMerged = base.copy(
+            category = diff.category?.meaningful()?.takeIf { it.isNotBlank() } ?: base.category,
+            brand = diff.brand.meaningful().ifBlank { base.brand },
+            model = diff.model.meaningful().ifBlank { base.model },
+            nickname = diff.nickname.meaningful().ifBlank { base.nickname },
+            oneLiner = diff.oneLiner.meaningful().ifBlank { base.oneLiner },
+            specs = mergedSpecs.map { it.copy(value = it.value.meaningful()) },
             history = base.history + diff.history,
-            photos = base.photos,
-            photoCrops = base.photoCrops,
-            avatarPhotoPath = base.avatarPhotoPath,
             heroVector = diff.heroVector ?: base.heroVector,
+            // photos / photoCrops / avatarPhotoPath：先保留 base，下一步 applyPhotoAssignments 再叠加 AI 新图
         )
+
+        // 影集层合并：AI 的 photo_assignments 物理拷贝到 draft-photos/，append
+        // 到 base.photos；isAvatar=true 的优先做新头像。
+        val withPhotos = if (assignments.isEmpty()) fieldsMerged
+        else applyPhotoAssignmentsToDraft(fieldsMerged, assignments)
+
+        return withPhotos.normalizedAvatar()
     }
 
-    internal fun mergeDraftOntoItem(diff: ItemDraft, base: Item): ItemDraft {
-        val diffSpecsByLabel = diff.specs.filter { it.label.isNotBlank() }.associateBy { it.label }
-        val mergedSpecs = base.specs.map { existing ->
-            diffSpecsByLabel[existing.label] ?: existing
-        } + diff.specs.filter { d ->
-            d.label.isNotBlank() && d.label !in base.specs.map { it.label }
-        }
-        return ItemDraft(
-            category = diff.category?.takeIf { it.isNotBlank() } ?: base.category,
-            brand = diff.brand.ifBlank { base.brand },
-            model = diff.model.ifBlank { base.model },
-            nickname = diff.nickname.ifBlank { base.nickname },
-            oneLiner = diff.oneLiner.ifBlank { base.oneLiner },
-            specs = mergedSpecs,
-            history = base.history + diff.history,
-            photos = base.photos,
-            photoCrops = base.photoCrops,
-            avatarPhotoPath = base.avatarPhotoPath,
-            heroVector = diff.heroVector ?: base.heroVector,
-        )
-    }
+    /** Cycle 0036：把已落 Item 的 photos / avatar / crops 复制成草稿态，给
+     *  MODIFY merge 当 baseline。其它字段从 Item 字段转过来。 */
+    private fun Item.toDraftBaseline(): ItemDraft = ItemDraft(
+        category = category,
+        brand = brand,
+        model = model,
+        nickname = nickname,
+        oneLiner = oneLiner,
+        specs = specs,
+        history = history,
+        photos = photos,
+        avatarPhotoPath = avatarPhotoPath,
+        heroVector = heroVector,
+        photoCrops = photoCrops,
+    )
+
+    /** Cycle 0036：avatarPhotoPath 必须是 photos 里的某张，否则置 null。所有
+     *  写 draft 的出口都过一遍这条不变式，避免悬空头像（cycle 0034 风险 H）。 */
+    private fun ItemDraft.normalizedAvatar(): ItemDraft =
+        if (avatarPhotoPath == null || avatarPhotoPath in photos) this
+        else copy(avatarPhotoPath = null)
 
     /** Cycle 0034 v5：用户选了一个"预制插画"做头像 — 写进 draft.heroVector，
      *  顺带清掉 avatarPhotoPath（互斥：照片头像 vs 插画头像）。 */
@@ -1745,8 +1957,6 @@ class AddViewModel(
                 it.copy(
                     messages = it.messages + committed,
                     confirmedDraft = null,
-                    proposedDraft = null,
-                    pendingCtaId = null,
                     editingCiId = null,
                 )
             }
@@ -1798,8 +2008,6 @@ class AddViewModel(
                     it.copy(
                         messages = it.messages + msg,
                         confirmedDraft = null,
-                        proposedDraft = null,
-                        pendingCtaId = null,
                         editingCiId = null,
                     )
                 }
@@ -2077,6 +2285,21 @@ private fun formatTime(epochMillis: Long): String {
     val hh = zoned.hour.toString().padStart(2, '0')
     val mm = zoned.minute.toString().padStart(2, '0')
     return "$hh:$mm"
+}
+
+/** Cycle 0036：给 chatbar staging 用的"3 位有效数字" 文件大小格式化。 */
+internal fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return ""
+    val units = listOf("B", "KB", "MB", "GB")
+    var size = bytes.toDouble()
+    var u = 0
+    while (size >= 1024 && u < units.lastIndex) { size /= 1024; u++ }
+    return when {
+        u == 0 -> "${size.toInt()} ${units[u]}"
+        size >= 100 -> "${size.toInt()} ${units[u]}"
+        size >= 10 -> String.format("%.1f %s", size, units[u])
+        else -> String.format("%.2f %s", size, units[u])
+    }
 }
 
 private fun formatDate(epochMillis: Long): String {

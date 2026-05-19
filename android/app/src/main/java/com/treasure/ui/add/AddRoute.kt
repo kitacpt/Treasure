@@ -136,21 +136,9 @@ fun AddRoute(
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    // Cycle 0035：文件附件 — 占位实现，把选中的文件名作为一条用户文本扔到对
-    // 话里（"先做成直接就添加进工作区的"），具体多模态文件输入后续 cycle 再做。
-    val pickFileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri != null) {
-            val name = runCatching {
-                ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
-                    val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
-                }
-            }.getOrNull() ?: uri.lastPathSegment ?: "附件"
-            vm.sendText("📎 已附加文件：$name")
-        }
-    }
+    // Cycle 0036：文件附件 launcher 移到 AddChat 内部跟 pendingAttachments
+    // staging 联动 —— 用户选完不再直发，而是落到 composer 上方待命，跟图片
+    // 一致。这里只保留 notif perm launcher。
     // Cycle 0034 v6：Android 13+ POST_NOTIFICATIONS — 前台保活 service 没这
     // 个权限时通知不显示，部分 OEM (vivo iManager / 华为 Magic) 会把它当
     // 普通后台进程秒杀。进入录入页时申请一次。
@@ -282,7 +270,7 @@ fun AddRoute(
                     onRenameConversation = vm::renameConversation,
                     onDeleteConversation = vm::deleteConversation,
                     onSendText = vm::sendText,
-                    onSendPhotos = vm::sendPhotos,
+                    onSendAttachments = vm::sendAttachments,
                     onStartVoice = { startVoice() },
                     onPressVoiceCommit = { commitVoiceAndSend() },
                     onRetryLastExtract = vm::retryLastExtract,
@@ -358,54 +346,18 @@ fun AddRoute(
                         selectedProfileId = id
                         appCtx.settingsStore.conversationOverrideProfileId = id
                     },
-                    onPickFile = {
-                        runCatching {
-                            pickFileLauncher.launch(arrayOf("*/*"))
-                        }
-                    },
                 )
                 AddMode.Preview -> {
                     val cta = proposalCta
                     if (cta != null) {
-                        // Proposal preview mode：编辑本地 proposalDraft，跟
-                        // vm.confirmedDraft 完全隔离。[采用] 才把 proposalDraft
-                        // 升格成 confirmedDraft。
-                        //
-                        // Cycle 0034 v4：第一次进 proposal preview 时把 cta 上
-                        // 的 photo_assignments 预填进 proposalDraft（photos /
-                        // photoCrops / avatarPhotoPath），让 HeroAvatarPicker
-                        // 直接像 Manual Refine 那样工作 — 选 / 删 / 双击预览
-                        // 全是一致交互。
+                        // Cycle 0036：proposal-preview 直接拿 cta.draft 当起手
+                        // — runExtract.onSuccess 阶段 mergeWithAssignments 已经
+                        // 把 photo_assignments 物理化、合到 cta.draft.photos /
+                        // avatarPhotoPath / photoCrops。这里不再做二次叠加，
+                        // 避免 cycle 0034 v4 那套 if/else 互斥导致的"MODIFY 时
+                        // AI 加图被吞"bug。
                         androidx.compose.runtime.LaunchedEffect(cta.id) {
-                            if (proposalDraft == null) {
-                                val ass = cta.photoAssignments
-                                val assignmentPhotos = ass.map { it.sourceUri }
-                                val assignmentCrops: Map<String, com.treasure.core.domain.PhotoCrop> = ass
-                                    .mapNotNull { pa ->
-                                        val isFull = pa.cropW > 0.999f && pa.cropH > 0.999f &&
-                                            pa.cropX < 0.001f && pa.cropY < 0.001f
-                                        if (isFull) null else pa.sourceUri to com.treasure.core.domain.PhotoCrop(
-                                            x = pa.cropX, y = pa.cropY, w = pa.cropW, h = pa.cropH,
-                                        )
-                                    }.toMap()
-                                val assignmentAvatar = ass.firstOrNull { it.isAvatar }?.sourceUri
-
-                                // Cycle 0034 v9：cta.draft 在 runExtract 阶段就
-                                // 已合并 — proposal-preview 不再二次 merge，
-                                // 直接拿来当 baseline，再叠 photo_assignments。
-                                val mergedDraft = cta.draft
-
-                                // photo_assignments 在 merged 之上 append（不覆盖
-                                // 已有 photos）。avatar：assignment 给的优先 →
-                                // merged 里的 → 空。
-                                proposalDraft = mergedDraft.copy(
-                                    photos = mergedDraft.photos + assignmentPhotos.filter {
-                                        it !in mergedDraft.photos
-                                    },
-                                    photoCrops = mergedDraft.photoCrops + assignmentCrops,
-                                    avatarPhotoPath = assignmentAvatar ?: mergedDraft.avatarPhotoPath,
-                                )
-                            }
+                            if (proposalDraft == null) proposalDraft = cta.draft
                         }
                         val d = proposalDraft ?: cta.draft
                         AddPreview(
