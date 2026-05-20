@@ -137,7 +137,9 @@ fun SettingsScreen(
             Header(
                 profileCount = state.profiles.size,
             )
-            Spacer(Modifier.height(22.dp))
+            // Cycle 0039：AI SERVICE 小标题跟模型卡片视觉成组 — 拉近到 10dp。
+            //（Settings 大标题在 Header 内已被推到 20dp 之外，独立感保留。）
+            Spacer(Modifier.height(10.dp))
             ProfilePager(
                 state = state,
                 onActiveIndexChange = onActiveIndexChange,
@@ -197,7 +199,9 @@ private fun Header(profileCount: Int) {
                 color = colors.ink,
                 style = MaterialTheme.typography.titleLarge,
             )
-            Spacer(Modifier.height(8.dp))
+            // Cycle 0039：Settings 大字 → AI SERVICE 8 → 20dp 拉开 — 让 titleLarge
+            // 与 labelSmall 不再视觉挤一坨，Settings 自己作为页面主标题独立感更强。
+            Spacer(Modifier.height(20.dp))
             Text(
                 text = "AI SERVICE · ${String.format("%02d", profileCount)}",
                 color = colors.sub,
@@ -282,7 +286,9 @@ private fun ProfilePager(
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        // Cycle 0039：dots indicator 紧贴模型卡片底部 — 18 → 8dp，让 pager
+        // 和 indicator 视觉上更像同一个组件。
+        Spacer(Modifier.height(8.dp))
 
         // dots indicator
         Row(
@@ -699,6 +705,19 @@ private fun BackupEntry(modifier: Modifier = Modifier) {
                 .padding(horizontal = 18.dp, vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Cycle 0039：左侧加线描档案箱 glyph（盖子 + 箱身 + 中间标签）
+            // 取代原先无图标的入口；跟项目其他 glyph 同 1.5dp stroke 风格。
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(colors.ink.copy(alpha = 0.06f))
+                    .border(0.5.dp, colors.ink.copy(alpha = 0.32f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                com.treasure.backup.ArchiveGlyph(color = colors.ink)
+            }
+            Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "数据备份 / 恢复",

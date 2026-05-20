@@ -33,10 +33,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
@@ -204,7 +210,7 @@ private fun ChooseScreen(
 ) {
     val colors = LocalTreasureColors.current
     ActionRow(
-        icon = "↗",
+        glyph = { color -> ExportGlyph(color) },
         title = "导出备份",
         subtitle = "EXPORT · 打包所有物品、分类、会话和实拍照片为 zip",
         accent = colors.ink,
@@ -212,7 +218,7 @@ private fun ChooseScreen(
     )
     Spacer(Modifier.height(10.dp))
     ActionRow(
-        icon = "↙",
+        glyph = { color -> ImportGlyph(color) },
         title = "从备份恢复",
         subtitle = "RESTORE · 用之前的 zip 整体覆盖当前数据",
         accent = colors.terra,
@@ -229,7 +235,7 @@ private fun ChooseScreen(
 
 @Composable
 private fun ActionRow(
-    icon: String,
+    glyph: @Composable (color: Color) -> Unit,
     title: String,
     subtitle: String,
     accent: Color,
@@ -248,13 +254,13 @@ private fun ActionRow(
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(40.dp)
                 .clip(CircleShape)
-                .background(accent.copy(alpha = 0.10f))
-                .border(0.5.dp, accent.copy(alpha = 0.55f), CircleShape),
+                .background(accent.copy(alpha = 0.08f))
+                .border(0.5.dp, accent.copy(alpha = 0.5f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text(text = icon, color = accent, style = MaterialTheme.typography.titleMedium)
+            glyph(accent)
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -271,6 +277,99 @@ private fun ActionRow(
             )
         }
         Text(text = "→", color = colors.sub, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/* ─── Cycle 0039 backup glyphs ──────────────────────────────────────
+ * 跟项目 PictureGlyph / FileGlyph / SoundwaveGlyph 同款 1.4dp stroke 线
+ * 描风。Export = 箱 + 向上飞出的箭头；Import = 箱 + 向下落入的箭头；
+ * Archive = 完整箱体（给 Settings 入口侧栏用）。
+ */
+
+/** 导出：底部一只半敞开的箱子 + 顶部向上箭头从箱口飞出。 */
+@Composable
+internal fun ExportGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val sw = 1.5.dp.toPx()
+        val w = size.width
+        val h = size.height
+        // 箱体（下半部分，开口在上）
+        val boxL = w * 0.16f
+        val boxR = w * 0.84f
+        val boxT = h * 0.52f
+        val boxB = h * 0.88f
+        // 箱口（上沿）左右两段，中间留空给箭头穿过
+        drawLine(color, Offset(boxL, boxT), Offset(w * 0.36f, boxT), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.64f, boxT), Offset(boxR, boxT), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(boxL, boxT), Offset(boxL, boxB), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(boxR, boxT), Offset(boxR, boxB), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(boxL, boxB), Offset(boxR, boxB), strokeWidth = sw, cap = StrokeCap.Round)
+        // 箭头主干：从箱体内 (cy=0.62) 上飞到 (cy=0.10)
+        val ax = w * 0.50f
+        drawLine(color, Offset(ax, h * 0.62f), Offset(ax, h * 0.10f), strokeWidth = sw, cap = StrokeCap.Round)
+        // 箭头头部（V 形）
+        drawLine(color, Offset(ax - w * 0.14f, h * 0.24f), Offset(ax, h * 0.10f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(ax + w * 0.14f, h * 0.24f), Offset(ax, h * 0.10f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+/** 恢复：底部箱子 + 顶部向下箭头落入箱口。 */
+@Composable
+internal fun ImportGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val sw = 1.5.dp.toPx()
+        val w = size.width
+        val h = size.height
+        // 箱体（下半，开口在上）
+        val boxL = w * 0.16f
+        val boxR = w * 0.84f
+        val boxT = h * 0.52f
+        val boxB = h * 0.88f
+        drawLine(color, Offset(boxL, boxT), Offset(w * 0.36f, boxT), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.64f, boxT), Offset(boxR, boxT), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(boxL, boxT), Offset(boxL, boxB), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(boxR, boxT), Offset(boxR, boxB), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(boxL, boxB), Offset(boxR, boxB), strokeWidth = sw, cap = StrokeCap.Round)
+        // 箭头主干：从 (cy=0.10) 下到 (cy=0.62)，进入箱体
+        val ax = w * 0.50f
+        drawLine(color, Offset(ax, h * 0.10f), Offset(ax, h * 0.62f), strokeWidth = sw, cap = StrokeCap.Round)
+        // 箭头头部
+        drawLine(color, Offset(ax - w * 0.14f, h * 0.48f), Offset(ax, h * 0.62f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(ax + w * 0.14f, h * 0.48f), Offset(ax, h * 0.62f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+/** 档案箱：盖子 + 箱体 + 中间贴标签。给 Settings BackupEntry 行用。 */
+@Composable
+internal fun ArchiveGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(22.dp)) {
+        val sw = 1.5.dp.toPx()
+        val w = size.width
+        val h = size.height
+        // 盖子（顶部矩形）
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.10f, h * 0.18f),
+            size = Size(w * 0.80f, h * 0.20f),
+            cornerRadius = CornerRadius(1.5.dp.toPx()),
+            style = Stroke(sw),
+        )
+        // 箱体（底部矩形）
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.14f, h * 0.42f),
+            size = Size(w * 0.72f, h * 0.42f),
+            cornerRadius = CornerRadius(1.5.dp.toPx()),
+            style = Stroke(sw),
+        )
+        // 中间标签（细横线）
+        drawLine(
+            color = color,
+            start = Offset(w * 0.36f, h * 0.62f),
+            end = Offset(w * 0.64f, h * 0.62f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round,
+        )
     }
 }
 

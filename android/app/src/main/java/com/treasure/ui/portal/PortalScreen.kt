@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.MaterialTheme
@@ -413,6 +415,10 @@ private fun DoorwayCard(
 @Composable
 private fun LatestEntryCard(item: Item, onOpenItem: (String) -> Unit) {
     val colors = LocalTreasureColors.current
+    // Cycle 0039：精简到只剩"标题 + 图标"。原先的 oneLiner / acquired 两个
+    // sub 字段在门厅这层信息量冗余 — 用户进了 Detail 全部都能看。
+    // 图标改 size(56dp) 正方形（之前 height(54) × aspectRatio(1.4f) 把 hero
+    // 横向拉宽看着像被压缩）。
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -422,32 +428,15 @@ private fun LatestEntryCard(item: Item, onOpenItem: (String) -> Unit) {
             .clickable { onOpenItem(item.id) }
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .height(54.dp)
-                .aspectRatio(1.4f),
-        ) {
+        Box(modifier = Modifier.size(56.dp)) {
             HeroAvatar(item = item, modifier = Modifier.fillMaxSize())
         }
-        Column(
-            modifier = Modifier.padding(start = 14.dp).weight(1f),
-        ) {
-            Text(
-                text = "${item.brand} ${item.model}",
-                color = colors.ink,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = item.oneLiner,
-                color = colors.sub,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
+        Spacer(Modifier.width(16.dp))
         Text(
-            text = item.acquired.replace("-", "."),
-            color = colors.sub,
-            style = MaterialTheme.typography.labelSmall,
+            text = "${item.brand} ${item.model}".trim().ifBlank { item.nickname.ifBlank { "—" } },
+            color = colors.ink,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f),
         )
     }
 }
